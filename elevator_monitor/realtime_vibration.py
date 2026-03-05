@@ -81,14 +81,14 @@ class RealtimeVibrationReader:
         elevator_id: str = "elevator-unknown",
         device_name: str = DEFAULT_DEVICE_NAME,
         port: str = "/dev/ttyUSB0",
-        baud: int = 115200,
+        baud: int = 230400,
         addr: int = 0x50,
         sample_hz: float = 100.0,
         detect_hz: int = 100,
         no_set_detect_hz: bool = False,
         max_data_age_ms: int = 500,
         reg_addr: int = 0x34,
-        reg_count: int = 19,
+        reg_count: int = 13,
         device: Optional[DeviceModel] = None,
         owns_device: bool = True,
     ) -> None:
@@ -296,15 +296,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--elevator-id", default=env_str("MONITOR_ELEVATOR_ID", "elevator-unknown"), help="电梯唯一ID")
     parser.add_argument("--device-name", default=env_str("MONITOR_DEVICE_NAME", DEFAULT_DEVICE_NAME), help="设备名称")
     parser.add_argument("--port", default=env_str("MONITOR_PORT", "/dev/ttyUSB0"), help="串口")
-    parser.add_argument("--baud", type=int, default=env_int("MONITOR_BAUD", 115200), help="波特率")
+    parser.add_argument("--baud", type=int, default=env_int("MONITOR_BAUD", 230400), help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=env_int("MONITOR_ADDR", 0x50), help="设备地址(支持 0x 前缀)")
     parser.add_argument("--sample-hz", type=float, default=env_float("MONITOR_SAMPLE_HZ", 100.0), help="采样频率")
     parser.add_argument("--detect-hz", type=int, default=env_int("MONITOR_DETECT_HZ", 100), help="设备检测周期(寄存器 0x65)")
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写设备检测周期")
     parser.add_argument("--startup-timeout-s", type=float, default=env_float("MONITOR_STARTUP_TIMEOUT_S", 3.0), help="连接后等待首帧超时")
     parser.add_argument("--max-data-age-ms", type=int, default=env_int("MONITOR_MAX_DATA_AGE_MS", 500), help="可接受数据最大延迟")
-    parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="循环读取起始寄存器")
-    parser.add_argument("--reg-count", type=int, default=19, help="循环读取寄存器数量")
+    parser.add_argument("--reg-addr", type=_parse_int_auto, default=env_int("MONITOR_REG_ADDR", 0x34), help="循环读取起始寄存器")
+    parser.add_argument("--reg-count", type=int, default=env_int("MONITOR_REG_COUNT", 13), help="循环读取寄存器数量（100Hz 推荐 13）")
     parser.add_argument("--duration-s", type=float, default=None, help="读取持续秒数")
     parser.add_argument("--limit", type=int, default=None, help="最多读取多少帧")
     parser.add_argument("--poll-s", type=float, default=0.01, help="无新帧时轮询间隔")

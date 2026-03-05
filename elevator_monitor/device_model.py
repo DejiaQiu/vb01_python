@@ -12,7 +12,7 @@ class SerialConfig:
     portName = ""
 
     # 波特率
-    baud = 9600
+    baud = 230400
 
 
 # 设备实例
@@ -396,7 +396,7 @@ class DeviceModel:
         return bytes(tempBytes)
 
     # 开始循环读取
-    def startLoopRead(self, regAddr=0x34, regCount=19, period_s=0.2):
+    def startLoopRead(self, regAddr=0x34, regCount=13, period_s=0.2):
         if not self.isOpen or self.serialPort is None:
             raise RuntimeError("串口未打开，无法启动循环读取")
 

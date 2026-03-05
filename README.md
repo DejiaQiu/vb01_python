@@ -177,9 +177,11 @@ pip install -r requirements.txt
 python -m elevator_monitor.realtime_monitor \
   --elevator-id elevator-001 \
   --port /dev/ttyUSB0 \
-  --baud 115200 \
+  --baud 230400 \
   --addr 0x50 \
   --sample-hz 100 \
+  --detect-hz 100 \
+  --reg-count 13 \
   --output-data data/elevator_rt_live.csv \
   --output-alert data/elevator_alerts_live.csv \
   --output-rail-wear-alert data/rail_wear_alerts_live.csv \
@@ -192,7 +194,10 @@ python -m elevator_monitor.realtime_monitor \
 python -m elevator_monitor.realtime_vibration \
   --elevator-id elevator-001 \
   --port /dev/ttyUSB0 \
+  --baud 230400 \
   --sample-hz 100 \
+  --detect-hz 100 \
+  --reg-count 13 \
   --limit 10
 ```
 
@@ -200,8 +205,11 @@ python -m elevator_monitor.realtime_vibration \
 ```bash
 python -m elevator_monitor.realtime_vibration \
   --port /dev/ttyUSB0 \
+  --baud 230400 \
   --emit-mode fixed \
   --emit-hz 100 \
+  --detect-hz 100 \
+  --reg-count 13 \
   --duration-s 30 \
   --output-csv data/vibration_fixed_100hz.csv \
   --format csv > /dev/null
@@ -214,9 +222,11 @@ from elevator_monitor import RealtimeVibrationReader
 with RealtimeVibrationReader(
     elevator_id="elevator-001",
     port="/dev/ttyUSB0",
-    baud=115200,
+    baud=230400,
     addr=0x50,
     sample_hz=100.0,
+    detect_hz=100,
+    reg_count=13,
 ) as reader:
     frame = reader.read_latest(wait_timeout_s=2.0)
     print(frame)
@@ -381,6 +391,8 @@ python3 report/fault_algorithms/rope_looseness_timeline.py \
 ## 关键环境变量（常用）
 完整变量见 `deploy/docker.monitor.env.example`，常用项：
 - 串口与采样：`MONITOR_PORT`、`MONITOR_BAUD`、`MONITOR_ADDR`、`MONITOR_SAMPLE_HZ`
+- 100Hz 链路建议：`MONITOR_DETECT_HZ=100`、`MONITOR_REG_COUNT=13`（按需再扩到 19）、
+  `MONITOR_REG_ADDR=0x34`
 - 输出路径：`MONITOR_OUTPUT_DATA`、`MONITOR_OUTPUT_ALERT`、`MONITOR_OUTPUT_RAIL_WEAR`
 - 规则阈值：`MONITOR_FAULT_VIBRATION_WARNING_Z`、`MONITOR_FAULT_VIBRATION_SHOCK_Z`
 - 融合模式：`MONITOR_FAULT_FUSION_MODE=rule_primary|model_primary`

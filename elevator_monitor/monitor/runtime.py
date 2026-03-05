@@ -43,6 +43,8 @@ class RealtimeMonitor:
         self.args.generated_algo_forecast_min_points = max(3, int(self.args.generated_algo_forecast_min_points))
         self.args.alert_context_pre_seconds = max(1.0, float(self.args.alert_context_pre_seconds))
         self.args.alert_context_max_rows = max(100, int(self.args.alert_context_max_rows))
+        self.args.reg_count = max(1, int(self.args.reg_count))
+        self.args.reg_addr = int(self.args.reg_addr)
         self.args.dify_timeout_s = max(1.0, float(self.args.dify_timeout_s))
         self.args.dify_cooldown_s = max(0.0, float(self.args.dify_cooldown_s))
         if self.args.dify_response_mode not in {"blocking", "streaming"}:
@@ -154,7 +156,7 @@ class RealtimeMonitor:
 
     def _log_runtime_config(self) -> None:
         self.logger.info(
-            "runtime config elevator_id=%s port=%s baud=%s addr=%s sample_hz=%s detect_hz=%s max_data_age_ms=%s "
+            "runtime config elevator_id=%s port=%s baud=%s addr=%s sample_hz=%s detect_hz=%s reg_addr=%s reg_count=%s max_data_age_ms=%s "
             "reconnect_no_data_s=%s reconnect_backoff_s=%s output_data=%s output_alert=%s output_rail_wear_alert=%s health_path=%s "
             "alert_context_enabled=%s alert_context_dir=%s alert_context_pre_seconds=%s alert_context_max_rows=%s "
             "fault_enabled=%s fault_min_level=%s fault_top_k=%s "
@@ -172,6 +174,8 @@ class RealtimeMonitor:
             hex(self.args.addr),
             self.args.sample_hz,
             self.args.detect_hz,
+            hex(self.args.reg_addr),
+            self.args.reg_count,
             self.args.max_data_age_ms,
             self.args.reconnect_no_data_s,
             self.args.reconnect_backoff_s,
@@ -657,7 +661,11 @@ class RealtimeMonitor:
                 self.logger.warning("set detect_hz failed, continue")
 
         try:
-            self.device.startLoopRead(period_s=1.0 / max(1.0, self.args.sample_hz))
+            self.device.startLoopRead(
+                regAddr=self.args.reg_addr,
+                regCount=self.args.reg_count,
+                period_s=1.0 / max(1.0, self.args.sample_hz),
+            )
         except Exception:
             self.logger.exception("start loop read failed")
             try:
