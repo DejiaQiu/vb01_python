@@ -45,6 +45,9 @@ class DeviceModel:
     # 起始寄存器
     statReg = None
 
+    # 最近一次有效解析时间戳(ms)
+    lastUpdateTsMs = None
+
     # endregion
 
     # region   计算CRC
@@ -126,6 +129,10 @@ class DeviceModel:
             return self.deviceData[key]
         else:
             return None
+
+    # 最近一次收到有效数据帧的时间戳(ms)
+    def getLastUpdateTsMs(self):
+        return self.lastUpdateTsMs
 
     # 删除设备数据
     def remove(self, key):
@@ -237,6 +244,7 @@ class DeviceModel:
                 else:
                     self.set(str(self.statReg), value)
                     self.statReg += 1
+            self.lastUpdateTsMs = int(time.time() * 1000)
             self.TempBytes.clear()
 
     # endregion

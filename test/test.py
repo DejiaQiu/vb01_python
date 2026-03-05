@@ -1,14 +1,29 @@
 import argparse
 import csv
+import os
+import sys
 import time
 from pathlib import Path
 
 import device_model
 
+# Ensure project modules are importable when running `python test/test.py`.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from elevator_monitor.device_model import DeviceModel as ProjectDeviceModel
+except Exception:
+    ProjectDeviceModel = None
+
 
 CSV_FIELDS = [
     "sample_idx",
     "ts_ms",
+    "data_ts_ms",
+    "data_age_ms",
+    "is_new_frame",
     "Ax",
     "Ay",
     "Az",
@@ -67,14 +82,95 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", default="/dev/ttyUSB0", help="串口设备路径")
     parser.add_argument("--baud", type=int, default=115200, help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=0x50, help="设备地址，支持0x前缀")
+    parser.add_argument(
+        "--device-model",
+        choices=["project", "sdk"],
+        default="project",
+        help="project=项目增强版设备模型（推荐）；sdk=官方SDK风格模型",
+    )
     parser.add_argument("--sample-hz", type=float, default=100.0, help="轮询频率（100Hz=0.01s）")
     parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="轮询起始寄存器")
     parser.add_argument("--reg-count", type=int, default=19, help="轮询寄存器个数")
     parser.add_argument("--detect-hz", type=int, default=100, help="写入寄存器0x65（检测周期Hz）")
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写寄存器0x65")
+    parser.add_argument("--emit-mode", choices=["new", "fixed"], default="new", help="new=只写新帧；fixed=按固定频率写")
+    parser.add_argument("--emit-hz", type=float, default=100.0, help="fixed 模式写出频率")
+    parser.add_argument("--poll-s", type=float, default=0.001, help="new 模式轮询间隔")
+    parser.add_argument("--reconnect-no-data-s", type=float, default=2.0, help="超过该秒数无新帧则重连")
+    parser.add_argument("--startup-timeout-s", type=float, default=5.0, help="启动后等待首帧超时秒数")
+    parser.add_argument("--flush-rows", type=int, default=50, help="每写N行执行一次flush；1表示每行落盘")
+    parser.add_argument("--fsync", action="store_true", help="flush后追加fsync（更稳但更慢）")
     parser.add_argument("--duration-s", type=float, default=60.0, help="采集时长（秒）")
     parser.add_argument("--output", default=_default_output(), help="CSV输出路径")
     return parser
+
+
+def _get_data_ts_ms(dev) -> int | None:
+    if hasattr(dev, "getLastUpdateTsMs"):
+        return dev.getLastUpdateTsMs()
+    if hasattr(dev, "get_last_update_ts_ms"):
+        return dev.get_last_update_ts_ms()
+    return None
+
+
+def _resolve_device_class(model_name: str):
+    if model_name == "project":
+        if ProjectDeviceModel is None:
+            raise RuntimeError("project 设备模型不可用，请改用 --device-model sdk")
+        return ProjectDeviceModel
+    return device_model.DeviceModel
+
+
+def _connect_device(args: argparse.Namespace):
+    model_cls = _resolve_device_class(args.device_model)
+    try:
+        dev = model_cls("测试设备", args.port, int(args.baud), int(args.addr), False)
+    except TypeError:
+        dev = model_cls("测试设备", args.port, int(args.baud), int(args.addr))
+
+    opened = dev.openDevice()
+    if opened is False:
+        raise RuntimeError(f"open failed: port={args.port} baud={args.baud}")
+
+    if not args.no_set_detect_hz:
+        dev.writeReg(0x65, int(args.detect_hz))
+    period_s = 1.0 / max(1.0, float(args.sample_hz))
+    dev.startLoopRead(
+        regAddr=int(args.reg_addr),
+        regCount=max(1, int(args.reg_count)),
+        period_s=period_s,
+    )
+    deadline = time.monotonic() + max(0.1, float(args.startup_timeout_s))
+    while time.monotonic() < deadline:
+        if _get_data_ts_ms(dev) is not None:
+            return dev
+        time.sleep(0.01)
+    _close_device(dev)
+    raise TimeoutError(f"startup timeout: no first frame within {float(args.startup_timeout_s):.2f}s")
+
+
+def _close_device(dev) -> None:
+    try:
+        dev.stopLoopRead()
+    except Exception:
+        pass
+    try:
+        dev.closeDevice()
+    except Exception:
+        pass
+
+
+def _snapshot(dev: device_model.DeviceModel, sample_idx: int, ts_ms: int, data_ts_ms: int | None, is_new: int) -> dict:
+    row = {
+        "sample_idx": sample_idx,
+        "ts_ms": ts_ms,
+        "data_ts_ms": data_ts_ms if data_ts_ms is not None else "",
+        "data_age_ms": (ts_ms - data_ts_ms) if data_ts_ms is not None else "",
+        "is_new_frame": is_new,
+    }
+    for field, reg in REG_MAP.items():
+        row[field] = dev.get(reg)
+    return row
 
 
 def main() -> int:
@@ -82,42 +178,72 @@ def main() -> int:
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    device = device_model.DeviceModel("测试设备", args.port, int(args.baud), int(args.addr))
+    device = None
     sample_idx = 0
+    reconnect_count = 0
+    last_data_ts_ms = None
+    last_new_monotonic = time.monotonic()
     try:
-        device.openDevice()
-        # Configure device output rate first, then start polling.
-        if not args.no_set_detect_hz:
-            device.writeReg(0x65, int(args.detect_hz))
-
-        period_s = 1.0 / max(1.0, float(args.sample_hz))
-        device.startLoopRead(
-            regAddr=int(args.reg_addr),
-            regCount=max(1, int(args.reg_count)),
-            period_s=period_s,
-        )
-        time.sleep(0.5)
-
+        device = _connect_device(args)
         deadline = time.monotonic() + max(0.1, float(args.duration_s))
+        fixed_period_s = 1.0 / max(1.0, float(args.emit_hz))
+        next_fixed_t = time.monotonic()
 
         with out_path.open("w", encoding="utf-8", newline="") as fp:
             writer = csv.DictWriter(fp, fieldnames=CSV_FIELDS)
             writer.writeheader()
             while time.monotonic() < deadline:
-                row = {
-                    "sample_idx": sample_idx,
-                    "ts_ms": int(time.time() * 1000),
-                }
-                for field, reg in REG_MAP.items():
-                    row[field] = device.get(reg)
-                writer.writerow(row)
-                sample_idx += 1
-                time.sleep(period_s)
-    finally:
-        device.stopLoopRead()
-        device.closeDevice()
+                now_mono = time.monotonic()
+                ts_ms = int(time.time() * 1000)
+                data_ts_ms = _get_data_ts_ms(device)
+                is_new = 1 if data_ts_ms is not None and data_ts_ms != last_data_ts_ms else 0
 
-    print(f"saved={out_path} rows={sample_idx}")
+                if is_new:
+                    last_new_monotonic = now_mono
+                    last_data_ts_ms = data_ts_ms
+
+                if args.emit_mode == "new":
+                    if is_new:
+                        writer.writerow(_snapshot(device, sample_idx, ts_ms, data_ts_ms, 1))
+                        sample_idx += 1
+                        if args.flush_rows > 0 and sample_idx % args.flush_rows == 0:
+                            fp.flush()
+                            if args.fsync:
+                                os.fsync(fp.fileno())
+                    else:
+                        time.sleep(max(0.0005, float(args.poll_s)))
+                else:
+                    # fixed mode: always write, mark whether the source frame is new.
+                    writer.writerow(_snapshot(device, sample_idx, ts_ms, data_ts_ms, is_new))
+                    sample_idx += 1
+                    if args.flush_rows > 0 and sample_idx % args.flush_rows == 0:
+                        fp.flush()
+                        if args.fsync:
+                            os.fsync(fp.fileno())
+                    next_fixed_t += fixed_period_s
+                    sleep_s = next_fixed_t - time.monotonic()
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+                    else:
+                        next_fixed_t = time.monotonic()
+
+                if time.monotonic() - last_new_monotonic > max(0.5, float(args.reconnect_no_data_s)):
+                    _close_device(device)
+                    reconnect_count += 1
+                    device = _connect_device(args)
+                    last_data_ts_ms = None
+                    last_new_monotonic = time.monotonic()
+            fp.flush()
+            if args.fsync:
+                os.fsync(fp.fileno())
+    except TimeoutError as ex:
+        print(str(ex))
+        return 2
+    finally:
+        if device is not None:
+            _close_device(device)
+
+    print(f"saved={out_path} rows={sample_idx} reconnects={reconnect_count}")
     return 0
 
 
