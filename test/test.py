@@ -67,7 +67,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", default="/dev/ttyUSB0", help="串口设备路径")
     parser.add_argument("--baud", type=int, default=115200, help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=0x50, help="设备地址，支持0x前缀")
-    parser.add_argument("--sample-hz", type=float, default=5.0, help="轮询频率（SDK默认约5Hz）")
+    parser.add_argument("--sample-hz", type=float, default=100.0, help="轮询频率（100Hz=0.01s）")
+    parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="轮询起始寄存器")
+    parser.add_argument("--reg-count", type=int, default=19, help="轮询寄存器个数")
     parser.add_argument("--detect-hz", type=int, default=100, help="写入寄存器0x65（检测周期Hz）")
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写寄存器0x65")
     parser.add_argument("--duration-s", type=float, default=60.0, help="采集时长（秒）")
@@ -84,13 +86,17 @@ def main() -> int:
     sample_idx = 0
     try:
         device.openDevice()
-        device.startLoopRead()
+        period_s = 1.0 / max(1.0, float(args.sample_hz))
+        device.startLoopRead(
+            regAddr=int(args.reg_addr),
+            regCount=max(1, int(args.reg_count)),
+            period_s=period_s,
+        )
         time.sleep(0.5)
 
         if not args.no_set_detect_hz:
             device.writeReg(0x65, int(args.detect_hz))
 
-        period_s = 1.0 / max(1.0, float(args.sample_hz))
         deadline = time.monotonic() + max(0.1, float(args.duration_s))
 
         with out_path.open("w", encoding="utf-8", newline="") as fp:

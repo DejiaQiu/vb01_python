@@ -317,7 +317,11 @@ class DeviceModel:
         return tempBytes
 
     # 开始循环读取
-    def startLoopRead(self):
+    def startLoopRead(self, regAddr=0x34, regCount=19, period_s=0.2):
+        # 记录轮询参数
+        self._loop_reg_addr = regAddr
+        self._loop_reg_count = regCount
+        self._loop_period_s = period_s
         # 循环读取控制
         self.loop = True
         # 开启读取线程
@@ -327,9 +331,19 @@ class DeviceModel:
     # 循环读取线程
     def loopRead(self):
         print("循环读取开始")
+        regAddr = getattr(self, "_loop_reg_addr", 0x34)
+        regCount = getattr(self, "_loop_reg_count", 19)
+        period_s = float(getattr(self, "_loop_period_s", 0.2) or 0.0)
+        next_t = time.perf_counter()
         while self.loop:
-            self.readReg(0x34, 19)
-            time.sleep(0.2)
+            self.readReg(regAddr, regCount)
+            if period_s > 0:
+                next_t += period_s
+                sleep_s = next_t - time.perf_counter()
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
+                else:
+                    next_t = time.perf_counter()
         print("循环读取结束")
 
     # 关闭循环读取
