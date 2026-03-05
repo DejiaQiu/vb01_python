@@ -78,7 +78,7 @@ def _default_output() -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="WTVB01-485 最小采集脚本：仅写真实新帧到CSV")
+    parser = argparse.ArgumentParser(description="WTVB01-485 最小采集脚本：固定频率写CSV")
     parser.add_argument("--port", default="/dev/ttyUSB0", help="串口设备路径")
     parser.add_argument("--baud", type=int, default=115200, help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=0x50, help="设备地址，支持0x前缀")
@@ -88,12 +88,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="project",
         help="project=项目增强版设备模型（推荐）；sdk=官方SDK风格模型",
     )
-    parser.add_argument("--sample-hz", type=float, default=100.0, help="轮询频率（100Hz=0.01s）")
+    parser.add_argument("--sample-hz", type=float, default=50.0, help="采集与写出频率（50Hz=0.02s）")
     parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="轮询起始寄存器")
     parser.add_argument("--reg-count", type=int, default=19, help="轮询寄存器个数")
-    parser.add_argument("--detect-hz", type=int, default=100, help="写入寄存器0x65（检测周期Hz）")
+    parser.add_argument("--detect-hz", type=int, default=50, help="写入寄存器0x65（检测周期Hz）")
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写寄存器0x65")
-    parser.add_argument("--poll-s", type=float, default=0.001, help="无新帧时轮询间隔")
     parser.add_argument("--reconnect-no-data-s", type=float, default=2.0, help="超过该秒数无新帧则重连")
     parser.add_argument("--startup-timeout-s", type=float, default=5.0, help="启动后等待首帧超时秒数")
     parser.add_argument("--flush-rows", type=int, default=50, help="每写N行执行一次flush；1表示每行落盘")
@@ -184,11 +183,19 @@ def main() -> int:
     try:
         device = _connect_device(args)
         deadline = time.monotonic() + max(0.1, float(args.duration_s))
+        fixed_period_s = 1.0 / max(1.0, float(args.sample_hz))
+        next_t = time.monotonic()
 
         with out_path.open("w", encoding="utf-8", newline="") as fp:
             writer = csv.DictWriter(fp, fieldnames=CSV_FIELDS)
             writer.writeheader()
             while time.monotonic() < deadline:
+                sleep_s = next_t - time.monotonic()
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
+                else:
+                    next_t = time.monotonic()
+
                 now_mono = time.monotonic()
                 ts_ms = int(time.time() * 1000)
                 data_ts_ms = _get_data_ts_ms(device)
@@ -198,15 +205,13 @@ def main() -> int:
                     last_new_monotonic = now_mono
                     last_data_ts_ms = data_ts_ms
 
-                if is_new:
-                    writer.writerow(_snapshot(device, sample_idx, ts_ms, data_ts_ms, 1))
-                    sample_idx += 1
-                    if args.flush_rows > 0 and sample_idx % args.flush_rows == 0:
-                        fp.flush()
-                        if args.fsync:
-                            os.fsync(fp.fileno())
-                else:
-                    time.sleep(max(0.0005, float(args.poll_s)))
+                # 固定频率写出：允许重复帧，is_new_frame 标记源帧是否更新
+                writer.writerow(_snapshot(device, sample_idx, ts_ms, data_ts_ms, is_new))
+                sample_idx += 1
+                if args.flush_rows > 0 and sample_idx % args.flush_rows == 0:
+                    fp.flush()
+                    if args.fsync:
+                        os.fsync(fp.fileno())
 
                 if time.monotonic() - last_new_monotonic > max(0.5, float(args.reconnect_no_data_s)):
                     _close_device(device)
@@ -214,6 +219,9 @@ def main() -> int:
                     device = _connect_device(args)
                     last_data_ts_ms = None
                     last_new_monotonic = time.monotonic()
+                    next_t = time.monotonic()
+                else:
+                    next_t += fixed_period_s
             fp.flush()
             if args.fsync:
                 os.fsync(fp.fileno())
