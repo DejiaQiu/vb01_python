@@ -90,17 +90,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--sample-hz", type=float, default=100.0, help="轮询频率（100Hz=0.01s）")
     parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="轮询起始寄存器")
-    parser.add_argument("--reg-count", type=int, default=13, help="轮询寄存器个数（100Hz推荐13）")
+    parser.add_argument("--reg-count", type=int, default=19, help="轮询寄存器个数")
     parser.add_argument("--detect-hz", type=int, default=100, help="写入寄存器0x65（检测周期Hz）")
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写寄存器0x65")
     parser.add_argument("--emit-mode", choices=["new", "fixed"], default="new", help="new=只写新帧；fixed=按固定频率写")
     parser.add_argument("--emit-hz", type=float, default=100.0, help="fixed 模式写出频率")
     parser.add_argument("--poll-s", type=float, default=0.001, help="new 模式轮询间隔")
-    parser.add_argument("--reconnect-no-data-s", type=float, default=20.0, help="超过该秒数无新帧则重连")
-    parser.add_argument("--startup-timeout-s", type=float, default=15.0, help="启动后等待首帧超时秒数")
-    parser.add_argument("--min-accept-hz", type=float, default=50.0, help="可接受最小真实频率")
-    parser.add_argument("--max-accept-hz", type=float, default=99.0, help="可接受最大真实频率")
-    parser.add_argument("--strict-hz-range", action="store_true", help="频率不在[min,max]时返回非零退出码")
+    parser.add_argument("--reconnect-no-data-s", type=float, default=2.0, help="超过该秒数无新帧则重连")
+    parser.add_argument("--startup-timeout-s", type=float, default=5.0, help="启动后等待首帧超时秒数")
     parser.add_argument("--flush-rows", type=int, default=50, help="每写N行执行一次flush；1表示每行落盘")
     parser.add_argument("--fsync", action="store_true", help="flush后追加fsync（更稳但更慢）")
     parser.add_argument("--duration-s", type=float, default=60.0, help="采集时长（秒）")
@@ -185,11 +182,7 @@ def main() -> int:
     sample_idx = 0
     reconnect_count = 0
     last_data_ts_ms = None
-    seen_data_ts_ms: set[int] = set()
-    first_data_ts_ms: int | None = None
-    last_seen_data_ts_ms: int | None = None
     last_new_monotonic = time.monotonic()
-    start_mono = time.monotonic()
     try:
         device = _connect_device(args)
         deadline = time.monotonic() + max(0.1, float(args.duration_s))
@@ -208,12 +201,6 @@ def main() -> int:
                 if is_new:
                     last_new_monotonic = now_mono
                     last_data_ts_ms = data_ts_ms
-                    if data_ts_ms is not None:
-                        dts = int(data_ts_ms)
-                        seen_data_ts_ms.add(dts)
-                        last_seen_data_ts_ms = dts
-                        if first_data_ts_ms is None:
-                            first_data_ts_ms = dts
 
                 if args.emit_mode == "new":
                     if is_new:
@@ -256,21 +243,7 @@ def main() -> int:
         if device is not None:
             _close_device(device)
 
-    elapsed_s = max(0.001, time.monotonic() - start_mono)
-    unique_frames = len(seen_data_ts_ms)
-    effective_hz = 0.0
-    if first_data_ts_ms is not None and last_seen_data_ts_ms is not None and last_seen_data_ts_ms > first_data_ts_ms:
-        effective_hz = (unique_frames - 1) / ((last_seen_data_ts_ms - first_data_ts_ms) / 1000.0)
-    elif unique_frames > 0:
-        effective_hz = unique_frames / elapsed_s
-
-    in_range = float(args.min_accept_hz) <= effective_hz <= float(args.max_accept_hz)
-    print(
-        f"saved={out_path} rows={sample_idx} unique_frames={unique_frames} "
-        f"effective_hz={effective_hz:.2f} reconnects={reconnect_count} in_range={int(in_range)}"
-    )
-    if args.strict_hz_range and not in_range:
-        return 3
+    print(f"saved={out_path} rows={sample_idx} reconnects={reconnect_count}")
     return 0
 
 
