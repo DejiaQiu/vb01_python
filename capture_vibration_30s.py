@@ -39,12 +39,33 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reg-count", type=int, default=13, help="循环读取寄存器数量（100Hz 推荐 13）")
     parser.add_argument("--emit-mode", choices=["new", "fixed"], default="fixed", help="new=仅写新帧；fixed=按固定频率写出（默认）")
     parser.add_argument("--emit-hz", type=float, default=100.0, help="fixed 模式输出频率")
+    parser.add_argument(
+        "--sdk-default",
+        action="store_true",
+        help="使用官方SDK兼容参数（9600/5Hz/0x34+19/no_set_detect_hz）",
+    )
     parser.add_argument("--output", default="", help="输出 CSV 路径，默认写入 data/captures/")
     return parser
 
 
 def main() -> int:
     args = build_arg_parser().parse_args()
+    if args.sdk_default:
+        # Align with the official demo behavior in vb01_python_sdk/test.py
+        args.baud = 9600
+        args.sample_hz = 5.0
+        args.reg_addr = 0x34
+        args.reg_count = 19
+        args.no_set_detect_hz = True
+        args.emit_mode = "new"
+        args.emit_hz = 5.0
+        args.startup_timeout_s = max(10.0, float(args.startup_timeout_s))
+        args.max_idle_s = max(20.0, float(args.max_idle_s))
+        print(
+            "sdk-default enabled: baud=9600 sample_hz=5 reg_addr=0x34 reg_count=19 no_set_detect_hz=1 emit_mode=new",
+            file=sys.stderr,
+        )
+
     output_path = Path(args.output) if args.output else _default_output_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
