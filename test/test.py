@@ -86,6 +86,10 @@ def main() -> int:
     sample_idx = 0
     try:
         device.openDevice()
+        # Configure device output rate first, then start polling.
+        if not args.no_set_detect_hz:
+            device.writeReg(0x65, int(args.detect_hz))
+
         period_s = 1.0 / max(1.0, float(args.sample_hz))
         device.startLoopRead(
             regAddr=int(args.reg_addr),
@@ -93,9 +97,6 @@ def main() -> int:
             period_s=period_s,
         )
         time.sleep(0.5)
-
-        if not args.no_set_detect_hz:
-            device.writeReg(0x65, int(args.detect_hz))
 
         deadline = time.monotonic() + max(0.1, float(args.duration_s))
 
