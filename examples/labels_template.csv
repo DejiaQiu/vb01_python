@@ -1,0 +1,5 @@
+elevator_id,start_ts_ms,end_ts_ms,fault_type,confirmed,note
+elevator-001,1771912080000,1771912140000,door_stuck,1,门区卡滞
+elevator-001,1771915080000,1771915140000,brake_abnormal,1,制动异响+抖动
+elevator-002,1771918080000,1771918140000,sensor_missing,1,通讯丢帧
+elevator-002,1771921080000,1771921140000,vibration_increase,1,振动持续升高
