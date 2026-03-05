@@ -232,6 +232,22 @@ with RealtimeVibrationReader(
     print(frame)
 ```
 
+官方SDK兼容最小测试单元（用于先验证 Modbus 链路是否通）：
+```bash
+python -m elevator_monitor.integrations.vb01_sdk_minimal \
+  --port /dev/ttyUSB0 \
+  --baud 9600 \
+  --addr 0x50 \
+  --reg-addr 0x34 \
+  --reg-count 19 \
+  --sample-hz 5 \
+  --startup-timeout-s 10 \
+  --duration-s 20 \
+  --pretty
+```
+
+返回 `ok=true` 说明链路可读；`startup_timeout` 说明当前没有收到首帧。
+
 ### 3) Docker 部署（推荐）
 ```bash
 cp deploy/docker.monitor.env.example deploy/docker.monitor.env
