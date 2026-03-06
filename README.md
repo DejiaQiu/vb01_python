@@ -171,6 +171,20 @@ alerts.csv]  alerts.csv]
 pip install -r requirements.txt
 ```
 
+## 需求驱动开发
+如果你希望先写需求，再让我按需求生成代码，可以使用项目内置的需求框架：
+
+1. 填写 `requirements/feature_request.md`
+2. 本地校验需求是否完整：
+
+```bash
+python -m elevator_monitor.feature_requirements requirements/feature_request.md
+```
+
+3. 然后直接告诉我“按 `requirements/feature_request.md` 实现”
+
+项目根目录的 `AGENTS.md` 会约束后续实现流程：先校验需求，再按 `实现位置`、`验收标准`、`测试用例` 落代码和测试。
+
 ## 快速开始
 ### 1) 本地运行在线监控
 ```bash
