@@ -14,6 +14,7 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("diagnosis_report", payload.get("capabilities", []))
+        self.assertIn("waveform_plot", payload.get("capabilities", []))
 
     def test_rule_engine_accepts_inline_rows(self):
         rows = []
@@ -80,6 +81,34 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["dify_inputs"]["ticket_priority"], "P2")
         self.assertIn("manifest-1", payload["dify_inputs"]["model_ids"])
 
+    def test_waveform_plot_accepts_inline_rows(self):
+        rows = []
+        ts0 = 1_000_000
+        for i in range(24):
+            rows.append(
+                {
+                    "ts_ms": ts0 + i * 1000,
+                    "Ax": 0.02 + 0.001 * i,
+                    "Ay": 0.03,
+                    "Az": -0.98 + 0.002 * i,
+                    "Gx": 0.1,
+                    "Gy": 0.2,
+                    "Gz": 0.3,
+                    "is_new_frame": 1,
+                }
+            )
+
+        response = self.client.post("/api/v1/diagnostics/waveform-plot", json={"rows": rows, "max_points": 64})
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        self.assertIn("plots", payload)
+        self.assertIn("acceleration", payload["plots"])
+        self.assertIn("gyroscope", payload["plots"])
+        self.assertIn("acceleration_magnitude", payload["plots"])
+        self.assertIn("data:image/svg+xml;base64,", payload["plots"]["acceleration"]["data_uri"])
+        self.assertIn("## 波形图", payload["markdown"])
+
     def test_diagnosis_report_builds_dify_inputs(self):
         rows = []
         ts0 = 1_000_000
@@ -117,6 +146,7 @@ class TestAPIService(unittest.TestCase):
                         "risk_level_24h": "high",
                     },
                 },
+                "include_waveforms": True,
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -125,6 +155,9 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("dify_prompt_template", payload)
         self.assertIn("report_markdown_draft", payload)
         self.assertEqual(payload["dify_report_inputs"]["site_name"], "Tower C")
+        self.assertIn("waveform_payload", payload)
+        self.assertIn("plots", payload["waveform_payload"])
+        self.assertIn("## 波形图", payload["report_markdown_draft"])
 
 
 if __name__ == "__main__":

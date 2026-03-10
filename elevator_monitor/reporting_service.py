@@ -40,9 +40,11 @@ def build_report_context(
     maintenance_package: dict[str, Any],
     language: str = "zh-CN",
     report_style: str = "standard",
+    waveform_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     diag = diagnosis_result if isinstance(diagnosis_result, dict) else {}
     package = maintenance_package if isinstance(maintenance_package, dict) else {}
+    waveforms = waveform_payload if isinstance(waveform_payload, dict) else {}
     top_fault = dict(diag.get("top_fault", {})) if isinstance(diag.get("top_fault"), dict) else {}
     summary = dict(diag.get("summary", {})) if isinstance(diag.get("summary"), dict) else {}
     risk = dict(package.get("risk", {})) if isinstance(package.get("risk"), dict) else {}
@@ -77,6 +79,7 @@ def build_report_context(
         "sample_count_raw": _safe_int(summary.get("n_raw"), 0),
         "sample_count_effective": _safe_int(summary.get("n_effective"), 0),
         "sample_rate_hz": _safe_float(summary.get("fs_hz"), 0.0),
+        "waveform_enabled": bool(waveforms),
         "maintenance_summary": str(package.get("summary", "")),
         "recommended_actions_text": " | ".join(package.get("recommended_actions", []) or []),
         "suggested_parts_text": ", ".join(package.get("suggested_parts", []) or []),
@@ -107,6 +110,7 @@ def build_report_context(
         },
         "diagnosis_result": diag,
         "maintenance_package": package,
+        "waveform_payload": waveforms,
         "dify_prompt_template": prompt,
         "dify_report_inputs": dify_report_inputs,
     }
@@ -116,6 +120,7 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
     top_fault = report_context.get("top_fault", {})
     risk = report_context.get("risk", {})
     package = report_context.get("maintenance_package", {})
+    waveforms = report_context.get("waveform_payload", {})
     actions = package.get("recommended_actions", []) or []
     parts = package.get("suggested_parts", []) or []
 
@@ -153,5 +158,11 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
             lines.append(f"- {item}")
     else:
         lines.append("- No mandatory replacement parts suggested.")
+
+    waveform_markdown = ""
+    if isinstance(waveforms, dict):
+        waveform_markdown = str(waveforms.get("markdown", "")).strip()
+    if waveform_markdown:
+        lines.extend(["", waveform_markdown])
 
     return "\n".join(lines).strip() + "\n"

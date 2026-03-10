@@ -12,6 +12,7 @@ owner: qiudejia
 - 将钢丝绳松动专项诊断从依赖单梯绝对阈值的规则，改造成高精度优先的候选故障筛查算法。
 - 将橡胶圈硬化专项诊断接入统一候选故障筛查链路，并使判定逻辑更贴合“曳引机本体安装振动传感器”场景下的支撑刚度/阻尼变化机理。
 - 在更换电梯、安装位置或传感器幅值尺度变化时，降低分数漂移和误报风险，允许一定漏报但尽量不把正常工况报成异常。
+- 为 Dify 展示链路补齐波形图生成能力，使“读取 CSV -> 绘制波形图 -> 综合研判 -> 生成报告”可以通过后端 API 和可导入 workflow 串起来。
 
 ## 用户场景
 - 设备诊断人员会对单个或批量振动 CSV 执行钢丝绳松动专项诊断。
@@ -25,6 +26,8 @@ owner: qiudejia
   - 修改钢丝绳松动专项规则算法，使其优先使用健康基线做 robust 归一化评分，并将判断口径收敛到高精度候选故障筛查。
   - 新增橡胶圈硬化专项规则算法，使用健康基线对竖向响应、方向性耦合、阻尼退化代理量做相对评分，并以保守单窗确认形式输出高置信候选。
   - 搭建 `report` 链路的统一候选故障筛查骨架：各故障脚本独立打分，由总控统一输出高置信候选、观察候选和原始排序结果。
+  - 新增波形图生成 API，输出用于 Dify 报告展示的加速度、角速度和加速度合成幅值波形图。
+  - 新增或更新可导入的 Dify workflow DSL，使其通过 HTTP 节点串联规则诊断、波形图、维保包和综合报告接口。
   - 保留现有 JSON 输出结构，并补充基线、结构证据、门控状态等可解释字段。
   - 更新时间序列确认逻辑，使其在低质量窗口存在时仍保持保守且稳定。
   - 新增或修改自动化测试，覆盖泛化性、正常抑制、回退逻辑、统一候选输出与连续确认。
@@ -39,9 +42,19 @@ owner: qiudejia
   - `report/fault_algorithms/_base.py`
   - `report/fault_algorithms/rope_looseness_timeline.py`
   - `report/fault_algorithms/run_all.py`
+  - `elevator_monitor/api/routers/diagnostics.py`
+  - `elevator_monitor/api/routers/workflows.py`
+  - `elevator_monitor/api/routers/meta.py`
+  - `elevator_monitor/api/schemas.py`
+  - `elevator_monitor/reporting_service.py`
+  - `elevator_monitor/waveform_service.py`
+  - `docs/dify_workflow_design.md`
+  - `docs/dify_workflows/elevator_diagnosis_report_v1.yml`
+  - `docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml`
   - `tests/test_rope_looseness_detector.py`
   - `tests/test_rubber_hardening_detector.py`
   - `tests/test_fault_algorithms_run_all.py`
+  - `tests/test_api_service.py`
 - 如需补充文档，只允许修改 `report/fault_algorithms/README.md`。
 
 ## 接口与输入输出
@@ -49,15 +62,18 @@ owner: qiudejia
   - 保持现有 `detect(features: dict) -> dict` 入口兼容。
   - 允许 `features` 中可选传入 `baseline` 字段，内容为钢丝绳或橡胶圈硬化相关特征的健康基线统计量。
   - 保持现有 CLI 输入 CSV 方式不变；时间序列确认脚本和统一故障筛查入口可选接受基线文件或健康样本目录。
+  - 新增波形图 API 输入，兼容 `csv_path`、`csv_text`、`rows` 三种方式。
 - 输出：
   - 保持现有结果 JSON 的 `fault_type`、`score`、`level`、`triggered`、`quality_factor`、`reasons`、`feature_snapshot` 字段兼容。
   - 在 `reasons` 中增加 robust 分量、基线状态、回退模式、结构型放行与门控证据。
   - 统一故障筛查入口除原始结果外，还应输出高置信候选列表、观察候选列表和筛查状态。
   - 时间序列确认输出继续返回单窗分数和连续确认结果。
+  - 波形图 API 至少输出加速度三轴图、角速度三轴图、加速度合成幅值图以及可直接用于 Markdown 展示的图像数据。
 
 ## 数据结构
 - 新增钢丝绳诊断所需的健康基线统计字段，至少包含相关特征的 `median` 和 `scale`。
 - 新增橡胶圈硬化诊断所需的按轴统计字段与相关健康基线统计字段，至少包含 `median` 和 `scale`。
+- 新增波形图数据结构，至少包含图名、SVG 或 data URI、Markdown 表达和数据摘要。
 - 其余结构不新增独立 schema 文件。
 
 ## 业务规则
@@ -71,6 +87,8 @@ owner: qiudejia
 - 时间序列确认在遇到极低质量窗口时可跳过该窗，但不得因此把单点噪声放大成连续故障。
 - 统一故障筛查总控不得直接把原始最高分等同于最终故障结论；应优先输出高置信候选故障，并保留原始排序供复盘。
 - 当没有任何高置信候选时，总控应保持 `normal` 或 `watch_only` 状态，而不是强行给出唯一故障结论。
+- 波形图 API 应优先复用已有 CSV 解析和 `is_new_frame` 过滤逻辑，避免把补点直接绘成主波形。
+- 诊断报告接口在请求显式开启时，应可自动附带波形图结果，供 Dify 报告展示使用。
 - 橡胶圈硬化诊断应贴合“曳引机本体安装传感器”的观测条件，优先比较健康基线上的竖向响应增强、阻尼退化代理量增强、轴间耦合结构变化，而不是只依赖总振动绝对幅值。
 - 橡胶圈硬化诊断中，竖向统计量（如 `az_std`、`az_rms_ac`、`az_p2p`、`az_cv`）、方向性代理量（如 `energy_z_over_xy`）、轴间相关结构（如 `corr_xy`、`corr_xz`、`corr_yz`）和瞬态/阻尼代理量（如 `az_jerk_rms`、`mag_std`、`mag_cv`）应参与综合评分。
 - 橡胶圈硬化诊断应对冲击型样本保持抑制，避免把碰撞、急停或明显尖峰冲击误报成硬化。
@@ -84,6 +102,8 @@ owner: qiudejia
 - 在提供健康基线时，明显的“竖向响应增强 + 耦合结构变化 + 非冲击”样本可进入橡胶圈硬化候选区。
 - 时间序列确认脚本在新评分下仍能输出连续确认结果，且兼容原有批量 CSV 输入方式。
 - 统一故障筛查入口在没有高置信候选时，应输出空候选列表或正常状态，不得仅凭原始最高分触发维保建议。
+- 波形图 API 对有效样本充足的输入应返回结构完整的图像结果，对低质量输入也应返回可解释的摘要而不是 500 错误。
+- Dify workflow DSL 文件应可被 YAML 解析，并包含规则诊断、波形图和报告相关节点。
 
 ## 测试用例
 - 新增测试：提供健康基线时，同一摆动异常样本做幅值缩放后，触发结果一致且分数差异受限。
@@ -93,6 +113,8 @@ owner: qiudejia
 - 新增测试：橡胶圈硬化在没有健康基线时，保守 fallback 评分仍能区分明显硬化型样本与冲击型样本。
 - 新增测试：时间序列确认逻辑在混合正常窗、低质量窗与异常窗的序列上，只在满足连续窗口数时输出确认告警。
 - 新增测试：统一故障筛查入口对正常样本输出空高置信候选，对明显钢丝绳异常样本输出钢丝绳候选，对明显橡胶圈硬化样本输出橡胶圈硬化候选。
+- 新增测试：波形图 API 对内联 rows 输入返回加速度图、角速度图和幅值图字段。
+- 新增测试：诊断报告接口在 `include_waveforms=true` 时返回波形图载荷，并在 Markdown 草稿中包含波形图段落。
 
 ## 非目标
 - 不做基于监督学习的新模型训练。

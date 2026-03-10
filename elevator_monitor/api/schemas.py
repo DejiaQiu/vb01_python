@@ -15,6 +15,15 @@ class RuleDiagnosisRequest(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class WaveformPlotRequest(BaseModel):
+    csv_path: str = ""
+    csv_text: str = ""
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    width: int = 920
+    height: int = 320
+    max_points: int = 240
+
+
 class MaintenancePackageRequest(BaseModel):
     site_name: str = ""
     alert_csv: str = "data/elevator_alerts_live.csv"
@@ -39,6 +48,8 @@ class DiagnosisReportRequest(BaseModel):
     recent_alert_limit: int = 50
     language: str = "zh-CN"
     report_style: str = "standard"
+    include_waveforms: bool = False
+    waveform_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 def normalize_row_values(rows: list[dict[str, Any]]) -> list[dict[str, str]]:

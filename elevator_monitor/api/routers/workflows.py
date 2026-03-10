@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from ...maintenance_workflow import build_maintenance_package, load_optional_json, load_recent_alerts
 from ...reporting_service import build_report_context, render_report_markdown
+from ...waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms.run_all import run_all, run_all_rows
 from ..schemas import (
     DiagnosisReportRequest,
@@ -70,11 +71,21 @@ def diagnosis_report(request: DiagnosisReportRequest) -> dict[str, Any]:
             manifest_path=request.manifest_json,
         )
 
+    waveform_payload = dict(request.waveform_payload) if request.waveform_payload else {}
+    if request.include_waveforms and not waveform_payload:
+        try:
+            rows, source = load_waveform_rows(request.rows, request.csv_text, request.csv_path)
+        except (ValueError, FileNotFoundError):
+            rows, source = [], ""
+        if rows:
+            waveform_payload = build_waveform_payload(rows, source=source)
+
     report_ctx = build_report_context(
         diagnosis_result=diagnosis,
         maintenance_package=package,
         language=request.language,
         report_style=request.report_style,
+        waveform_payload=waveform_payload,
     )
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
     return report_ctx

@@ -1,0 +1,966 @@
+app:
+  description: '参考“电梯故障诊断”流程改成的项目版 Dify 工作流。支持上传 CSV，先抽取文本，再调用本项目的规则诊断、波形图、维保包和综合报告 API。'
+  icon: 📊
+  icon_background: '#E8F7E8'
+  mode: advanced-chat
+  name: 电梯故障诊断-项目版
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: 后端基础地址
+    id: 4d27d8a6-68c8-4f40-80b0-982d1cc8fe2a
+    name: ip
+    selector:
+    - env
+    - ip
+    value: http://127.0.0.1:8000
+    value_type: string
+  - description: 报告默认站点名
+    id: 0bcc5488-3d4d-4a4d-a2bb-0d0a675ed00f
+    name: site_name
+    selector:
+    - env
+    - site_name
+    value: unknown-site
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .CSV
+      - .csv
+      - .TXT
+      - .txt
+      allowed_file_types:
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: true
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 3
+        file_size_limit: 15
+        image_file_batch_limit: 3
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 3
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: 上传电梯振动 CSV 后，会自动执行规则诊断、波形图生成和综合报告输出。
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: if-else
+      id: start-source-file-branch-target
+      source: start
+      sourceHandle: source
+      target: file_branch
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: file-branch-true-upload-tip-target
+      source: file_branch
+      sourceHandle: 'true'
+      target: upload_tip
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: document-extractor
+      id: file-branch-false-doc-extract-target
+      source: file_branch
+      sourceHandle: 'false'
+      target: doc_extract
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: code
+      id: doc-extract-source-prepare-csv-target
+      source: doc_extract
+      sourceHandle: source
+      target: prepare_csv
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: prepare-csv-source-diagnosis-http-target
+      source: prepare_csv
+      sourceHandle: source
+      target: diagnosis_http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: prepare-csv-source-waveform-http-target
+      source: prepare_csv
+      sourceHandle: source
+      target: waveform_http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: prepare-csv-source-maintenance-http-target
+      source: prepare_csv
+      sourceHandle: source
+      target: maintenance_http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: diagnosis-http-source-diagnosis-parse-target
+      source: diagnosis_http
+      sourceHandle: source
+      target: diagnosis_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: waveform-http-source-waveform-parse-target
+      source: waveform_http
+      sourceHandle: source
+      target: waveform_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: maintenance-http-source-maintenance-parse-target
+      source: maintenance_http
+      sourceHandle: source
+      target: maintenance_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: diagnosis-parse-source-report-body-target
+      source: diagnosis_parse
+      sourceHandle: source
+      target: report_body
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: waveform-parse-source-report-body-target
+      source: waveform_parse
+      sourceHandle: source
+      target: report_body
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: maintenance-parse-source-report-body-target
+      source: maintenance_parse
+      sourceHandle: source
+      target: report_body
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: report-body-source-report-http-target
+      source: report_body
+      sourceHandle: source
+      target: report_http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: report-http-source-report-parse-target
+      source: report_http
+      sourceHandle: source
+      target: report_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: report-parse-source-report-answer-target
+      source: report_parse
+      sourceHandle: source
+      target: report_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 开始
+        type: start
+        variables: []
+      height: 73
+      id: start
+      position:
+        x: 30
+        y: 250
+      positionAbsolute:
+        x: 30
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: empty
+            id: b72f4e2d-3e54-4eb5-b425-193a6617fa62
+            value: ''
+            varType: array[file]
+            variable_selector:
+            - sys
+            - files
+          id: 'true'
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: 是否上传CSV
+        type: if-else
+      height: 124
+      id: file_branch
+      position:
+        x: 336
+        y: 195
+      positionAbsolute:
+        x: 336
+        y: 195
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        answer: |
+          请先上传电梯振动 `CSV` 文件。
+          
+          当前流程会按这个顺序运行：
+          1. 提取 CSV 文本
+          2. 调用规则诊断接口
+          3. 生成波形图
+          4. 汇总维保包
+          5. 输出综合诊断报告
+          
+          如果后端地址不是 `{{#env.ip#}}`，先在环境变量里把 `ip` 改成你的服务地址。
+        desc: ''
+        selected: false
+        title: 上传提示
+        type: answer
+        variables: []
+      height: 198
+      id: upload_tip
+      position:
+        x: 677
+        y: 6
+      positionAbsolute:
+        x: 677
+        y: 6
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        desc: ''
+        is_array_file: true
+        selected: false
+        title: 文档提取器
+        type: document-extractor
+        variable_selector:
+        - sys
+        - files
+      height: 104
+      id: doc_extract
+      position:
+        x: 677
+        y: 250
+      positionAbsolute:
+        x: 677
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import csv
+          import io
+          import json
+          
+          
+          def _pick_text(value):
+              if isinstance(value, list):
+                  for item in value:
+                      text = str(item).strip()
+                      if text:
+                          return text
+                  return ""
+              return str(value or "").strip()
+          
+          
+          def _from_markdown_table(text):
+              lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+              if len(lines) < 2:
+                  return ""
+              if "|" not in lines[0] or "---" not in lines[1]:
+                  return ""
+          
+              def split_row(line):
+                  return [part.strip() for part in line.strip().strip("|").split("|")]
+          
+              headers = split_row(lines[0])
+              if not headers:
+                  return ""
+          
+              rows = []
+              for line in lines[2:]:
+                  if "|" not in line:
+                      continue
+                  parts = split_row(line)
+                  if len(parts) < len(headers):
+                      parts.extend([""] * (len(headers) - len(parts)))
+                  rows.append(parts[: len(headers)])
+          
+              if not rows:
+                  return ""
+          
+              buffer = io.StringIO()
+              writer = csv.writer(buffer)
+              writer.writerow(headers)
+              writer.writerows(rows)
+              return buffer.getvalue()
+          
+          
+          def _normalize_csv_like(text):
+              sample = text[:2048]
+              try:
+                  dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+              except Exception:
+                  dialect = csv.excel
+          
+              rows = []
+              reader = csv.reader(io.StringIO(text), dialect)
+              for row in reader:
+                  if any(str(cell).strip() for cell in row):
+                      rows.append([str(cell).strip() for cell in row])
+          
+              if len(rows) < 2:
+                  return text
+          
+              width = max(len(row) for row in rows)
+              buffer = io.StringIO()
+              writer = csv.writer(buffer)
+              for row in rows:
+                  writer.writerow(row + [""] * (width - len(row)))
+              return buffer.getvalue()
+          
+          
+          def main(extracted_text, site_name):
+              raw_text = _pick_text(extracted_text)
+              csv_text = _from_markdown_table(raw_text) or _normalize_csv_like(raw_text)
+              preview = "\n".join(csv_text.splitlines()[:6])
+              diagnosis_body = json.dumps(
+                  {"csv_text": csv_text, "rows": []},
+                  ensure_ascii=False,
+              )
+              waveform_body = json.dumps(
+                  {
+                      "csv_text": csv_text,
+                      "rows": [],
+                      "width": 920,
+                      "height": 320,
+                      "max_points": 240,
+                  },
+                  ensure_ascii=False,
+              )
+              maintenance_body = json.dumps(
+                  {"site_name": site_name or "unknown-site"},
+                  ensure_ascii=False,
+              )
+              return {
+                  "csv_text": csv_text,
+                  "preview": preview,
+                  "diagnosis_body": diagnosis_body,
+                  "waveform_body": waveform_body,
+                  "maintenance_body": maintenance_body,
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          csv_text:
+            children: null
+            type: string
+          preview:
+            children: null
+            type: string
+          diagnosis_body:
+            children: null
+            type: string
+          waveform_body:
+            children: null
+            type: string
+          maintenance_body:
+            children: null
+            type: string
+        selected: false
+        title: 准备CSV与请求体
+        type: code
+        variables:
+        - value_selector:
+          - doc_extract
+          - text
+          value_type: array[string]
+          variable: extracted_text
+        - value_selector:
+          - env
+          - site_name
+          value_type: string
+          variable: site_name
+      height: 52
+      id: prepare_csv
+      position:
+        x: 1038
+        y: 250
+      positionAbsolute:
+        x: 1038
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#prepare_csv.diagnosis_body#}}'
+          type: raw-text
+        desc: ''
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 规则诊断
+        type: http-request
+        url: '{{#env.ip#}}/api/v1/diagnostics/rule-engine'
+        variables: []
+      height: 125
+      id: diagnosis_http
+      position:
+        x: 1403
+        y: 98
+      positionAbsolute:
+        x: 1403
+        y: 98
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#prepare_csv.waveform_body#}}'
+          type: raw-text
+        desc: ''
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 波形图
+        type: http-request
+        url: '{{#env.ip#}}/api/v1/diagnostics/waveform-plot'
+        variables: []
+      height: 125
+      id: waveform_http
+      position:
+        x: 1403
+        y: 250
+      positionAbsolute:
+        x: 1403
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#prepare_csv.maintenance_body#}}'
+          type: raw-text
+        desc: ''
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 维保包
+        type: http-request
+        url: '{{#env.ip#}}/api/v1/workflows/maintenance-package'
+        variables: []
+      height: 125
+      id: maintenance_http
+      position:
+        x: 1403
+        y: 402
+      positionAbsolute:
+        x: 1403
+        y: 402
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import json
+          
+          
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {}
+              screening = payload.get("screening", {}) if isinstance(payload, dict) else {}
+              status = str(screening.get("status", "unknown"))
+              top_candidate = screening.get("top_candidate", {}) if isinstance(screening, dict) else {}
+              top_fault = str(top_candidate.get("fault_type", ""))
+              top_score = top_candidate.get("score", 0)
+              if top_fault:
+                  summary = f"筛查状态：{status}；高置信候选：{top_fault}；分数：{top_score}。"
+              else:
+                  watch_faults = screening.get("watch_faults", []) if isinstance(screening, dict) else []
+                  if watch_faults:
+                      first = watch_faults[0]
+                      summary = f"筛查状态：{status}；重点关注：{first.get('fault_type', 'unknown')}。"
+                  else:
+                      summary = f"筛查状态：{status}。"
+              return {
+                  "diagnosis_json": json.dumps(payload, ensure_ascii=False),
+                  "status": status,
+                  "top_fault": top_fault,
+                  "summary": summary,
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          diagnosis_json:
+            children: null
+            type: string
+          status:
+            children: null
+            type: string
+          top_fault:
+            children: null
+            type: string
+          summary:
+            children: null
+            type: string
+        selected: false
+        title: 解析诊断结果
+        type: code
+        variables:
+        - value_selector:
+          - diagnosis_http
+          - body
+          value_type: string
+          variable: body
+      height: 52
+      id: diagnosis_parse
+      position:
+        x: 1745
+        y: 98
+      positionAbsolute:
+        x: 1745
+        y: 98
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import json
+          
+          
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {}
+              return {
+                  "waveform_json": json.dumps(payload, ensure_ascii=False),
+                  "waveform_markdown": str(payload.get("markdown", "")),
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          waveform_json:
+            children: null
+            type: string
+          waveform_markdown:
+            children: null
+            type: string
+        selected: false
+        title: 解析波形图结果
+        type: code
+        variables:
+        - value_selector:
+          - waveform_http
+          - body
+          value_type: string
+          variable: body
+      height: 52
+      id: waveform_parse
+      position:
+        x: 1745
+        y: 250
+      positionAbsolute:
+        x: 1745
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import json
+          
+          
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {}
+              return {
+                  "maintenance_json": json.dumps(payload, ensure_ascii=False),
+                  "summary": str(payload.get("summary", "")),
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          maintenance_json:
+            children: null
+            type: string
+          summary:
+            children: null
+            type: string
+        selected: false
+        title: 解析维保包
+        type: code
+        variables:
+        - value_selector:
+          - maintenance_http
+          - body
+          value_type: string
+          variable: body
+      height: 52
+      id: maintenance_parse
+      position:
+        x: 1745
+        y: 402
+      positionAbsolute:
+        x: 1745
+        y: 402
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import json
+          
+          
+          def _loads(value):
+              text = str(value or "").strip()
+              if not text:
+                  return {}
+              try:
+                  return json.loads(text)
+              except Exception:
+                  return {}
+          
+          
+          def main(csv_text, site_name, diagnosis_json, maintenance_json, waveform_json):
+              payload = {
+                  "site_name": site_name or "unknown-site",
+                  "csv_text": csv_text or "",
+                  "diagnosis_result": _loads(diagnosis_json),
+                  "maintenance_package": _loads(maintenance_json),
+                  "include_waveforms": False,
+                  "waveform_payload": _loads(waveform_json),
+                  "language": "zh-CN",
+                  "report_style": "standard",
+              }
+              return {
+                  "report_body": json.dumps(payload, ensure_ascii=False),
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          report_body:
+            children: null
+            type: string
+        selected: false
+        title: 准备综合报告请求体
+        type: code
+        variables:
+        - value_selector:
+          - prepare_csv
+          - csv_text
+          value_type: string
+          variable: csv_text
+        - value_selector:
+          - env
+          - site_name
+          value_type: string
+          variable: site_name
+        - value_selector:
+          - diagnosis_parse
+          - diagnosis_json
+          value_type: string
+          variable: diagnosis_json
+        - value_selector:
+          - maintenance_parse
+          - maintenance_json
+          value_type: string
+          variable: maintenance_json
+        - value_selector:
+          - waveform_parse
+          - waveform_json
+          value_type: string
+          variable: waveform_json
+      height: 52
+      id: report_body
+      position:
+        x: 2111
+        y: 250
+      positionAbsolute:
+        x: 2111
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#report_body.report_body#}}'
+          type: raw-text
+        desc: ''
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 综合报告
+        type: http-request
+        url: '{{#env.ip#}}/api/v1/workflows/diagnosis-report'
+        variables: []
+      height: 125
+      id: report_http
+      position:
+        x: 2470
+        y: 250
+      positionAbsolute:
+        x: 2470
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import json
+          
+          
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {}
+              report_markdown = str(payload.get("report_markdown_draft", "")).strip()
+              if not report_markdown:
+                  report_markdown = "报告接口返回为空，请检查后端服务或 CSV 内容。"
+              return {
+                  "report_title": str(payload.get("report_title", "电梯故障诊断报告")),
+                  "report_markdown": report_markdown,
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          report_title:
+            children: null
+            type: string
+          report_markdown:
+            children: null
+            type: string
+        selected: false
+        title: 解析综合报告
+        type: code
+        variables:
+        - value_selector:
+          - report_http
+          - body
+          value_type: string
+          variable: body
+      height: 52
+      id: report_parse
+      position:
+        x: 2817
+        y: 250
+      positionAbsolute:
+        x: 2817
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        answer: |
+          {{#report_parse.report_markdown#}}
+        desc: ''
+        selected: false
+        title: 综合报告输出
+        type: answer
+        variables: []
+      height: 107
+      id: report_answer
+      position:
+        x: 3156
+        y: 250
+      positionAbsolute:
+        x: 3156
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: -375.0
+      y: 35.0
+      zoom: 0.52
+  rag_pipeline_variables: []

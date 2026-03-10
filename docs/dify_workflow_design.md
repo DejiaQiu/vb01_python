@@ -3,6 +3,7 @@
 This project already provides a backend API:
 
 - `POST /api/v1/diagnostics/rule-engine`
+- `POST /api/v1/diagnostics/waveform-plot`
 - `POST /api/v1/workflows/maintenance-package`
 - `POST /api/v1/workflows/diagnosis-report`
 - `GET /api/v1/health/monitor`
@@ -67,6 +68,33 @@ Expected output fields:
 - `top_fault.score`
 - `top_fault.level`
 - `results` (all 8-rule outputs)
+
+### Node 2.5: HTTP Request - Waveform Plot
+
+Request:
+
+- Method: `POST`
+- URL: `http://<backend-host>:8000/api/v1/diagnostics/waveform-plot`
+- Headers: `Content-Type: application/json`
+- Body:
+
+```json
+{
+  "csv_path": "{{#start.csv_path#}}",
+  "csv_text": "{{#start.csv_text#}}",
+  "rows": {{#start.rows#}},
+  "width": 920,
+  "height": 320,
+  "max_points": 240
+}
+```
+
+Expected output fields:
+
+- `plots.acceleration.data_uri`
+- `plots.gyroscope.data_uri`
+- `plots.acceleration_magnitude.data_uri`
+- `markdown`
 
 ### Node 3: HTTP Request - Maintenance Package
 
@@ -219,6 +247,7 @@ Recommended Dify Workflow Start variables for push mode:
 - `risk` object
 - `diagnosis_result` object
 - `maintenance_package` object
+- `waveform_payload` object (when `include_waveforms=true` or payload provided)
 - `dify_prompt_template` string
 - `dify_report_inputs` object
 - `report_markdown_draft` string
