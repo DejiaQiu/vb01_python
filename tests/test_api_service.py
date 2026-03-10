@@ -106,6 +106,9 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("acceleration", payload["plots"])
         self.assertIn("gyroscope", payload["plots"])
         self.assertIn("acceleration_magnitude", payload["plots"])
+        self.assertIn("echarts", payload)
+        self.assertIn("acceleration", payload["echarts"])
+        self.assertIn("```echarts", payload["markdown_echarts"])
         self.assertIn("data:image/svg+xml;base64,", payload["plots"]["acceleration"]["data_uri"])
         self.assertIn("## 波形图", payload["markdown"])
 
@@ -157,6 +160,7 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["dify_report_inputs"]["site_name"], "Tower C")
         self.assertIn("waveform_payload", payload)
         self.assertIn("plots", payload["waveform_payload"])
+        self.assertIn("markdown_echarts", payload["waveform_payload"])
         self.assertIn("## 1. 一句话结论", payload["report_markdown_draft"])
         self.assertIn("## 2. 给非专业人员的解释", payload["report_markdown_draft"])
         self.assertIn("## 3. 建议怎么做", payload["report_markdown_draft"])

@@ -1,11 +1,16 @@
 app:
-  description: '参考“电梯故障诊断”流程改成的项目版 Dify 工作流。支持上传 CSV，先抽取文本，再调用本项目的规则诊断、波形图、维保包和综合报告 API。'
+  description: '参考“电梯故障诊断”模板改造的项目版 Dify 工作流。上传 CSV 后，Dify 端直接生成 echarts 波形图，后端只负责规则诊断、维保包和报告上下文。'
   icon: 📊
   icon_background: '#E8F7E8'
   mode: advanced-chat
   name: 电梯故障诊断-项目版
   use_icon_as_answer_icon: false
-dependencies: []
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.0.26@4f1c4ded3d189719b7dd54e9d4e5b26f724f3632f3dfaa299491b42accc112c8
+    version: null
 kind: app
 version: 0.5.0
 workflow:
@@ -17,7 +22,7 @@ workflow:
     selector:
     - env
     - ip
-    value: http://127.0.0.1:8000
+    value: http://192.168.5.132:8000
     value_type: string
   - description: 报告默认站点名
     id: 0bcc5488-3d4d-4a4d-a2bb-0d0a675ed00f
@@ -56,7 +61,7 @@ workflow:
         - local_file
         - remote_url
       number_limits: 3
-    opening_statement: 上传电梯振动 CSV 后，会自动执行规则诊断、波形图生成和综合报告输出。
+    opening_statement: 上传电梯振动 CSV 后，会自动执行规则诊断，并由 Dify 直接绘制波形图和输出综合报告。
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:
@@ -133,21 +138,21 @@ workflow:
         isInLoop: false
         sourceType: code
         targetType: http-request
-      id: prepare-csv-source-waveform-http-target
+      id: prepare-csv-source-maintenance-http-target
       source: prepare_csv
       sourceHandle: source
-      target: waveform_http
+      target: maintenance_http
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInLoop: false
         sourceType: code
-        targetType: http-request
-      id: prepare-csv-source-maintenance-http-target
+        targetType: code
+      id: prepare-csv-source-waveform-code-target
       source: prepare_csv
       sourceHandle: source
-      target: maintenance_http
+      target: waveform_code
       targetHandle: target
       type: custom
       zIndex: 0
@@ -159,17 +164,6 @@ workflow:
       source: diagnosis_http
       sourceHandle: source
       target: diagnosis_parse
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInLoop: false
-        sourceType: http-request
-        targetType: code
-      id: waveform-http-source-waveform-parse-target
-      source: waveform_http
-      sourceHandle: source
-      target: waveform_parse
       targetHandle: target
       type: custom
       zIndex: 0
@@ -190,17 +184,6 @@ workflow:
         targetType: code
       id: diagnosis-parse-source-report-body-target
       source: diagnosis_parse
-      sourceHandle: source
-      target: report_body
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInLoop: false
-        sourceType: code
-        targetType: code
-      id: waveform-parse-source-report-body-target
-      source: waveform_parse
       sourceHandle: source
       target: report_body
       targetHandle: target
@@ -242,9 +225,31 @@ workflow:
     - data:
         isInLoop: false
         sourceType: code
-        targetType: answer
-      id: report-parse-source-report-answer-target
+        targetType: llm
+      id: report-parse-source-report-llm-target
       source: report_parse
+      sourceHandle: source
+      target: report_llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: waveform-code-source-report-llm-target
+      source: waveform_code
+      sourceHandle: source
+      target: report_llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: report-llm-source-report-answer-target
+      source: report_llm
       sourceHandle: source
       target: report_answer
       targetHandle: target
@@ -307,7 +312,7 @@ workflow:
           当前流程会按这个顺序运行：
           1. 提取 CSV 文本
           2. 调用规则诊断接口
-          3. 生成波形图
+          3. 在 Dify 端直接生成波形图
           4. 汇总维保包
           5. 输出综合诊断报告
           
@@ -429,19 +434,8 @@ workflow:
           def main(extracted_text, site_name):
               raw_text = _pick_text(extracted_text)
               csv_text = _from_markdown_table(raw_text) or _normalize_csv_like(raw_text)
-              preview = "\n".join(csv_text.splitlines()[:6])
               diagnosis_body = json.dumps(
                   {"csv_text": csv_text, "rows": []},
-                  ensure_ascii=False,
-              )
-              waveform_body = json.dumps(
-                  {
-                      "csv_text": csv_text,
-                      "rows": [],
-                      "width": 920,
-                      "height": 320,
-                      "max_points": 240,
-                  },
                   ensure_ascii=False,
               )
               maintenance_body = json.dumps(
@@ -450,9 +444,7 @@ workflow:
               )
               return {
                   "csv_text": csv_text,
-                  "preview": preview,
                   "diagnosis_body": diagnosis_body,
-                  "waveform_body": waveform_body,
                   "maintenance_body": maintenance_body,
               }
         code_language: python3
@@ -461,13 +453,7 @@ workflow:
           csv_text:
             children: null
             type: string
-          preview:
-            children: null
-            type: string
           diagnosis_body:
-            children: null
-            type: string
-          waveform_body:
             children: null
             type: string
           maintenance_body:
@@ -543,44 +529,6 @@ workflow:
           config: null
           type: no-auth
         body:
-          data: '{{#prepare_csv.waveform_body#}}'
-          type: raw-text
-        desc: ''
-        headers: Content-Type:application/json
-        method: post
-        params: ''
-        retry_config:
-          max_retries: 3
-          retry_enabled: true
-          retry_interval: 100
-        selected: false
-        ssl_verify: true
-        timeout:
-          max_connect_timeout: 0
-          max_read_timeout: 0
-          max_write_timeout: 0
-        title: 波形图
-        type: http-request
-        url: '{{#env.ip#}}/api/v1/diagnostics/waveform-plot'
-        variables: []
-      height: 125
-      id: waveform_http
-      position:
-        x: 1403
-        y: 250
-      positionAbsolute:
-        x: 1403
-        y: 250
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 242
-    - data:
-        authorization:
-          config: null
-          type: no-auth
-        body:
           data: '{{#prepare_csv.maintenance_body#}}'
           type: raw-text
         desc: ''
@@ -616,6 +564,199 @@ workflow:
       width: 242
     - data:
         code: |
+          import csv
+          import io
+          import json
+          import math
+          
+          
+          def _safe_float(value, default=0.0):
+              try:
+                  return float(value)
+              except Exception:
+                  return default
+          
+          
+          def _safe_int(value):
+              try:
+                  return int(float(value))
+              except Exception:
+                  return None
+          
+          
+          def _rows_from_csv(text):
+              raw = str(text or "").strip()
+              if not raw:
+                  return []
+              return [dict(row) for row in csv.DictReader(io.StringIO(raw))]
+          
+          
+          def _pick_effective_rows(rows, min_real_rows=8):
+              flagged = []
+              has_flag = False
+              for row in rows:
+                  flag = _safe_int(row.get("is_new_frame"))
+                  if flag is None:
+                      continue
+                  has_flag = True
+                  if flag == 1:
+                      flagged.append(row)
+              if has_flag and len(flagged) >= min_real_rows:
+                  return flagged, True
+              return rows, False
+          
+          
+          def _pick(row, *names):
+              for name in names:
+                  if name in row and str(row.get(name)).strip() != "":
+                      return row.get(name)
+              return ""
+          
+          
+          def _extract_series(rows, *names):
+              return [_safe_float(_pick(row, *names), 0.0) for row in rows]
+          
+          
+          def _extract_ts(rows):
+              xs = []
+              for idx, row in enumerate(rows):
+                  value = _safe_int(_pick(row, "ts_ms", "data_ts_ms"))
+                  xs.append(idx if value is None else value)
+              return xs
+          
+          
+          def _downsample(xs, series_list, max_points=180):
+              if len(xs) <= max_points:
+                  return xs, series_list
+              idxs = [round(i * (len(xs) - 1) / max(1, max_points - 1)) for i in range(max_points)]
+              return [xs[i] for i in idxs], [[series[i] for i in idxs] for series in series_list]
+          
+          
+          def _option(title, xs, series_defs):
+              x0 = xs[0] if xs else 0
+              x_data = [round((value - x0) / 1000.0, 3) for value in xs]
+              option = {
+                  "title": {"text": title, "left": "center"},
+                  "tooltip": {"trigger": "axis"},
+                  "legend": {"top": 28, "data": [item["name"] for item in series_defs]},
+                  "grid": {"left": 48, "right": 24, "top": 72, "bottom": 36},
+                  "xAxis": {
+                      "type": "category",
+                      "name": "Time (s)",
+                      "boundaryGap": False,
+                      "data": x_data,
+                  },
+                  "yAxis": {
+                      "type": "value",
+                      "scale": True,
+                  },
+                  "series": [],
+              }
+              for item in series_defs:
+                  option["series"].append(
+                      {
+                          "name": item["name"],
+                          "type": "line",
+                          "showSymbol": False,
+                          "smooth": False,
+                          "lineStyle": {"width": 2, "color": item["color"]},
+                          "itemStyle": {"color": item["color"]},
+                          "data": [round(float(v), 6) for v in item["data"]],
+                      }
+                  )
+              return json.dumps(option, ensure_ascii=False)
+          
+          
+          def main(csv_text):
+              rows = _rows_from_csv(csv_text)
+              rows, used_new_only = _pick_effective_rows(rows)
+              ts = _extract_ts(rows)
+              ax = _extract_series(rows, "Ax", "AX")
+              ay = _extract_series(rows, "Ay", "AY")
+              az = _extract_series(rows, "Az", "AZ")
+              gx = _extract_series(rows, "Gx", "GX")
+              gy = _extract_series(rows, "Gy", "GY")
+              gz = _extract_series(rows, "Gz", "GZ")
+              amag = [math.sqrt(ax[i] * ax[i] + ay[i] * ay[i] + az[i] * az[i]) for i in range(len(ax))]
+          
+              ts_acc, [ax, ay, az] = _downsample(ts, [ax, ay, az])
+              ts_gyr, [gx, gy, gz] = _downsample(ts, [gx, gy, gz])
+              ts_mag, [amag] = _downsample(ts, [amag])
+          
+              acc_chart = _option(
+                  "加速度三轴波形",
+                  ts_acc,
+                  [
+                      {"name": "Ax", "color": "#1F77B4", "data": ax},
+                      {"name": "Ay", "color": "#FF7F0E", "data": ay},
+                      {"name": "Az", "color": "#2CA02C", "data": az},
+                  ],
+              )
+              gyro_chart = _option(
+                  "角速度三轴波形",
+                  ts_gyr,
+                  [
+                      {"name": "Gx", "color": "#9467BD", "data": gx},
+                      {"name": "Gy", "color": "#D62728", "data": gy},
+                      {"name": "Gz", "color": "#8C564B", "data": gz},
+                  ],
+              )
+              mag_chart = _option(
+                  "加速度合成幅值波形",
+                  ts_mag,
+                  [
+                      {"name": "A_mag", "color": "#17BECF", "data": amag},
+                  ],
+              )
+              summary = (
+                  f"本次用于绘图的有效数据点共 {len(rows)} 个，"
+                  f"{'已优先使用 is_new_frame=1 的真实采样点。' if used_new_only else '未检测到足够多的真实采样标记，直接使用原始记录绘图。'}"
+              )
+              return {
+                  "acc_chart": acc_chart,
+                  "gyro_chart": gyro_chart,
+                  "mag_chart": mag_chart,
+                  "waveform_summary": summary,
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          acc_chart:
+            children: null
+            type: string
+          gyro_chart:
+            children: null
+            type: string
+          mag_chart:
+            children: null
+            type: string
+          waveform_summary:
+            children: null
+            type: string
+        selected: false
+        title: Dify波形绘图
+        type: code
+        variables:
+        - value_selector:
+          - prepare_csv
+          - csv_text
+          value_type: string
+          variable: csv_text
+      height: 52
+      id: waveform_code
+      position:
+        x: 1403
+        y: 250
+      positionAbsolute:
+        x: 1403
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
           import json
           
           
@@ -627,23 +768,14 @@ workflow:
                   payload = {}
               screening = payload.get("screening", {}) if isinstance(payload, dict) else {}
               status = str(screening.get("status", "unknown"))
-              top_candidate = screening.get("top_candidate", {}) if isinstance(screening, dict) else {}
-              top_fault = str(top_candidate.get("fault_type", ""))
-              top_score = top_candidate.get("score", 0)
-              if top_fault:
-                  summary = f"筛查状态：{status}；高置信候选：{top_fault}；分数：{top_score}。"
+              top_candidate = payload.get("top_candidate", {}) if isinstance(payload, dict) else {}
+              if isinstance(top_candidate, dict) and top_candidate.get("fault_type"):
+                  summary = f"筛查状态：{status}；高置信候选：{top_candidate.get('fault_type')}；分数：{top_candidate.get('score', 0)}。"
               else:
-                  watch_faults = screening.get("watch_faults", []) if isinstance(screening, dict) else []
-                  if watch_faults:
-                      first = watch_faults[0]
-                      summary = f"筛查状态：{status}；重点关注：{first.get('fault_type', 'unknown')}。"
-                  else:
-                      summary = f"筛查状态：{status}。"
+                  summary = f"筛查状态：{status}。"
               return {
                   "diagnosis_json": json.dumps(payload, ensure_ascii=False),
-                  "status": status,
-                  "top_fault": top_fault,
-                  "summary": summary,
+                  "diagnosis_summary": summary,
               }
         code_language: python3
         desc: ''
@@ -651,13 +783,7 @@ workflow:
           diagnosis_json:
             children: null
             type: string
-          status:
-            children: null
-            type: string
-          top_fault:
-            children: null
-            type: string
-          summary:
+          diagnosis_summary:
             children: null
             type: string
         selected: false
@@ -694,54 +820,8 @@ workflow:
               except Exception:
                   payload = {}
               return {
-                  "waveform_json": json.dumps(payload, ensure_ascii=False),
-                  "waveform_markdown": str(payload.get("markdown", "")),
-              }
-        code_language: python3
-        desc: ''
-        outputs:
-          waveform_json:
-            children: null
-            type: string
-          waveform_markdown:
-            children: null
-            type: string
-        selected: false
-        title: 解析波形图结果
-        type: code
-        variables:
-        - value_selector:
-          - waveform_http
-          - body
-          value_type: string
-          variable: body
-      height: 52
-      id: waveform_parse
-      position:
-        x: 1745
-        y: 250
-      positionAbsolute:
-        x: 1745
-        y: 250
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 242
-    - data:
-        code: |
-          import json
-          
-          
-          def main(body):
-              text = str(body or "").strip()
-              try:
-                  payload = json.loads(text) if text else {}
-              except Exception:
-                  payload = {}
-              return {
                   "maintenance_json": json.dumps(payload, ensure_ascii=False),
-                  "summary": str(payload.get("summary", "")),
+                  "maintenance_summary": str(payload.get("summary", "")),
               }
         code_language: python3
         desc: ''
@@ -749,7 +829,7 @@ workflow:
           maintenance_json:
             children: null
             type: string
-          summary:
+          maintenance_summary:
             children: null
             type: string
         selected: false
@@ -779,24 +859,23 @@ workflow:
           import json
           
           
-          def _loads(value):
-              text = str(value or "").strip()
-              if not text:
+          def _loads(text):
+              raw = str(text or "").strip()
+              if not raw:
                   return {}
               try:
-                  return json.loads(text)
+                  return json.loads(raw)
               except Exception:
                   return {}
           
           
-          def main(csv_text, site_name, diagnosis_json, maintenance_json, waveform_json):
+          def main(site_name, csv_text, diagnosis_json, maintenance_json):
               payload = {
                   "site_name": site_name or "unknown-site",
                   "csv_text": csv_text or "",
                   "diagnosis_result": _loads(diagnosis_json),
                   "maintenance_package": _loads(maintenance_json),
                   "include_waveforms": False,
-                  "waveform_payload": _loads(waveform_json),
                   "language": "zh-CN",
                   "report_style": "standard",
               }
@@ -814,15 +893,15 @@ workflow:
         type: code
         variables:
         - value_selector:
-          - prepare_csv
-          - csv_text
-          value_type: string
-          variable: csv_text
-        - value_selector:
           - env
           - site_name
           value_type: string
           variable: site_name
+        - value_selector:
+          - prepare_csv
+          - csv_text
+          value_type: string
+          variable: csv_text
         - value_selector:
           - diagnosis_parse
           - diagnosis_json
@@ -833,11 +912,6 @@ workflow:
           - maintenance_json
           value_type: string
           variable: maintenance_json
-        - value_selector:
-          - waveform_parse
-          - waveform_json
-          value_type: string
-          variable: waveform_json
       height: 52
       id: report_body
       position:
@@ -872,7 +946,7 @@ workflow:
           max_connect_timeout: 0
           max_read_timeout: 0
           max_write_timeout: 0
-        title: 综合报告
+        title: 综合报告上下文
         type: http-request
         url: '{{#env.ip#}}/api/v1/workflows/diagnosis-report'
         variables: []
@@ -900,12 +974,13 @@ workflow:
                   payload = json.loads(text) if text else {}
               except Exception:
                   payload = {}
-              report_markdown = str(payload.get("report_markdown_draft", "")).strip()
-              if not report_markdown:
-                  report_markdown = "报告接口返回为空，请检查后端服务或 CSV 内容。"
+              dify_prompt = str(payload.get("dify_prompt_template", "")).strip()
+              dify_inputs = payload.get("dify_report_inputs", {})
               return {
                   "report_title": str(payload.get("report_title", "电梯故障诊断报告")),
-                  "report_markdown": report_markdown,
+                  "report_markdown": str(payload.get("report_markdown_draft", "")).strip(),
+                  "dify_prompt_template": dify_prompt,
+                  "dify_inputs_json": json.dumps(dify_inputs, ensure_ascii=False, indent=2) if isinstance(dify_inputs, dict) else "{}",
               }
         code_language: python3
         desc: ''
@@ -916,8 +991,14 @@ workflow:
           report_markdown:
             children: null
             type: string
+          dify_prompt_template:
+            children: null
+            type: string
+          dify_inputs_json:
+            children: null
+            type: string
         selected: false
-        title: 解析综合报告
+        title: 解析综合报告上下文
         type: code
         variables:
         - value_selector:
@@ -939,15 +1020,52 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: |
-          {{#report_parse.report_markdown#}}
+        context:
+          enabled: true
+          variable_selector:
+          - report_parse
+          - dify_inputs_json
         desc: ''
+        model:
+          completion_params:
+            temperature: 0.4
+          mode: chat
+          name: qwen-plus-latest
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: 86f1aaf2-7f56-49d7-8881-8f78ff50f0df
+          role: system
+          text: |
+            {{#report_parse.dify_prompt_template#}}
+            
+            下面是后端已经整理好的报告输入，请在此基础上做最终输出润色：
+            {{#report_parse.dify_inputs_json#}}
+            
+            下面是后端草稿，可作为参考，但不要机械照抄：
+            {{#report_parse.report_markdown#}}
+            
+            下面是波形图数据摘要：
+            {{#waveform_code.waveform_summary#}}
+            
+            输出要求：
+            1. 面向普通人，优先说“看到了什么、代表什么、要不要处理”。
+            2. 结构固定为：
+               ## 1. 一句话结论
+               ## 2. 给非专业人员的解释
+               ## 3. 建议怎么做
+               ## 4. 本次判断依据
+               ## 5. 给维保人员的补充参考
+            3. 不要重复一级标题，答案节点会单独拼接标题。
+            4. 不要输出 JSON，不要生成波形图代码块，答案节点会自动拼接。
+            5. 尽量使用自然中文，不要过多直接暴露英文技术字段名。
         selected: false
-        title: 综合报告输出
-        type: answer
+        title: LLM综合润色
+        type: llm
         variables: []
-      height: 107
-      id: report_answer
+        vision:
+          enabled: false
+      height: 94
+      id: report_llm
       position:
         x: 3156
         y: 250
@@ -959,8 +1077,50 @@ workflow:
       targetPosition: left
       type: custom
       width: 242
+    - data:
+        answer: |
+          # {{#report_parse.report_title#}}
+          
+          {{#report_llm.text#}}
+          
+          ## 波形图
+          
+          {{#waveform_code.waveform_summary#}}
+          
+          ### 加速度三轴
+          ```echarts
+          {{#waveform_code.acc_chart#}}
+          ```
+          
+          ### 角速度三轴
+          ```echarts
+          {{#waveform_code.gyro_chart#}}
+          ```
+          
+          ### 加速度合成幅值
+          ```echarts
+          {{#waveform_code.mag_chart#}}
+          ```
+        desc: ''
+        selected: false
+        title: 综合报告输出
+        type: answer
+        variables: []
+      height: 220
+      id: report_answer
+      position:
+        x: 3506
+        y: 250
+      positionAbsolute:
+        x: 3506
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
     viewport:
-      x: -375.0
-      y: 35.0
-      zoom: 0.52
+      x: -280.0
+      y: 52.0
+      zoom: 0.5
   rag_pipeline_variables: []

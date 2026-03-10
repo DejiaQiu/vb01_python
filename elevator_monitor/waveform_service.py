@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -140,6 +141,52 @@ def _plot_block(title: str, series: list[dict[str, Any]], *, width: int, height:
     }
 
 
+def _series_values(values: list[float]) -> list[float]:
+    return [round(float(item), 6) for item in values]
+
+
+def _echarts_option(title: str, series: list[dict[str, Any]]) -> dict[str, Any]:
+    x_data = [round(float(item), 3) for item in (series[0]["xs"] if series else [])]
+    return {
+        "title": {"text": title, "left": "center"},
+        "tooltip": {"trigger": "axis"},
+        "legend": {"top": 28, "data": [str(item["label"]) for item in series]},
+        "grid": {"left": 48, "right": 24, "top": 72, "bottom": 36},
+        "xAxis": {
+            "type": "category",
+            "name": "Time (s)",
+            "boundaryGap": False,
+            "data": x_data,
+        },
+        "yAxis": {
+            "type": "value",
+            "scale": True,
+        },
+        "series": [
+            {
+                "name": str(item["label"]),
+                "type": "line",
+                "showSymbol": False,
+                "smooth": False,
+                "lineStyle": {"width": 2, "color": str(item["color"])},
+                "itemStyle": {"color": str(item["color"])},
+                "data": _series_values(item["ys"]),
+            }
+            for item in series
+        ],
+    }
+
+
+def _echarts_block(title: str, series: list[dict[str, Any]]) -> dict[str, Any]:
+    option = _echarts_option(title, series)
+    option_json = json.dumps(option, ensure_ascii=False)
+    return {
+        "option": option,
+        "option_json": option_json,
+        "markdown": f"```echarts\n{option_json}\n```",
+    }
+
+
 def load_waveform_rows(rows: list[dict[str, Any]], csv_text: str, csv_path: str) -> tuple[list[dict[str, Any]], str]:
     if rows:
         normalized = [{str(k): "" if v is None else str(v) for k, v in row.items()} for row in rows if isinstance(row, dict)]
@@ -199,6 +246,14 @@ def build_waveform_payload(
         width=width,
         height=height,
     )
+    acceleration_chart = _echarts_block(
+        "Acceleration Waveform",
+        [
+            {"label": "Ax", "color": "#1F77B4", "xs": x_acc, "ys": ax},
+            {"label": "Ay", "color": "#FF7F0E", "xs": x_acc, "ys": ay},
+            {"label": "Az", "color": "#2CA02C", "xs": x_acc, "ys": az},
+        ],
+    )
     gyroscope = _plot_block(
         "Gyroscope Waveform",
         [
@@ -209,6 +264,14 @@ def build_waveform_payload(
         width=width,
         height=height,
     )
+    gyroscope_chart = _echarts_block(
+        "Gyroscope Waveform",
+        [
+            {"label": "Gx", "color": "#9467BD", "xs": x_gyr, "ys": gx},
+            {"label": "Gy", "color": "#D62728", "xs": x_gyr, "ys": gy},
+            {"label": "Gz", "color": "#8C564B", "xs": x_gyr, "ys": gz},
+        ],
+    )
     magnitude = _plot_block(
         "Acceleration Magnitude",
         [
@@ -216,6 +279,12 @@ def build_waveform_payload(
         ],
         width=width,
         height=height,
+    )
+    magnitude_chart = _echarts_block(
+        "Acceleration Magnitude",
+        [
+            {"label": "A_mag", "color": "#17BECF", "xs": x_mag, "ys": amag},
+        ],
     )
 
     markdown = "\n".join(
@@ -227,6 +296,17 @@ def build_waveform_payload(
             gyroscope["markdown"],
             "",
             magnitude["markdown"],
+        ]
+    )
+    markdown_echarts = "\n".join(
+        [
+            "## 波形图",
+            "",
+            acceleration_chart["markdown"],
+            "",
+            gyroscope_chart["markdown"],
+            "",
+            magnitude_chart["markdown"],
         ]
     )
 
@@ -245,5 +325,11 @@ def build_waveform_payload(
             "gyroscope": gyroscope,
             "acceleration_magnitude": magnitude,
         },
+        "echarts": {
+            "acceleration": acceleration_chart,
+            "gyroscope": gyroscope_chart,
+            "acceleration_magnitude": magnitude_chart,
+        },
         "markdown": markdown,
+        "markdown_echarts": markdown_echarts,
     }

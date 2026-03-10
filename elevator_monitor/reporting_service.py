@@ -464,7 +464,7 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
 
     waveform_markdown = ""
     if isinstance(waveforms, dict):
-        waveform_markdown = str(waveforms.get("markdown", "")).strip()
+        waveform_markdown = str(waveforms.get("markdown_echarts") or waveforms.get("markdown", "")).strip()
     if waveform_markdown:
         lines.extend(["", waveform_markdown])
 
