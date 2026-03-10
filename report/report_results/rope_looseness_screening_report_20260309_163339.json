@@ -1,0 +1,1074 @@
+{
+  "generated_at": "2026-03-09T16:33:39",
+  "report_path": "/Users/qiudejia/Downloads/vb01_python/report/report_results/rope_looseness_screening_report_20260309_163339.md",
+  "datasets": {
+    "second_elevator": {
+      "source_dir": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+      "baseline": {
+        "mode": "dir",
+        "count": 5,
+        "stats": 11,
+        "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+        "window": {
+          "start_hhmm": "1015",
+          "end_hhmm": "1019"
+        }
+      },
+      "phase_status_counts": {
+        "unlabeled": {
+          "low_quality": 1
+        },
+        "normal_1015_1037": {
+          "low_quality": 2,
+          "normal": 5,
+          "watch_only": 2
+        },
+        "loose1_1038_1044": {
+          "watch_only": 4
+        },
+        "loose2_1045_1049": {
+          "normal": 1,
+          "candidate_faults": 1,
+          "low_quality": 2,
+          "watch_only": 1
+        },
+        "recover_1050_1104": {
+          "normal": 7,
+          "low_quality": 3,
+          "watch_only": 2
+        },
+        "rubber_1105_1106": {
+          "normal": 2
+        }
+      },
+      "phase_top_fault_counts": {
+        "unlabeled": {
+          "rope_looseness": 1
+        },
+        "normal_1015_1037": {
+          "car_imbalance": 7,
+          "rope_looseness": 2
+        },
+        "loose1_1038_1044": {
+          "rope_looseness": 4
+        },
+        "loose2_1045_1049": {
+          "car_imbalance": 2,
+          "rope_looseness": 3
+        },
+        "recover_1050_1104": {
+          "car_imbalance": 8,
+          "rope_looseness": 4
+        },
+        "rubber_1105_1106": {
+          "car_imbalance": 2
+        }
+      },
+      "results": [
+        {
+          "file": "vibration_30s_20260303_100819.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_100819.csv",
+          "hhmmss": "100819",
+          "phase": "unlabeled",
+          "status": "low_quality",
+          "top_fault": "rope_looseness",
+          "top_score": 18.81,
+          "top_triggered": false,
+          "top_quality": 0.319,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 3,
+          "n_raw": 3,
+          "fs_hz": 0.4036,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_101536.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_101536.csv",
+          "hhmmss": "101536",
+          "phase": "normal_1015_1037",
+          "status": "low_quality",
+          "top_fault": "car_imbalance",
+          "top_score": 9.0,
+          "top_triggered": false,
+          "top_quality": 0.2,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 1,
+          "n_raw": 1,
+          "fs_hz": 0.0,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_101624.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_101624.csv",
+          "hhmmss": "101624",
+          "phase": "normal_1015_1037",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 19.23,
+          "top_triggered": false,
+          "top_quality": 0.354,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 9,
+          "n_raw": 9,
+          "fs_hz": 0.7021,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_101650.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_101650.csv",
+          "hhmmss": "101650",
+          "phase": "normal_1015_1037",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 20.69,
+          "top_triggered": false,
+          "top_quality": 0.393,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 10,
+          "n_raw": 10,
+          "fs_hz": 0.3372,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_101725.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_101725.csv",
+          "hhmmss": "101725",
+          "phase": "normal_1015_1037",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 59.0,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 11,
+          "n_raw": 11,
+          "fs_hz": 0.436,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_101836.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_101836.csv",
+          "hhmmss": "101836",
+          "phase": "normal_1015_1037",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 31.66,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 16,
+          "n_raw": 16,
+          "fs_hz": 0.5254,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_101912.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_101912.csv",
+          "hhmmss": "101912",
+          "phase": "normal_1015_1037",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 17.68,
+          "top_triggered": false,
+          "top_quality": 0.393,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 10,
+          "n_raw": 10,
+          "fs_hz": 0.6949,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_103656.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_103656.csv",
+          "hhmmss": "103656",
+          "phase": "normal_1015_1037",
+          "status": "low_quality",
+          "top_fault": "car_imbalance",
+          "top_score": 9.0,
+          "top_triggered": false,
+          "top_quality": 0.2,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 1,
+          "n_raw": 1,
+          "fs_hz": 0.0,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_103711.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_103711.csv",
+          "hhmmss": "103711",
+          "phase": "normal_1015_1037",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 27.7,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 14,
+          "n_raw": 14,
+          "fs_hz": 0.4548,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_103751.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_103751.csv",
+          "hhmmss": "103751",
+          "phase": "normal_1015_1037",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 58.4,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 9,
+          "n_raw": 9,
+          "fs_hz": 0.7046,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_103816.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_103816.csv",
+          "hhmmss": "103816",
+          "phase": "loose1_1038_1044",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 51.16,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 11,
+          "n_raw": 11,
+          "fs_hz": 0.3346,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_103912.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_103912.csv",
+          "hhmmss": "103912",
+          "phase": "loose1_1038_1044",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 48.28,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 16,
+          "n_raw": 16,
+          "fs_hz": 0.6801,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104016.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104016.csv",
+          "hhmmss": "104016",
+          "phase": "loose1_1038_1044",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 54.76,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 12,
+          "n_raw": 12,
+          "fs_hz": 0.3975,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104100.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104100.csv",
+          "hhmmss": "104100",
+          "phase": "loose1_1038_1044",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 45.89,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 9,
+          "n_raw": 9,
+          "fs_hz": 0.3122,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104530.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104530.csv",
+          "hhmmss": "104530",
+          "phase": "loose2_1045_1049",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 22.98,
+          "top_triggered": false,
+          "top_quality": 0.511,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 13,
+          "n_raw": 13,
+          "fs_hz": 0.4272,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104608.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104608.csv",
+          "hhmmss": "104608",
+          "phase": "loose2_1045_1049",
+          "status": "candidate_faults",
+          "top_fault": "rope_looseness",
+          "top_score": 68.08,
+          "top_triggered": true,
+          "top_quality": 1.0,
+          "candidate_faults": [
+            "rope_looseness"
+          ],
+          "watch_faults": [],
+          "n_effective": 13,
+          "n_raw": 13,
+          "fs_hz": 0.4079,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104650.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104650.csv",
+          "hhmmss": "104650",
+          "phase": "loose2_1045_1049",
+          "status": "low_quality",
+          "top_fault": "car_imbalance",
+          "top_score": 11.83,
+          "top_triggered": false,
+          "top_quality": 0.2,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 2,
+          "n_raw": 2,
+          "fs_hz": 0.2175,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104718.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104718.csv",
+          "hhmmss": "104718",
+          "phase": "loose2_1045_1049",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 56.85,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 11,
+          "n_raw": 11,
+          "fs_hz": 0.3779,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_104806.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_104806.csv",
+          "hhmmss": "104806",
+          "phase": "loose2_1045_1049",
+          "status": "low_quality",
+          "top_fault": "rope_looseness",
+          "top_score": 17.55,
+          "top_triggered": false,
+          "top_quality": 0.425,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 4,
+          "n_raw": 4,
+          "fs_hz": 1.1017,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_105427.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_105427.csv",
+          "hhmmss": "105427",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 24.75,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 17,
+          "n_raw": 17,
+          "fs_hz": 0.5496,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_105505.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_105505.csv",
+          "hhmmss": "105505",
+          "phase": "recover_1050_1104",
+          "status": "low_quality",
+          "top_fault": "car_imbalance",
+          "top_score": 9.0,
+          "top_triggered": false,
+          "top_quality": 0.2,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 1,
+          "n_raw": 1,
+          "fs_hz": 0.0,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_105518.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_105518.csv",
+          "hhmmss": "105518",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "rope_looseness",
+          "top_score": 42.17,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 11,
+          "n_raw": 11,
+          "fs_hz": 0.793,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_105553.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_105553.csv",
+          "hhmmss": "105553",
+          "phase": "recover_1050_1104",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 59.0,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 9,
+          "n_raw": 9,
+          "fs_hz": 0.2954,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_105641.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_105641.csv",
+          "hhmmss": "105641",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "rope_looseness",
+          "top_score": 36.62,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 9,
+          "n_raw": 9,
+          "fs_hz": 0.5323,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_105710.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_105710.csv",
+          "hhmmss": "105710",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 34.87,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 14,
+          "n_raw": 14,
+          "fs_hz": 0.4446,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110154.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110154.csv",
+          "hhmmss": "110154",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 19.32,
+          "top_triggered": false,
+          "top_quality": 0.393,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 10,
+          "n_raw": 10,
+          "fs_hz": 0.3358,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110250.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110250.csv",
+          "hhmmss": "110250",
+          "phase": "recover_1050_1104",
+          "status": "watch_only",
+          "top_fault": "car_imbalance",
+          "top_score": 53.86,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 14,
+          "n_raw": 14,
+          "fs_hz": 0.438,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110322.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110322.csv",
+          "hhmmss": "110322",
+          "phase": "recover_1050_1104",
+          "status": "low_quality",
+          "top_fault": "car_imbalance",
+          "top_score": 9.89,
+          "top_triggered": false,
+          "top_quality": 0.2,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 4,
+          "n_raw": 4,
+          "fs_hz": 0.9506,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110344.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110344.csv",
+          "hhmmss": "110344",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 25.59,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 15,
+          "n_raw": 15,
+          "fs_hz": 0.4982,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110424.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110424.csv",
+          "hhmmss": "110424",
+          "phase": "recover_1050_1104",
+          "status": "low_quality",
+          "top_fault": "rope_looseness",
+          "top_score": 12.21,
+          "top_triggered": false,
+          "top_quality": 0.744,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 7,
+          "n_raw": 7,
+          "fs_hz": 0.9132,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110451.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110451.csv",
+          "hhmmss": "110451",
+          "phase": "recover_1050_1104",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 29.68,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 18,
+          "n_raw": 18,
+          "fs_hz": 0.5776,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110543.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110543.csv",
+          "hhmmss": "110543",
+          "phase": "rubber_1105_1106",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 37.54,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 17,
+          "n_raw": 17,
+          "fs_hz": 0.5752,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        },
+        {
+          "file": "vibration_30s_20260303_110622.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/data/captures/vibration_30s_20260303_110622.csv",
+          "hhmmss": "110622",
+          "phase": "rubber_1105_1106",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 29.02,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 21,
+          "n_raw": 21,
+          "fs_hz": 0.7122,
+          "baseline": {
+            "mode": "dir",
+            "count": 5,
+            "stats": 11,
+            "path": "/Users/qiudejia/Downloads/vb01_python/data/captures",
+            "window": {
+              "start_hhmm": "1015",
+              "end_hhmm": "1019"
+            }
+          }
+        }
+      ]
+    },
+    "first_elevator": {
+      "source_dir": "/Users/qiudejia/Downloads/vb01_python/report/data_files",
+      "results": [
+        {
+          "file": "异常.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/report/data_files/异常.csv",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 47.87,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 15,
+          "n_raw": 15,
+          "fs_hz": 1.9917,
+          "baseline": {
+            "mode": "disabled",
+            "count": 0,
+            "stats": 0
+          }
+        },
+        {
+          "file": "异常1.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/report/data_files/异常1.csv",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 46.25,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 12,
+          "n_raw": 12,
+          "fs_hz": 1.9913,
+          "baseline": {
+            "mode": "disabled",
+            "count": 0,
+            "stats": 0
+          }
+        },
+        {
+          "file": "正常上行.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/report/data_files/正常上行.csv",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 26.34,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 36,
+          "n_raw": 36,
+          "fs_hz": 1.9907,
+          "baseline": {
+            "mode": "disabled",
+            "count": 0,
+            "stats": 0
+          }
+        },
+        {
+          "file": "正常下行.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/report/data_files/正常下行.csv",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 28.84,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 32,
+          "n_raw": 32,
+          "fs_hz": 1.9914,
+          "baseline": {
+            "mode": "disabled",
+            "count": 0,
+            "stats": 0
+          }
+        },
+        {
+          "file": "螺栓松动异常上行.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/report/data_files/螺栓松动异常上行.csv",
+          "status": "normal",
+          "top_fault": "car_imbalance",
+          "top_score": 24.75,
+          "top_triggered": false,
+          "top_quality": 0.55,
+          "candidate_faults": [],
+          "watch_faults": [],
+          "n_effective": 40,
+          "n_raw": 40,
+          "fs_hz": 1.9913,
+          "baseline": {
+            "mode": "disabled",
+            "count": 0,
+            "stats": 0
+          }
+        },
+        {
+          "file": "螺栓松动异常下行.csv",
+          "path": "/Users/qiudejia/Downloads/vb01_python/report/data_files/螺栓松动异常下行.csv",
+          "status": "watch_only",
+          "top_fault": "rope_looseness",
+          "top_score": 47.64,
+          "top_triggered": false,
+          "top_quality": 1.0,
+          "candidate_faults": [],
+          "watch_faults": [
+            "rope_looseness"
+          ],
+          "n_effective": 20,
+          "n_raw": 20,
+          "fs_hz": 1.9918,
+          "baseline": {
+            "mode": "disabled",
+            "count": 0,
+            "stats": 0
+          }
+        }
+      ]
+    }
+  }
+}

@@ -43,6 +43,55 @@ def ratio_to_100(value: float, low: float, high: float) -> float:
     return 100.0 * clamp((value - low) / (high - low), 0.0, 1.0)
 
 
+def robust_fit(values: list[float]) -> tuple[float, float]:
+    clean = [float(v) for v in values if math.isfinite(float(v))]
+    if not clean:
+        return 0.0, 1.0
+    med = statistics.median(clean)
+    abs_dev = [abs(v - med) for v in clean]
+    mad = statistics.median(abs_dev) if abs_dev else 0.0
+    if mad > EPS:
+        scale = 1.4826 * mad
+    else:
+        std = statistics.pstdev(clean) if len(clean) > 1 else 0.0
+        scale = max(std, 1e-6)
+    return float(med), float(scale)
+
+
+def build_feature_baseline(
+    feature_rows: list[dict[str, Any]],
+    keys: tuple[str, ...],
+    *,
+    min_samples: int = 8,
+) -> dict[str, Any]:
+    eligible_rows = [row for row in feature_rows if parse_int(row.get("n")) is not None and int(parse_int(row.get("n")) or 0) >= min_samples]
+    rows_to_use = eligible_rows if len(eligible_rows) >= 3 else feature_rows
+    stats: dict[str, dict[str, float]] = {}
+    for key in keys:
+        values: list[float] = []
+        for row in rows_to_use:
+            value = parse_float(row.get(key))
+            if value is None or not math.isfinite(value):
+                continue
+            values.append(float(value))
+        if len(values) < 3:
+            continue
+        med, scale = robust_fit(values)
+        stats[key] = {
+            "median": float(med),
+            "scale": float(scale),
+            "count": float(len(values)),
+        }
+    return {
+        "stats": stats,
+        "count": int(len(rows_to_use)),
+        "source_count": int(len(feature_rows)),
+        "eligible_count": int(len(eligible_rows)),
+        "min_samples": int(min_samples),
+        "keys": list(keys),
+    }
+
+
 def safe_mean(xs: list[float]) -> float:
     if not xs:
         return 0.0
@@ -59,6 +108,28 @@ def safe_p2p(xs: list[float]) -> float:
     if not xs:
         return 0.0
     return float(max(xs) - min(xs))
+
+
+def safe_percentile(xs: list[float], q: float) -> float:
+    if not xs:
+        return 0.0
+    clean = sorted(float(x) for x in xs)
+    if len(clean) == 1:
+        return clean[0]
+    q = clamp(float(q), 0.0, 100.0)
+    pos = (len(clean) - 1) * q / 100.0
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return clean[lo]
+    frac = pos - lo
+    return float(clean[lo] * (1.0 - frac) + clean[hi] * frac)
+
+
+def qspread(xs: list[float], low_q: float = 5.0, high_q: float = 95.0) -> float:
+    if not xs:
+        return 0.0
+    return float(safe_percentile(xs, high_q) - safe_percentile(xs, low_q))
 
 
 def rms_ac(xs: list[float]) -> float:
@@ -200,6 +271,22 @@ def _duration_seconds(ts_ms: list[int]) -> float:
     return float(d / 1000.0)
 
 
+def _channel_feature_pack(xs: list[float], fs_hz: float) -> dict[str, float]:
+    mean = safe_mean(xs)
+    std = safe_std(xs)
+    cv = float(std / max(abs(mean), EPS)) if abs(mean) > EPS else 0.0
+    return {
+        "mean": float(mean),
+        "std": float(std),
+        "p2p": float(safe_p2p(xs)),
+        "rms_ac": float(rms_ac(xs)),
+        "kurt": float(kurtosis_excess(xs)),
+        "jerk_rms": float(diff_rms(xs, fs_hz=fs_hz)),
+        "qspread": float(qspread(xs)),
+        "cv": float(cv),
+    }
+
+
 def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     raw_n = len(rows)
     effective_rows, used_new_only, new_ratio = _pick_effective_rows(rows)
@@ -251,6 +338,11 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     zc_rate = zero_cross_rate([v - safe_mean(az) for v in az], duration_s=duration_s)
     jerk_rms = diff_rms(a_mag, fs_hz=fs_hz)
 
+    ax_pack = _channel_feature_pack(ax, fs_hz=fs_hz)
+    ay_pack = _channel_feature_pack(ay, fs_hz=fs_hz)
+    az_pack = _channel_feature_pack(az, fs_hz=fs_hz)
+    mag_pack = _channel_feature_pack(a_mag, fs_hz=fs_hz)
+
     ax_std = safe_std(ax)
     ay_std = safe_std(ay)
     az_std = safe_std(az)
@@ -260,6 +352,12 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     ag_corr = abs(correlation(a_mag, g_mag))
     gx_ax_corr = abs(correlation(gx, ax))
     gy_ay_corr = abs(correlation(gy, ay))
+    corr_xy = correlation(ax, ay)
+    corr_xz = correlation(ax, az)
+    corr_yz = correlation(ay, az)
+
+    energy_x_over_y = float(ax_pack["rms_ac"] / max(ay_pack["rms_ac"], EPS))
+    energy_z_over_xy = float(az_pack["rms_ac"] / max(0.5 * (ax_pack["rms_ac"] + ay_pack["rms_ac"]), EPS))
 
     temp_rise = 0.0
     if t_arr:
@@ -290,6 +388,11 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
         "ag_corr": float(ag_corr),
         "gx_ax_corr": float(gx_ax_corr),
         "gy_ay_corr": float(gy_ay_corr),
+        "corr_xy": float(corr_xy),
+        "corr_xz": float(corr_xz),
+        "corr_yz": float(corr_yz),
+        "energy_x_over_y": float(energy_x_over_y),
+        "energy_z_over_xy": float(energy_z_over_xy),
         "temp_rise": float(temp_rise),
         "sx_std": float(safe_std(sx)),
         "sy_std": float(safe_std(sy)),
@@ -298,6 +401,10 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
         "fy_std": float(safe_std(fy)),
         "fz_std": float(safe_std(fz)),
     }
+
+    for prefix, pack in (("ax", ax_pack), ("ay", ay_pack), ("az", az_pack), ("mag", mag_pack)):
+        for key, value in pack.items():
+            feature[f"{prefix}_{key}"] = float(value)
     return feature
 
 
