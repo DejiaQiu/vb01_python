@@ -5,6 +5,108 @@ import time
 from typing import Any
 
 
+_FAULT_LABELS = {
+    "bearing_wear": "轴承磨损",
+    "brake_jitter": "制动抖动",
+    "car_imbalance": "轿厢受力不均",
+    "coupling_misalignment": "联轴器不对中",
+    "door_stuck": "门系统卡阻",
+    "guide_rail_wear": "导轨磨损",
+    "impact_shock": "冲击或急停类异常",
+    "mechanical_looseness": "机械连接松动",
+    "rail_wear": "导轨磨损",
+    "rope_looseness": "钢丝绳松动或张力不均",
+    "rubber_hardening": "减振橡胶硬化",
+    "unknown": "暂无明确故障类型",
+}
+
+_FAULT_EXPLANATIONS = {
+    "bearing_wear": "系统更像是在提示旋转部件磨损，需要重点检查轴承温升、噪声和润滑状态。",
+    "brake_jitter": "系统看到与制动动作不平顺相似的振动表现，建议检查制动释放和抱闸过程。",
+    "car_imbalance": "系统看到轿厢左右或前后受力不够均匀的迹象，常见于偏载或导向状态变化。",
+    "coupling_misalignment": "系统看到联轴器或传动连接不同心的迹象，建议检查对中和紧固情况。",
+    "door_stuck": "系统更像是在提示门机或门锁一侧存在阻力异常，需要检查门系统机械阻滞。",
+    "guide_rail_wear": "系统看到与导轨或导靴磨损相似的振动模式，建议结合现场磨痕一起判断。",
+    "impact_shock": "系统看到更像冲击或急停的瞬态异常，不一定是持续性机械故障。",
+    "mechanical_looseness": "系统看到连接件松动类振动特征，建议检查紧固件、底座和连接部位。",
+    "rail_wear": "系统看到与导轨或导靴磨损相似的振动模式，建议结合现场磨痕一起判断。",
+    "rope_looseness": "系统看到与钢丝绳张力不均或松动相似的振动模式，建议优先检查钢丝绳受力是否均衡。",
+    "rubber_hardening": "系统看到减振橡胶变硬后常见的竖向响应和耦合变化，建议检查减振橡胶老化情况。",
+    "unknown": "当前没有足够证据把问题稳定归到某一类具体故障。",
+}
+
+_SCREENING_LABELS = {
+    "candidate_faults": "高置信候选",
+    "watch_only": "重点关注",
+    "normal": "未见明确异常",
+    "low_quality": "数据不足",
+}
+
+_SCREENING_EXPLANATIONS = {
+    "candidate_faults": "系统识别到了与某类故障比较吻合的振动模式，建议尽快安排现场复核。",
+    "watch_only": "系统看到了可疑迹象，但证据还不够强，更适合复测或持续观察，不建议直接下故障定论。",
+    "normal": "系统没有看到持续、明确的异常模式，目前不支持立即拆修或停梯处理。",
+    "low_quality": "这次数据点数偏少或质量不足，系统不能可靠判断，建议重新采集更完整的数据。",
+}
+
+_PRIORITY_LABELS = {
+    "P1": "立即处理",
+    "P2": "尽快安排检查",
+    "P3": "建议 24 小时内复检",
+    "P4": "继续观察",
+}
+
+_RISK_LABELS = {
+    "critical": "高风险",
+    "high": "较高风险",
+    "watch": "需要关注",
+    "normal": "风险较低",
+}
+
+_BASELINE_LABELS = {
+    "disabled": "本次没有健康基线，只能按保守规则做筛查，结果更偏向“宁可漏报也少误报”。",
+    "json": "本次使用了已保存的健康基线做对比，结论更偏向“和这台电梯平时状态相比有没有明显变化”。",
+    "dir": "本次使用了健康样本目录自动生成的基线做对比，结论更偏向“和这台电梯平时状态相比有没有明显变化”。",
+}
+
+_ACTION_TRANSLATIONS = {
+    "Check rope tension balance across all ropes.": "检查各根钢丝绳张力是否均衡。",
+    "Inspect traction sheave groove wear and rope slip marks.": "检查曳引轮绳槽磨损和钢丝绳打滑痕迹。",
+    "Rebalance tension before returning to full load.": "在恢复满载运行前，先把钢丝绳张力重新调整平衡。",
+    "Inspect anchor bolts and frame fasteners.": "检查地脚螺栓和机架紧固件是否松动。",
+    "Recheck coupling tightness and vibration isolation mounts.": "复查联轴器紧固情况和减振支撑是否异常。",
+    "Retest after torque recovery.": "恢复紧固后重新采集一次数据做复测。",
+    "Inspect guide rail and shoe wear marks.": "检查导轨和导靴的磨损痕迹。",
+    "Verify alignment and lubrication state.": "检查导向对中情况和润滑状态。",
+    "Compare rail wear trend against previous inspection records.": "把本次磨损迹象和历史巡检记录做对比。",
+    "Inspect brake engagement and release timing.": "检查制动器抱闸和松闸时序是否正常。",
+    "Check motor base and coupling for intermittent impact.": "检查曳引机底座和联轴器是否存在间歇性冲击。",
+    "Review recent starts/stops around the alert window.": "复核告警时间段前后的启动、制动工况。",
+    "Inspect traction motor bearing temperature and noise.": "检查曳引机轴承温升和异响情况。",
+    "Check lubrication status and shaft radial play.": "检查润滑状态和轴系径向间隙。",
+    "Confirm whether bearing resonance matches the recent trend.": "核对轴承共振迹象是否与最近趋势一致。",
+    "Inspect the mechanical path around the motor and traction system.": "检查曳引机及曳引系统周边机械传动链路。",
+    "Compare the alert context waveform against the site baseline.": "把当前异常波形和本站点历史正常波形做对比。",
+    "Confirm whether the anomaly repeats under both up and down runs.": "确认异常在上行和下行中是否都会重复出现。",
+    "Prioritize remote review before dispatching a full repair team.": "优先做远程复核，再决定是否安排完整维保班组到场。",
+}
+
+_PART_TRANSLATIONS = {
+    "brake pad": "制动衬片",
+    "coupling insert": "联轴器弹性体",
+    "door belt": "门机皮带",
+    "door lock switch": "门锁开关",
+    "door roller": "门滑轮",
+    "fastener kit": "紧固件套件",
+    "guide shoe": "导靴",
+    "lubricant": "润滑剂",
+    "motor bearing": "电机轴承",
+    "rope clamp": "钢丝绳夹具",
+    "rope tension gauge": "钢丝绳张力计",
+    "vibration pad": "减振垫",
+}
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -23,15 +125,174 @@ def _build_dify_prompt(language: str) -> str:
     lang = language.strip() or "zh-CN"
     return (
         f"你是电梯预测性维保报告助手，输出语言为 {lang}。\n"
-        "请基于输入的 diagnostics_result_json 与 maintenance_package_json 生成结构化 Markdown 报告。\n"
+        "请基于输入的 diagnostics_result_json 与 maintenance_package_json 生成面向非专业读者的结构化 Markdown 报告。\n"
         "报告必须包含：\n"
-        "1) 执行摘要\n"
-        "2) 诊断结论（Top fault + 证据）\n"
-        "3) 风险与优先级解释\n"
-        "4) 维保建议与备件建议\n"
-        "5) 后续验证计划（如何复检）\n"
+        "1) 一句话结论\n"
+        "2) 给非专业人员的解释\n"
+        "3) 建议怎么做\n"
+        "4) 本次判断依据\n"
+        "5) 给维保人员的补充参考\n"
+        "请优先使用日常中文表达，避免堆砌英文缩写和生硬术语。\n"
         "禁止编造输入中不存在的传感器类型、故障标签或现场信息。"
     )
+
+
+def _fault_label(fault_type: str) -> str:
+    key = fault_type.strip().lower()
+    return _FAULT_LABELS.get(key, key or _FAULT_LABELS["unknown"])
+
+
+def _fault_explanation(fault_type: str) -> str:
+    key = fault_type.strip().lower()
+    return _FAULT_EXPLANATIONS.get(key, _FAULT_EXPLANATIONS["unknown"])
+
+
+def _screening_label(status: str) -> str:
+    key = status.strip().lower()
+    return _SCREENING_LABELS.get(key, key or "未知状态")
+
+
+def _screening_explanation(status: str) -> str:
+    key = status.strip().lower()
+    return _SCREENING_EXPLANATIONS.get(key, "当前状态缺少解释信息，建议结合现场复核。")
+
+
+def _priority_label(priority: str) -> str:
+    key = priority.strip().upper()
+    return _PRIORITY_LABELS.get(key, key or "未分级")
+
+
+def _risk_label(level: str) -> str:
+    key = level.strip().lower()
+    return _RISK_LABELS.get(key, key or "未分级")
+
+
+def _baseline_text(mode: str) -> str:
+    key = mode.strip().lower()
+    return _BASELINE_LABELS.get(key, _BASELINE_LABELS["disabled"])
+
+
+def _translate_action(action: Any) -> str:
+    text = str(action or "").strip()
+    if not text:
+        return ""
+    return _ACTION_TRANSLATIONS.get(text, text)
+
+
+def _translate_part(part: Any) -> str:
+    text = str(part or "").strip()
+    if not text:
+        return ""
+    return _PART_TRANSLATIONS.get(text, text)
+
+
+def _confidence_text(score: float) -> str:
+    if score >= 80.0:
+        return "很高"
+    if score >= 60.0:
+        return "较高"
+    if score >= 45.0:
+        return "中等"
+    return "较低"
+
+
+def _quality_text(quality: float) -> str:
+    if quality >= 0.8:
+        return "数据质量较好"
+    if quality >= 0.6:
+        return "数据基本可用"
+    return "数据质量一般，仅适合保守判断"
+
+
+def _preferred_issue(diag: dict[str, Any]) -> dict[str, Any]:
+    screening = diag.get("screening", {})
+    status = str(screening.get("status", "")).strip().lower()
+    if status == "candidate_faults":
+        candidate = diag.get("top_candidate", {})
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    if status == "watch_only":
+        watch_faults = diag.get("watch_faults", [])
+        if isinstance(watch_faults, list) and watch_faults:
+            first = watch_faults[0]
+            if isinstance(first, dict):
+                return first
+    top_fault = diag.get("top_fault", {})
+    return top_fault if isinstance(top_fault, dict) else {}
+
+
+def _headline_text(status: str, issue: dict[str, Any], dispatch_hours: int) -> str:
+    issue_label = _fault_label(str(issue.get("fault_type", "")))
+    score = _safe_float(issue.get("score"), 0.0)
+    if status == "candidate_faults":
+        return f"本次检测发现“{issue_label}”高置信候选，建议在 {max(1, dispatch_hours)} 小时内安排现场检查。"
+    if status == "watch_only":
+        return f"本次检测发现“{issue_label}”可疑迹象，但证据还不够强，建议尽快复测或结合现场检查确认。"
+    if status == "low_quality":
+        return "本次数据质量不足，暂时不能给出可靠结论，建议重新采集数据后再判断。"
+    if score >= 0.0:
+        return "本次检测未发现明确异常，当前更适合继续观察和按计划维保。"
+    return "本次检测暂未形成明确判断。"
+
+
+def _explanation_text(status: str, issue: dict[str, Any]) -> str:
+    issue_label = _fault_label(str(issue.get("fault_type", "")))
+    if status == "candidate_faults":
+        return f"{_screening_explanation(status)} 当前最像的问题是“{issue_label}”。这表示系统看到的振动模式与该类故障较为接近，但仍建议以现场复核结果为准。"
+    if status == "watch_only":
+        return f"{_screening_explanation(status)} 当前最值得关注的是“{issue_label}”，它更像一个提醒信号，而不是已经确认的故障结论。"
+    if status == "low_quality":
+        return _screening_explanation(status)
+    return _screening_explanation(status)
+
+
+def _default_actions(status: str, issue_fault_type: str, dispatch_hours: int) -> list[str]:
+    issue_label = _fault_label(issue_fault_type)
+    if status == "low_quality":
+        return [
+            "重新采集一段更完整的运行数据，尽量覆盖稳定上行或下行过程。",
+            "确认 CSV 中有效数据点足够，避免只有零散几条记录。",
+            "复测后再做综合判断，避免依据低质量数据直接安排拆检。",
+        ]
+    if status == "normal":
+        return [
+            "保持当前维保计划，不必因为本次结果单独追加拆检。",
+            "如果现场已经出现异响、抖动或乘坐不适，再补采一次数据做复核。",
+            "建议持续积累健康样本，后续对比会更稳定。",
+        ]
+    if issue_fault_type == "rope_looseness":
+        return [
+            f"建议在 {max(1, dispatch_hours)} 小时内检查各根钢丝绳张力是否均衡。",
+            "检查曳引轮绳槽磨损、打滑痕迹和钢丝绳外观状态。",
+            "处理后再复测一次，确认异常是否回落。",
+        ]
+    if issue_fault_type == "rubber_hardening":
+        return [
+            f"建议在 {max(1, dispatch_hours)} 小时内检查曳引机减振橡胶是否老化、变硬或开裂。",
+            "检查曳引机底座支撑和紧固状态，确认是否存在刚性传递增强。",
+            "处理后再采集一段同工况数据对比。",
+        ]
+    return [
+        f"建议在 {max(1, dispatch_hours)} 小时内安排现场检查，重点复核“{issue_label}”相关部位。",
+        "结合现场异响、抖动和历史维保记录一起判断，不建议只凭一次筛查结果直接定性。",
+        "处理或复核后再采集一次同类数据，确认问题是否持续存在。",
+    ]
+
+
+def _render_action_lines(actions: list[Any], status: str, issue_fault_type: str, dispatch_hours: int) -> list[str]:
+    translated = [_translate_action(item) for item in actions]
+    translated = [item for item in translated if item]
+    if not translated:
+        translated = _default_actions(status, issue_fault_type, dispatch_hours)
+    return [f"- {item}" for item in translated]
+
+
+def _render_parts_lines(parts: list[Any]) -> list[str]:
+    translated = [_translate_part(item) for item in parts]
+    translated = [item for item in translated if item]
+    if not translated:
+        return ["- 本次报告没有给出必须更换的固定备件，建议以现场复核结果为准。"]
+    return [f"- {item}" for item in translated]
 
 
 def build_report_context(
@@ -47,16 +308,22 @@ def build_report_context(
     waveforms = waveform_payload if isinstance(waveform_payload, dict) else {}
     top_fault = dict(diag.get("top_fault", {})) if isinstance(diag.get("top_fault"), dict) else {}
     summary = dict(diag.get("summary", {})) if isinstance(diag.get("summary"), dict) else {}
+    screening = dict(diag.get("screening", {})) if isinstance(diag.get("screening"), dict) else {}
     risk = dict(package.get("risk", {})) if isinstance(package.get("risk"), dict) else {}
+    baseline = dict(diag.get("baseline", {})) if isinstance(diag.get("baseline"), dict) else {}
+    preferred_issue = _preferred_issue(diag)
 
     elevator_id = str(package.get("elevator_id", "")).strip() or "elevator-unknown"
     site_name = str(package.get("site_name", "")).strip() or "unknown-site"
     priority = str(package.get("priority", "P4")).strip() or "P4"
     top_fault_type = str(top_fault.get("fault_type", "unknown")).strip() or "unknown"
     top_fault_score = _safe_float(top_fault.get("score"), 0.0)
+    screening_status = str(screening.get("status", "normal")).strip() or "normal"
     risk_now = _safe_float(risk.get("risk_score"), 0.0)
     risk_24h = _safe_float(risk.get("risk_24h"), 0.0)
     dispatch_hours = _safe_int(package.get("dispatch_within_hours"), 72)
+    preferred_fault_type = str(preferred_issue.get("fault_type", top_fault_type)).strip() or top_fault_type
+    preferred_fault_score = _safe_float(preferred_issue.get("score"), top_fault_score)
 
     report_title = f"{site_name} / {elevator_id} 诊断与维保报告"
     prompt = _build_dify_prompt(language)
@@ -69,9 +336,14 @@ def build_report_context(
         "elevator_id": elevator_id,
         "priority": priority,
         "dispatch_within_hours": dispatch_hours,
+        "screening_status": screening_status,
+        "screening_label": _screening_label(screening_status),
         "top_fault_type": top_fault_type,
         "top_fault_score": top_fault_score,
         "fault_level": str(top_fault.get("level", "normal")),
+        "preferred_fault_type": preferred_fault_type,
+        "preferred_fault_label": _fault_label(preferred_fault_type),
+        "preferred_fault_score": preferred_fault_score,
         "risk_score_now": risk_now,
         "risk_24h": risk_24h,
         "risk_level_now": str(risk.get("risk_level_now", "normal")),
@@ -79,6 +351,7 @@ def build_report_context(
         "sample_count_raw": _safe_int(summary.get("n_raw"), 0),
         "sample_count_effective": _safe_int(summary.get("n_effective"), 0),
         "sample_rate_hz": _safe_float(summary.get("fs_hz"), 0.0),
+        "baseline_mode": str(baseline.get("mode", "disabled")),
         "waveform_enabled": bool(waveforms),
         "maintenance_summary": str(package.get("summary", "")),
         "recommended_actions_text": " | ".join(package.get("recommended_actions", []) or []),
@@ -96,11 +369,23 @@ def build_report_context(
         "site_name": site_name,
         "elevator_id": elevator_id,
         "priority": priority,
+        "screening": {
+            "status": screening_status,
+            "label": _screening_label(screening_status),
+        },
+        "baseline": baseline,
         "top_fault": {
             "fault_type": top_fault_type,
             "score": top_fault_score,
             "level": str(top_fault.get("level", "normal")),
             "reasons": list(top_fault.get("reasons", [])) if isinstance(top_fault.get("reasons"), list) else [],
+        },
+        "preferred_issue": {
+            "fault_type": preferred_fault_type,
+            "fault_label": _fault_label(preferred_fault_type),
+            "score": preferred_fault_score,
+            "level": str(preferred_issue.get("level", top_fault.get("level", "normal"))),
+            "quality_factor": _safe_float(preferred_issue.get("quality_factor"), 0.0),
         },
         "risk": {
             "risk_score": risk_now,
@@ -118,46 +403,64 @@ def build_report_context(
 
 def render_report_markdown(report_context: dict[str, Any]) -> str:
     top_fault = report_context.get("top_fault", {})
+    preferred_issue = report_context.get("preferred_issue", {})
+    screening = report_context.get("screening", {})
+    baseline = report_context.get("baseline", {})
+    diagnosis = report_context.get("diagnosis_result", {})
+    summary = diagnosis.get("summary", {}) if isinstance(diagnosis, dict) else {}
     risk = report_context.get("risk", {})
     package = report_context.get("maintenance_package", {})
     waveforms = report_context.get("waveform_payload", {})
     actions = package.get("recommended_actions", []) or []
     parts = package.get("suggested_parts", []) or []
+    screening_status = str(screening.get("status", "normal")).strip().lower()
+    issue_fault_type = str(preferred_issue.get("fault_type", top_fault.get("fault_type", "unknown"))).strip()
+    issue_label = _fault_label(issue_fault_type)
+    issue_score = _safe_float(preferred_issue.get("score", top_fault.get("score")), 0.0)
+    quality_factor = _safe_float(preferred_issue.get("quality_factor"), 0.0)
+    dispatch_hours = _safe_int(package.get("dispatch_within_hours"), 72)
+    baseline_mode = str(baseline.get("mode", "disabled"))
+    n_raw = _safe_int(summary.get("n_raw"), 0)
+    n_effective = _safe_int(summary.get("n_effective"), 0)
+    fs_hz = _safe_float(summary.get("fs_hz"), 0.0)
 
     lines = [
-        f"# {report_context.get('report_title', 'Elevator Diagnostic Report')}",
+        f"# {report_context.get('report_title', '电梯故障诊断报告')}",
         "",
-        f"- Site: {report_context.get('site_name', '')}",
-        f"- Elevator: {report_context.get('elevator_id', '')}",
-        f"- Priority: {report_context.get('priority', '')}",
+        "## 1. 一句话结论",
+        _headline_text(screening_status, preferred_issue, dispatch_hours),
         "",
-        "## Executive Summary",
-        str(package.get("summary", "")),
+        "## 2. 给非专业人员的解释",
+        _explanation_text(screening_status, preferred_issue),
         "",
-        "## Diagnosis",
-        f"- Top fault: {top_fault.get('fault_type', 'unknown')}",
-        f"- Fault score: {_safe_float(top_fault.get('score'), 0.0):.2f}",
-        f"- Fault level: {top_fault.get('level', 'normal')}",
-        "",
-        "## Risk",
-        f"- Risk now: {_safe_float(risk.get('risk_score'), 0.0):.2f} ({risk.get('risk_level_now', 'normal')})",
-        f"- Risk 24h: {_safe_float(risk.get('risk_24h'), 0.0):.2f} ({risk.get('risk_level_24h', 'normal')})",
-        "",
-        "## Recommended Actions",
+        "## 3. 建议怎么做",
     ]
 
-    if actions:
-        for item in actions:
-            lines.append(f"- {item}")
-    else:
-        lines.append("- Continue monitoring and collect more labeled windows.")
+    lines.extend(_render_action_lines(actions, screening_status, issue_fault_type, dispatch_hours))
 
-    lines.extend(["", "## Suggested Parts"])
-    if parts:
-        for item in parts:
-            lines.append(f"- {item}")
-    else:
-        lines.append("- No mandatory replacement parts suggested.")
+    lines.extend(
+        [
+            "",
+            "## 4. 本次判断依据",
+            f"- 筛查状态：{_screening_label(screening_status)}",
+            f"- 当前最值得关注的问题：{issue_label}",
+            f"- 参考匹配分数：{issue_score:.1f}/100（分数越高，越像对应故障模式；当前可信度为“{_confidence_text(issue_score)}”）",
+            f"- 数据情况：{n_effective} 个有效点 / {n_raw} 个原始点，采样频率约 {fs_hz:.2f} Hz，{_quality_text(quality_factor)}",
+            f"- 风险判断：当前 {_risk_label(str(risk.get('risk_level_now', 'normal')))}，24 小时内 {_risk_label(str(risk.get('risk_level_24h', 'normal')))}",
+            f"- 处理优先级：{_priority_label(str(report_context.get('priority', 'P4')))}",
+            f"- 基线说明：{_baseline_text(baseline_mode)}",
+            f"- 故障解释：{_fault_explanation(issue_fault_type)}",
+            "- 说明：本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。",
+            "",
+            "## 5. 给维保人员的补充参考",
+            f"- 系统故障标签：{issue_fault_type or 'unknown'}",
+            f"- 原始最高分故障：{_fault_label(str(top_fault.get('fault_type', 'unknown')))} / {_safe_float(top_fault.get('score'), 0.0):.1f}",
+            f"- 维保时限建议：{max(1, dispatch_hours)} 小时内",
+            "- 备件与工具参考：",
+        ]
+    )
+
+    lines.extend(_render_parts_lines(parts))
 
     waveform_markdown = ""
     if isinstance(waveforms, dict):

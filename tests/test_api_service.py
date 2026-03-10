@@ -157,6 +157,11 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["dify_report_inputs"]["site_name"], "Tower C")
         self.assertIn("waveform_payload", payload)
         self.assertIn("plots", payload["waveform_payload"])
+        self.assertIn("## 1. 一句话结论", payload["report_markdown_draft"])
+        self.assertIn("## 2. 给非专业人员的解释", payload["report_markdown_draft"])
+        self.assertIn("## 3. 建议怎么做", payload["report_markdown_draft"])
+        self.assertIn("本报告属于振动筛查结果", payload["report_markdown_draft"])
+        self.assertNotIn("## Executive Summary", payload["report_markdown_draft"])
         self.assertIn("## 波形图", payload["report_markdown_draft"])
 
 
