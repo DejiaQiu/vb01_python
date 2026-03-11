@@ -30,7 +30,7 @@ app = create_app()
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the Elevator Monitor FastAPI service")
     parser.add_argument("--host", default="0.0.0.0", help="bind host")
-    parser.add_argument("--port", type=int, default=8000, help="bind port")
+    parser.add_argument("--port", type=int, default=8085, help="bind port")
     parser.add_argument("--reload", action="store_true", help="enable autoreload")
     return parser
 

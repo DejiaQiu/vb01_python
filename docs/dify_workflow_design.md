@@ -50,7 +50,7 @@ Rule:
 Request:
 
 - Method: `POST`
-- URL: `http://<backend-host>:8000/api/v1/diagnostics/rule-engine`
+- URL: `http://<backend-host>:8085/api/v1/diagnostics/rule-engine`
 - Headers: `Content-Type: application/json`
 - Body:
 
@@ -74,7 +74,7 @@ Expected output fields:
 Request:
 
 - Method: `POST`
-- URL: `http://<backend-host>:8000/api/v1/diagnostics/waveform-plot`
+- URL: `http://<backend-host>:8085/api/v1/diagnostics/waveform-plot`
 - Headers: `Content-Type: application/json`
 - Body:
 
@@ -101,7 +101,7 @@ Expected output fields:
 Request:
 
 - Method: `POST`
-- URL: `http://<backend-host>:8000/api/v1/workflows/maintenance-package`
+- URL: `http://<backend-host>:8085/api/v1/workflows/maintenance-package`
 - Headers: `Content-Type: application/json`
 - Body:
 
@@ -128,7 +128,7 @@ Expected output fields:
 Request:
 
 - Method: `POST`
-- URL: `http://<backend-host>:8000/api/v1/workflows/diagnosis-report`
+- URL: `http://<backend-host>:8085/api/v1/workflows/diagnosis-report`
 - Headers: `Content-Type: application/json`
 - Body:
 

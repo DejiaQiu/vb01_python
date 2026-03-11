@@ -1,5 +1,5 @@
 ---
-name: 钢丝绳与橡胶圈诊断通用化改造
+name: 电梯辅助检测系统
 status: approved
 module: report
 priority: high
