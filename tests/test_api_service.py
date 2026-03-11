@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -15,6 +19,8 @@ class TestAPIService(unittest.TestCase):
         payload = response.json()
         self.assertIn("diagnosis_report", payload.get("capabilities", []))
         self.assertIn("waveform_plot", payload.get("capabilities", []))
+        self.assertIn("batch_diagnosis", payload.get("capabilities", []))
+        self.assertIn("latest_status", payload.get("capabilities", []))
 
     def test_rule_engine_accepts_inline_rows(self):
         rows = []
@@ -111,6 +117,58 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("```echarts", payload["markdown_echarts"])
         self.assertIn("data:image/svg+xml;base64,", payload["plots"]["acceleration"]["data_uri"])
         self.assertIn("## 波形图", payload["markdown"])
+
+    def test_latest_status_reads_saved_payload(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "status": "watch_only",
+                        "preferred_issue": {"fault_type": "rope_looseness", "score": 58.0},
+                        "risk": {"risk_level_now": "watch"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/diagnostics/latest-status",
+                params={"latest_json": str(status_path)},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "watch_only")
+        self.assertEqual(payload["preferred_issue"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["risk"]["risk_level_now"], "watch")
+        self.assertEqual(payload["latest_json"], str(status_path))
+
+    def test_batch_run_endpoint_returns_payload(self):
+        fake_payload = {
+            "workflow_type": "scheduled_batch_diagnosis_v1",
+            "status": "candidate_faults",
+            "preferred_issue": {"fault_type": "rubber_hardening", "score": 74.5},
+            "risk": {"risk_level_now": "high", "risk_score": 0.78},
+        }
+        with patch("elevator_monitor.api.routers.diagnostics.run_batch_diagnosis", return_value=fake_payload) as mocked:
+            response = self.client.post(
+                "/api/v1/diagnostics/batch-run",
+                json={
+                    "input_dir": "/tmp/demo",
+                    "max_files": 6,
+                    "baseline_dir": "/tmp/baseline",
+                    "write_outputs": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "candidate_faults")
+        self.assertEqual(payload["preferred_issue"]["fault_type"], "rubber_hardening")
+        mocked.assert_called_once()
 
     def test_diagnosis_report_builds_dify_inputs(self):
         rows = []

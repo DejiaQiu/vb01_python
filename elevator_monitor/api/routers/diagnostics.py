@@ -4,10 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from ...batch_diagnosis import load_latest_status, run_batch_diagnosis
 from ...waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms.run_all import run_all, run_all_rows
 
-from ..schemas import RuleDiagnosisRequest, WaveformPlotRequest, resolve_rule_rows
+from ..schemas import BatchDiagnosisRequest, RuleDiagnosisRequest, WaveformPlotRequest, resolve_rule_rows
 
 
 router = APIRouter(prefix="/api/v1/diagnostics", tags=["diagnostics"])
@@ -46,3 +47,37 @@ def waveform_plot(request: WaveformPlotRequest) -> dict[str, Any]:
         height=max(180, int(request.height)),
         max_points=max(32, int(request.max_points)),
     )
+
+
+@router.post("/batch-run")
+def batch_run(request: BatchDiagnosisRequest) -> dict[str, Any]:
+    try:
+        return run_batch_diagnosis(
+            input_dir=request.input_dir,
+            csv_paths=list(request.csv_paths),
+            max_files=max(1, int(request.max_files)),
+            baseline_json=request.baseline_json,
+            baseline_dir=request.baseline_dir,
+            baseline_start_hhmm=request.baseline_start_hhmm,
+            baseline_end_hhmm=request.baseline_end_hhmm,
+            latest_json=request.latest_json,
+            history_jsonl=request.history_jsonl,
+            write_outputs=bool(request.write_outputs),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/latest-status")
+def latest_status(latest_json: str = "data/diagnosis/latest_status.json") -> dict[str, Any]:
+    try:
+        payload = load_latest_status(latest_json)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    payload = dict(payload)
+    payload["latest_json"] = latest_json
+    return payload

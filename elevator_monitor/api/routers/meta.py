@@ -15,6 +15,8 @@ def meta() -> dict[str, Any]:
         "version": "1.0.0",
         "capabilities": [
             "rule_diagnosis",
+            "batch_diagnosis",
+            "latest_status",
             "waveform_plot",
             "maintenance_package",
             "diagnosis_report",

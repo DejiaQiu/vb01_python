@@ -52,6 +52,19 @@ class DiagnosisReportRequest(BaseModel):
     waveform_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class BatchDiagnosisRequest(BaseModel):
+    input_dir: str = ""
+    csv_paths: list[str] = Field(default_factory=list)
+    max_files: int = 12
+    baseline_json: str = ""
+    baseline_dir: str = ""
+    baseline_start_hhmm: str = "0000"
+    baseline_end_hhmm: str = "2359"
+    latest_json: str = "data/diagnosis/latest_status.json"
+    history_jsonl: str = "data/diagnosis/history.jsonl"
+    write_outputs: bool = True
+
+
 def normalize_row_values(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     for row in rows:

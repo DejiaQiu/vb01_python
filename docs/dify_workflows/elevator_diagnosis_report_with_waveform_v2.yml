@@ -1,5 +1,5 @@
 app:
-  description: '参考“电梯故障诊断”模板改造的项目版 Dify 工作流。上传 CSV 后，Dify 端直接生成 echarts 波形图，后端只负责规则诊断、维保包和报告上下文。'
+  description: '项目版 Dify 工作流。未上传文件时读取最近一次批诊断状态；上传 CSV 后，Dify 端直接生成 echarts 波形图并输出综合报告。'
   icon: 📊
   icon_background: '#E8F7E8'
   mode: advanced-chat
@@ -32,6 +32,14 @@ workflow:
     - site_name
     value: unknown-site
     value_type: string
+  - description: 最新状态文件路径
+    id: 8c49dc71-11f0-4bc7-b6ea-f7cbec40fe0b
+    name: latest_json
+    selector:
+    - env
+    - latest_json
+    value: data/diagnosis/latest_status.json
+    value_type: string
   features:
     file_upload:
       allowed_file_extensions:
@@ -61,7 +69,7 @@ workflow:
         - local_file
         - remote_url
       number_limits: 3
-    opening_statement: 上传电梯振动 CSV 后，会自动执行规则诊断，并由 Dify 直接绘制波形图和输出综合报告。
+    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；上传电梯振动 CSV 后，会自动执行规则诊断、绘制波形图并输出综合报告。
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:
@@ -93,11 +101,11 @@ workflow:
         isInIteration: false
         isInLoop: false
         sourceType: if-else
-        targetType: answer
-      id: file-branch-true-upload-tip-target
+        targetType: http-request
+      id: file-branch-true-status-http-target
       source: file_branch
       sourceHandle: 'true'
-      target: upload_tip
+      target: status_http
       targetHandle: target
       type: custom
       zIndex: 0
@@ -255,6 +263,39 @@ workflow:
       targetHandle: target
       type: custom
       zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: status-http-source-status-parse-target
+      source: status_http
+      sourceHandle: source
+      target: status_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: status-parse-source-status-llm-target
+      source: status_parse
+      sourceHandle: source
+      target: status_llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: status-llm-source-status-answer-target
+      source: status_llm
+      sourceHandle: source
+      target: status_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
     nodes:
     - data:
         desc: ''
@@ -306,30 +347,181 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: |
-          请先上传电梯振动 `CSV` 文件。
-          
-          当前流程会按这个顺序运行：
-          1. 提取 CSV 文本
-          2. 调用规则诊断接口
-          3. 在 Dify 端直接生成波形图
-          4. 汇总维保包
-          5. 输出综合诊断报告
-          
-          如果后端地址不是 `{{#env.ip#}}`，先在环境变量里把 `ip` 改成你的服务地址。
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: ''
+          type: raw-text
         desc: ''
+        headers: Accept:application/json
+        method: get
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
         selected: false
-        title: 上传提示
-        type: answer
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 读取最新状态
+        type: http-request
+        url: '{{#env.ip#}}/api/v1/diagnostics/latest-status?latest_json={{#env.latest_json#}}'
         variables: []
-      height: 198
-      id: upload_tip
+      height: 125
+      id: status_http
       position:
         x: 677
-        y: 6
+        y: 24
       positionAbsolute:
         x: 677
-        y: 6
+        y: 24
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: |
+          import json
+          
+          
+          def _as_dict(value):
+              return value if isinstance(value, dict) else {}
+          
+          
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {"status": "unknown", "detail": "latest status payload is not valid json"}
+          
+              payload = _as_dict(payload)
+              status = str(payload.get("status", "unknown"))
+              risk = _as_dict(payload.get("risk"))
+              preferred = _as_dict(payload.get("preferred_issue"))
+              top_candidate = _as_dict(payload.get("top_candidate"))
+              latest_file = str(payload.get("latest_file_name") or payload.get("latest_file") or "")
+              fault_type = str(preferred.get("fault_type") or top_candidate.get("fault_type") or "none")
+              fault_score = preferred.get("score", top_candidate.get("score", 0))
+              risk_now = str(risk.get("risk_level_now", "unknown"))
+              risk_24h = str(risk.get("risk_level_24h", "unknown"))
+              summary = (
+                  f"状态={status}; 候选故障={fault_type}; 分数={fault_score}; "
+                  f"当前风险={risk_now}; 24h风险={risk_24h}; 最新文件={latest_file}"
+              )
+              return {
+                  "status_json": json.dumps(payload, ensure_ascii=False),
+                  "status_summary": summary,
+              }
+        code_language: python3
+        desc: ''
+        outputs:
+          status_json:
+            children: null
+            type: string
+          status_summary:
+            children: null
+            type: string
+        selected: false
+        title: 解析最新状态
+        type: code
+        variables:
+        - value_selector:
+          - status_http
+          - body
+          value_type: string
+          variable: body
+      height: 52
+      id: status_parse
+      position:
+        x: 1038
+        y: 24
+      positionAbsolute:
+        x: 1038
+        y: 24
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - status_parse
+          - status_json
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen-plus-latest
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: 6bc4515a-764e-42d2-bf70-6c1a26e71179
+          role: system
+          text: |
+            你是电梯在线状态回复助手。你只能依据下面这份“最近一次定时批诊断结果”回答，不能编造不存在的故障、风险或历史。
+            
+            站点名：{{#env.site_name#}}
+            用户问题：{{#sys.query#}}
+            最新状态摘要：{{#status_parse.status_summary#}}
+            最新状态 JSON：
+            {{#status_parse.status_json#}}
+            
+            输出要求：
+            1. 先直接回答用户问题。
+            2. 然后固定输出四行：
+               当前状态：
+               最新候选故障：
+               当前风险：
+               建议动作：
+            3. 如果状态是 normal，明确写“当前未见明确异常证据”。
+            4. 如果状态是 watch_only，明确写“存在可疑特征，建议继续观察或尽快复测”。
+            5. 如果状态是 candidate_faults，明确写“出现高置信候选，建议安排现场复核”。
+            6. 用自然中文，不要输出 JSON，不要夸大结论。
+        selected: false
+        title: 在线状态回答
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 94
+      id: status_llm
+      position:
+        x: 1403
+        y: 24
+      positionAbsolute:
+        x: 1403
+        y: 24
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        answer: |
+          # {{#env.site_name#}} 在线状态
+          
+          {{#status_llm.text#}}
+        desc: ''
+        selected: false
+        title: 在线状态输出
+        type: answer
+        variables: []
+      height: 129
+      id: status_answer
+      position:
+        x: 1745
+        y: 24
+      positionAbsolute:
+        x: 1745
+        y: 24
       selected: false
       sourcePosition: right
       targetPosition: left

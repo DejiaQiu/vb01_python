@@ -1,253 +1,238 @@
-# Dify Workflow Design (FastAPI Backend)
+# Dify Workflow Design (Scheduled Diagnosis + Offline Report)
 
-This project already provides a backend API:
+This project now uses one main Dify workflow with two branches:
+
+1. No CSV uploaded: query the latest scheduled batch diagnosis result.
+2. CSV uploaded: generate a detailed offline diagnosis report.
+
+The old realtime rule engine under `elevator_monitor/monitor/` is no longer the primary path for user-facing status replies. It can still be kept for acquisition health or compatibility, but the main diagnosis source is the newer candidate-fault screening logic under `report/fault_algorithms/`.
+
+## Primary APIs
 
 - `POST /api/v1/diagnostics/rule-engine`
+- `POST /api/v1/diagnostics/batch-run`
+- `GET /api/v1/diagnostics/latest-status`
 - `POST /api/v1/diagnostics/waveform-plot`
 - `POST /api/v1/workflows/maintenance-package`
 - `POST /api/v1/workflows/diagnosis-report`
 - `GET /api/v1/health/monitor`
 
-Official Dify docs references:
+Recommended backend address for Dify:
 
-- Workflow app: https://docs.dify.ai/en/guides/application-orchestrate/workflow-app
-- HTTP Request node: https://docs.dify.ai/guides/workflow/node/http-request
-- Execute Workflow API: https://docs.dify.ai/api-reference/workflow-execution/execute-workflow
+- `http://<backend-host>:8085`
 
-You can integrate Dify in two standard ways:
+## Integrated Workflow Logic
 
-1. Pull mode (recommended first): Dify workflow uses HTTP Request nodes to call this backend.
-2. Push mode (optional): monitor service calls Dify Workflow API when alert is emitted.
+Recommended Dify DSL file:
 
-The monitor-side push mode is now supported by runtime args:
+- [elevator_diagnosis_report_with_waveform_v2.yml](/Users/qiudejia/Downloads/vb01_python/docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml)
 
-- `MONITOR_DIFY_ENABLED`
-- `MONITOR_DIFY_BASE_URL` (example: `https://your-dify-domain/v1`)
-- `MONITOR_DIFY_API_KEY`
-- `MONITOR_DIFY_MIN_LEVEL`
-- `MONITOR_DIFY_COOLDOWN_S`
+Branch rule:
 
-## A. Pull Mode Workflow (Dify calls backend)
+- `sys.files` is empty: go to online status query branch
+- `sys.files` has uploaded CSV: go to offline diagnosis report branch
 
-### Node 1: Input (Start)
+### Branch A: No CSV uploaded
 
-Input variables:
+Purpose:
 
-- `site_name` (string)
-- `csv_path` (string, optional)
-- `csv_text` (string, optional)
-- `rows` (array, optional)
-- `alert_csv` (string, default `data/elevator_alerts_live.csv`)
-- `health_json` (string, default `data/monitor_health.json`)
-- `manifest_json` (string, optional)
+- Answer questions like "current status", "latest candidate fault", "should maintenance be arranged now"
+- Only read the latest scheduled batch diagnosis result
 
-Rule:
+Node flow:
 
-- Provide one of `rows` / `csv_text` / `csv_path` for diagnosis input.
+1. `Start`
+2. `If/Else`
+3. `HTTP Request` -> `GET /api/v1/diagnostics/latest-status`
+4. `Code` -> parse the latest status JSON and build a concise summary
+5. `LLM` -> answer in natural Chinese using the structured status
+6. `Answer`
 
-### Node 2: HTTP Request - Rule Diagnosis
+Suggested environment variables:
 
-Request:
+- `ip`: backend base URL, for example `http://192.168.5.132:8085`
+- `site_name`: display name in the reply
+- `latest_json`: status file path, default `data/diagnosis/latest_status.json`
 
-- Method: `POST`
-- URL: `http://<backend-host>:8085/api/v1/diagnostics/rule-engine`
-- Headers: `Content-Type: application/json`
-- Body:
+Expected status payload:
 
-```json
-{
-  "csv_path": "{{#start.csv_path#}}",
-  "csv_text": "{{#start.csv_text#}}",
-  "rows": {{#start.rows#}}
-}
+- `status`
+- `preferred_issue`
+- `top_candidate`
+- `watch_faults`
+- `risk`
+- `recommendation`
+- `latest_file_name`
+- `generated_at_ms`
+
+Typical answer style:
+
+- current status
+- risk level now
+- 24h risk level
+- latest candidate fault
+- whether to continue observation or arrange inspection
+
+### Branch B: CSV uploaded
+
+Purpose:
+
+- Upload a CSV
+- run the candidate-fault screening chain
+- draw waveform charts in Dify
+- generate a readable report
+
+Current recommended node flow:
+
+1. `Start` with file upload
+2. `Document Extractor`
+3. `Code` -> normalize CSV text / rows
+4. `HTTP Request` -> `POST /api/v1/diagnostics/rule-engine`
+5. `HTTP Request` -> `POST /api/v1/workflows/maintenance-package`
+6. `Code` -> build ECharts config directly in Dify
+7. `HTTP Request` -> `POST /api/v1/workflows/diagnosis-report`
+8. `LLM` -> rewrite for normal readers
+9. `Answer`
+
+Notes:
+
+- Waveforms are now rendered on the Dify side with `echarts` code blocks.
+- The backend `waveform-plot` API is still available for other clients, but the current Dify report workflow does not need to depend on it.
+
+## Scheduled Batch Diagnosis
+
+This is the new bridge between "online reply" and "offline algorithm".
+
+Instead of running an always-on streaming rule engine, run scheduled jobs several times per day:
+
+```bash
+python3 -m elevator_monitor.batch_diagnosis \
+  --input-dir data/captures \
+  --max-files 12 \
+  --baseline-dir data/captures \
+  --baseline-start-hhmm 1015 \
+  --baseline-end-hhmm 1019 \
+  --latest-json data/diagnosis/latest_status.json \
+  --history-jsonl data/diagnosis/history.jsonl \
+  --pretty
 ```
 
-Expected output fields:
+What it does:
 
-- `top_fault.fault_type`
-- `top_fault.score`
-- `top_fault.level`
-- `results` (all 8-rule outputs)
+- pick the latest batch of CSV files
+- reuse `report/fault_algorithms/run_all.py`
+- keep rope looseness and rubber hardening as the main candidate-fault scripts
+- compute a trend-aware risk score from repeated appearances, score trend, and data quality
+- write a stable `latest_status.json` for Dify to query
 
-### Node 2.5: HTTP Request - Waveform Plot
+Recommended scheduling:
 
-Request:
+- run `3` to `6` times per day
+- keep a stable latest file path
+- append history to `history.jsonl`
 
-- Method: `POST`
-- URL: `http://<backend-host>:8085/api/v1/diagnostics/waveform-plot`
-- Headers: `Content-Type: application/json`
-- Body:
+## Legacy Realtime Chain
 
-```json
-{
-  "csv_path": "{{#start.csv_path#}}",
-  "csv_text": "{{#start.csv_text#}}",
-  "rows": {{#start.rows#}},
-  "width": 920,
-  "height": 320,
-  "max_points": 240
-}
-```
+The old monitor path is still present in code:
 
-Expected output fields:
+- `elevator_monitor/monitor/runtime.py`
+- `elevator_monitor/fault_types.py`
+- `elevator_monitor/risk_predictor.py`
 
-- `plots.acceleration.data_uri`
-- `plots.gyroscope.data_uri`
-- `plots.acceleration_magnitude.data_uri`
-- `markdown`
+Recommended role now:
 
-### Node 3: HTTP Request - Maintenance Package
+- acquisition health
+- process supervision
+- compatibility only
 
-Request:
+Not recommended as the main source for user-facing diagnosis:
 
-- Method: `POST`
-- URL: `http://<backend-host>:8085/api/v1/workflows/maintenance-package`
-- Headers: `Content-Type: application/json`
-- Body:
+- old generic realtime fault labels
+- old realtime risk score
 
-```json
-{
-  "site_name": "{{#start.site_name#}}",
-  "alert_csv": "{{#start.alert_csv#}}",
-  "health_json": "{{#start.health_json#}}",
-  "manifest_json": "{{#start.manifest_json#}}"
-}
-```
+For user-facing online status, prefer:
 
-Expected output fields:
+- scheduled batch diagnosis result
+- `GET /api/v1/diagnostics/latest-status`
 
-- `priority`
-- `maintenance_mode`
-- `summary`
-- `recommended_actions`
-- `suggested_parts`
-- `dify_inputs` (normalized payload for downstream systems)
+## API Contracts
 
-### Node 4: HTTP Request - Diagnosis Report Context (recommended)
-
-Request:
-
-- Method: `POST`
-- URL: `http://<backend-host>:8085/api/v1/workflows/diagnosis-report`
-- Headers: `Content-Type: application/json`
-- Body:
-
-```json
-{
-  "site_name": "{{#start.site_name#}}",
-  "csv_path": "{{#start.csv_path#}}",
-  "csv_text": "{{#start.csv_text#}}",
-  "rows": {{#start.rows#}},
-  "maintenance_package": {{#node3#}},
-  "language": "zh-CN",
-  "report_style": "standard"
-}
-```
-
-Expected output fields:
-
-- `dify_prompt_template`
-- `dify_report_inputs`
-- `report_markdown_draft`
-
-### Node 5: LLM - Final Human-readable Report
+### `POST /api/v1/diagnostics/batch-run`
 
 Input:
 
-- `dify_prompt_template` + `dify_report_inputs` from Node 4
+- `input_dir`
+- `csv_paths`
+- `max_files`
+- `baseline_json`
+- `baseline_dir`
+- `baseline_start_hhmm`
+- `baseline_end_hhmm`
+- `latest_json`
+- `history_jsonl`
+- `write_outputs`
 
 Output:
 
-- A short Chinese incident brief for dispatch/notification.
-
-### Node 6: Branch / Notification
-
-Branch by `priority`:
-
-- `P1/P2`: immediate notification path
-- `P3/P4`: watchlist path
-
-Output payload for downstream:
-
-```json
-{
-  "ticket_title": "{{#node3.dify_inputs.ticket_title#}}",
-  "ticket_priority": "{{#node3.dify_inputs.ticket_priority#}}",
-  "elevator_id": "{{#node3.dify_inputs.elevator_id#}}",
-  "summary": "{{#node3.dify_inputs.summary#}}",
-  "report_markdown": "{{#node5.text#}}"
-}
-```
-
-## B. Push Mode Workflow (Monitor calls Dify)
-
-The realtime monitor can call Dify Workflow API (`POST /v1/workflows/run`) directly after alert emission.
-This backend sends `maintenance_package` + flattened `dify_inputs` as Workflow inputs.
-
-Recommended Dify Workflow Start variables for push mode:
-
-- `ticket_title`
-- `ticket_priority`
-- `site_name`
-- `elevator_id`
-- `maintenance_mode`
-- `dispatch_within_hours`
-- `status`
-- `fault_type`
-- `fault_confidence`
-- `risk_level_now`
-- `risk_level_24h`
-- `risk_24h`
-- `predictive_only`
-- `summary`
-- `recommended_actions_text`
-- `suggested_parts_text`
-- `alert_context_csv`
-- `model_ids`
-- `maintenance_package` (full JSON string)
-
-## API Output Contract (for Dify node mapping)
-
-### Rule engine (`/api/v1/diagnostics/rule-engine`)
-
-- `input`: source identifier
-- `summary`: `{n_raw, n_effective, fs_hz, used_new_only, new_ratio}`
-- `top_fault`: `{fault_type, score, level, triggered, reasons[]}`
-- `results`: list of all rule outputs
-
-### Maintenance package (`/api/v1/workflows/maintenance-package`)
-
 - `workflow_type`
 - `generated_at_ms`
-- `site_name`
 - `status`
-- `elevator_id`
-- `priority`
-- `maintenance_mode`
-- `dispatch_within_hours`
+- `preferred_issue`
+- `top_candidate`
+- `watch_faults`
+- `risk`
+- `recommendation`
+- `latest_result`
+- `history`
+- `output_files`
+
+### `GET /api/v1/diagnostics/latest-status`
+
+Query:
+
+- `latest_json`
+
+Output:
+
+- latest scheduled batch diagnosis payload
+- `latest_json`
+
+### `POST /api/v1/diagnostics/rule-engine`
+
+Input:
+
+- `csv_path` or `csv_text` or `rows`
+
+Output:
+
 - `summary`
-- `current_fault_type`
-- `current_fault_confidence`
-- `risk` object
-- `recent_alert_stats` object
-- `monitor` object
-- `recommended_actions` list
-- `suggested_parts` list
-- `evidence` object
-- `model_context` object
-- `dify_inputs` object (for direct workflow mapping)
+- `screening`
+- `top_fault`
+- `top_candidate`
+- `candidate_faults`
+- `watch_faults`
+- `results`
 
-### Diagnosis report (`/api/v1/workflows/diagnosis-report`)
+### `POST /api/v1/workflows/diagnosis-report`
 
-- `report_context_version`
+Output:
+
 - `report_title`
-- `language`
-- `priority`
-- `top_fault` object
-- `risk` object
-- `diagnosis_result` object
-- `maintenance_package` object
-- `waveform_payload` object (when `include_waveforms=true` or payload provided)
-- `dify_prompt_template` string
-- `dify_report_inputs` object
-- `report_markdown_draft` string
+- `dify_prompt_template`
+- `dify_report_inputs`
+- `report_markdown_draft`
+- `waveform_payload` when enabled or supplied
+
+## Recommended Product Split
+
+No CSV uploaded:
+
+- read latest status only
+- return a short answer
+- answer current risk and latest candidate
+
+CSV uploaded:
+
+- inspect one batch in detail
+- show waveforms and reasoning
+- produce a report for maintenance review

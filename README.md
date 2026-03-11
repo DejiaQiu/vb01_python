@@ -203,7 +203,40 @@ python -m elevator_monitor.realtime_monitor \
   --log-file logs/realtime_monitor.log
 ```
 
-### 2) 只做实时振动读取（CLI/SDK）
+### 2) 启动诊断 API 服务
+```bash
+python -m elevator_monitor.api.main \
+  --host 0.0.0.0 \
+  --port 8085
+```
+
+后台运行示例：
+```bash
+mkdir -p logs
+nohup python -m elevator_monitor.api.main \
+  --host 0.0.0.0 \
+  --port 8085 > logs/api_service.log 2>&1 &
+```
+
+### 3) 运行定时批诊断（推荐的在线状态主链路）
+```bash
+python -m elevator_monitor.batch_diagnosis \
+  --input-dir data/captures \
+  --max-files 12 \
+  --baseline-dir data/captures \
+  --baseline-start-hhmm 1015 \
+  --baseline-end-hhmm 1019 \
+  --latest-json data/diagnosis/latest_status.json \
+  --history-jsonl data/diagnosis/history.jsonl \
+  --pretty
+```
+
+查询最近一次批诊断结果：
+```bash
+curl "http://127.0.0.1:8085/api/v1/diagnostics/latest-status?latest_json=data/diagnosis/latest_status.json"
+```
+
+### 4) 只做实时振动读取（CLI/SDK）
 ```bash
 python -m elevator_monitor.realtime_vibration \
   --elevator-id elevator-001 \
@@ -260,6 +293,16 @@ python -m elevator_monitor.integrations.vb01_sdk_minimal \
   --pretty
 ```
 
+### 5) 单个 CSV 离线诊断
+```bash
+python report/fault_algorithms/run_all.py \
+  --input data/captures/vibration_30s_20260303_104608.csv \
+  --baseline-dir data/captures \
+  --baseline-start-hhmm 1015 \
+  --baseline-end-hhmm 1019 \
+  --pretty
+```
+
 返回 `ok=true` 说明链路可读；`startup_timeout` 说明当前没有收到首帧。
 
 ### 3) Docker 部署（推荐）
@@ -282,7 +325,7 @@ docker compose -f deploy/docker-compose.monitor.yml down
 
 ### 4) 启动统一 API（供 Dify / 工单系统调用）
 ```bash
-python -m elevator_monitor.api_service --host 0.0.0.0 --port 8000
+python -m elevator_monitor.api_service --host 0.0.0.0 --port 8085
 ```
 
 核心接口：
