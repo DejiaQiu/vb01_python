@@ -326,6 +326,7 @@ docker compose -f deploy/docker-compose.monitor.yml down
 ### 4) 启动统一 API（供 Dify / 工单系统调用）
 ```bash
 python -m elevator_monitor.api_service --host 0.0.0.0 --port 8085
+nohup python -m elevator_monitor.api.main --host 0.0.0.0 --port 8085 > logs/api_service.log 2>&1 &
 ```
 
 核心接口：
