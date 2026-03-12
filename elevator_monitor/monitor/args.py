@@ -30,8 +30,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baud", type=int, default=env_int("MONITOR_BAUD", 230400), help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=env_int("MONITOR_ADDR", 0x50), help="设备地址(支持 0x 前缀)")
 
-    parser.add_argument("--sample-hz", type=float, default=env_float("MONITOR_SAMPLE_HZ", 100.0), help="主循环采样频率")
-    parser.add_argument("--detect-hz", type=int, default=env_int("MONITOR_DETECT_HZ", 100), help="设备检测周期(寄存器 0x65)")
+    parser.add_argument("--sample-hz", type=float, default=env_float("MONITOR_SAMPLE_HZ", 60.0), help="主循环采样频率")
+    parser.add_argument("--detect-hz", type=int, default=env_int("MONITOR_DETECT_HZ", 60), help="设备检测周期(寄存器 0x65)")
     parser.add_argument(
         "--reg-addr",
         type=_parse_int_auto,
@@ -42,7 +42,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--reg-count",
         type=int,
         default=env_int("MONITOR_REG_COUNT", 13),
-        help="循环读取寄存器数量（100Hz 推荐使用较小寄存器窗口）",
+        help="循环读取寄存器数量（60Hz 默认推荐较小寄存器窗口）",
     )
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写设备检测周期")
     parser.add_argument("--startup-timeout-s", type=float, default=env_float("MONITOR_STARTUP_TIMEOUT_S", 3.0), help="连接后等待首帧超时")

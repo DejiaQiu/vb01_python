@@ -27,8 +27,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", default="/dev/ttyUSB0", help="串口设备路径")
     parser.add_argument("--baud", type=int, default=230400, help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=0x50, help="设备地址，支持 0x 前缀")
-    parser.add_argument("--sample-hz", type=float, default=100.0, help="轮询采样频率")
-    parser.add_argument("--detect-hz", type=int, default=100, help="设备检测周期，写入寄存器 0x65")
+    parser.add_argument("--sample-hz", type=float, default=60.0, help="轮询采样频率")
+    parser.add_argument("--detect-hz", type=int, default=60, help="设备检测周期，写入寄存器 0x65")
     parser.add_argument("--no-set-detect-hz", action="store_true", help="不写设备检测周期")
     parser.add_argument("--duration-s", type=float, default=30.0, help="采集时长（秒）")
     parser.add_argument("--startup-timeout-s", type=float, default=3.0, help="连接后等待首帧超时（秒）")
@@ -36,9 +36,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-s", type=float, default=0.01, help="轮询间隔（秒）")
     parser.add_argument("--max-data-age-ms", type=int, default=500, help="可接受数据最大延迟（毫秒）")
     parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="循环读取起始寄存器")
-    parser.add_argument("--reg-count", type=int, default=13, help="循环读取寄存器数量（100Hz 推荐 13）")
+    parser.add_argument("--reg-count", type=int, default=13, help="循环读取寄存器数量（60Hz 默认推荐 13）")
     parser.add_argument("--emit-mode", choices=["new", "fixed"], default="fixed", help="new=仅写新帧；fixed=按固定频率写出（默认）")
-    parser.add_argument("--emit-hz", type=float, default=100.0, help="fixed 模式输出频率")
+    parser.add_argument("--emit-hz", type=float, default=60.0, help="fixed 模式输出频率")
     parser.add_argument(
         "--sdk-default",
         action="store_true",
