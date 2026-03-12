@@ -67,6 +67,7 @@ Expected status payload:
 
 Typical answer style:
 
+- detection date of the latest scheduled batch diagnosis
 - current status
 - risk level now
 - 24h risk level

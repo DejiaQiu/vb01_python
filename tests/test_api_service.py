@@ -226,6 +226,14 @@ class TestAPIService(unittest.TestCase):
         self.assertNotIn("## Executive Summary", payload["report_markdown_draft"])
         self.assertIn("## 波形图", payload["report_markdown_draft"])
 
+    def test_dify_workflow_online_status_includes_detection_date(self):
+        workflow_path = Path("docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml")
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+
+        self.assertIn('payload.get(\\"generated_at_ms\\")', workflow_text)
+        self.assertIn("检测日期：", workflow_text)
+        self.assertIn("固定输出五行", workflow_text)
+
 
 if __name__ == "__main__":
     unittest.main()

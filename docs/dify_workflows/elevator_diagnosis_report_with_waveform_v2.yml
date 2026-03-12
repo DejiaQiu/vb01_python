@@ -1,6 +1,6 @@
 app:
-  description: '项目版 Dify 工作流。未上传文件时读取最近一次批诊断状态；上传 CSV 后，Dify 端直接生成 echarts 波形图并输出综合报告。'
-  icon: 📊
+  description: 项目版 Dify 工作流。未上传文件时读取最近一次批诊断状态；上传 CSV 后，Dify 端直接生成 echarts 波形图并输出综合报告。
+  icon: 🤖
   icon_background: '#E8F7E8'
   mode: advanced-chat
   name: 电梯故障诊断-项目版
@@ -9,7 +9,7 @@ dependencies:
 - current_identifier: null
   type: marketplace
   value:
-    marketplace_plugin_unique_identifier: langgenius/tongyi:0.0.26@4f1c4ded3d189719b7dd54e9d4e5b26f724f3632f3dfaa299491b42accc112c8
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.7@c4e7b999ae67bfc059f6f51630bed36def5a835d12b0251694f5784b5ff1cd95
     version: null
 kind: app
 version: 0.5.0
@@ -22,7 +22,7 @@ workflow:
     selector:
     - env
     - ip
-    value: http://192.168.5.132:8085
+    value: http://192.168.5.10:8085
     value_type: string
   - description: 报告默认站点名
     id: 0bcc5488-3d4d-4a4d-a2bb-0d0a675ed00f
@@ -30,7 +30,7 @@ workflow:
     selector:
     - env
     - site_name
-    value: unknown-site
+    value: 测试梯
     value_type: string
   - description: 最新状态文件路径
     id: 8c49dc71-11f0-4bc7-b6ea-f7cbec40fe0b
@@ -55,13 +55,13 @@ workflow:
       enabled: true
       fileUploadConfig:
         audio_file_size_limit: 50
-        batch_count_limit: 3
+        batch_count_limit: 5
         file_size_limit: 15
-        image_file_batch_limit: 3
+        image_file_batch_limit: 10
         image_file_size_limit: 10
         single_chunk_attachment_limit: 10
         video_file_size_limit: 100
-        workflow_file_upload_limit: 3
+        workflow_file_upload_limit: 10
       image:
         enabled: false
         number_limits: 3
@@ -76,9 +76,10 @@ workflow:
       enabled: false
     speech_to_text:
       enabled: false
-    suggested_questions: []
+    suggested_questions:
+    - 近期电梯情况
     suggested_questions_after_answer:
-      enabled: false
+      enabled: true
     text_to_speech:
       enabled: false
       language: ''
@@ -351,7 +352,9 @@ workflow:
           config: null
           type: no-auth
         body:
-          data: ''
+          data:
+          - type: text
+            value: ''
           type: raw-text
         desc: ''
         headers: Accept:application/json
@@ -371,7 +374,7 @@ workflow:
         type: http-request
         url: '{{#env.ip#}}/api/v1/diagnostics/latest-status?latest_json={{#env.latest_json#}}'
         variables: []
-      height: 125
+      height: 161
       id: status_http
       position:
         x: 677
@@ -385,42 +388,35 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import json
-          
-          
-          def _as_dict(value):
-              return value if isinstance(value, dict) else {}
-          
-          
-          def main(body):
-              text = str(body or "").strip()
-              try:
-                  payload = json.loads(text) if text else {}
-              except Exception:
-                  payload = {"status": "unknown", "detail": "latest status payload is not valid json"}
-          
-              payload = _as_dict(payload)
-              status = str(payload.get("status", "unknown"))
-              risk = _as_dict(payload.get("risk"))
-              preferred = _as_dict(payload.get("preferred_issue"))
-              top_candidate = _as_dict(payload.get("top_candidate"))
-              latest_file = str(payload.get("latest_file_name") or payload.get("latest_file") or "")
-              fault_type = str(preferred.get("fault_type") or top_candidate.get("fault_type") or "none")
-              fault_score = preferred.get("score", top_candidate.get("score", 0))
-              risk_now = str(risk.get("risk_level_now", "unknown"))
-              risk_24h = str(risk.get("risk_level_24h", "unknown"))
-              summary = (
-                  f"状态={status}; 候选故障={fault_type}; 分数={fault_score}; "
-                  f"当前风险={risk_now}; 24h风险={risk_24h}; 最新文件={latest_file}"
-              )
-              return {
-                  "status_json": json.dumps(payload, ensure_ascii=False),
-                  "status_summary": summary,
-              }
+        code: "import json\nfrom datetime import datetime\n\n\ndef _as_dict(value):\n\
+          \    return value if isinstance(value, dict) else {}\n\n\ndef _format_detected_at(value):\n\
+          \    try:\n        ts_ms = int(float(value))\n    except (TypeError, ValueError):\n\
+          \        return \"未提供\"\n    if ts_ms <= 0:\n        return \"未提供\"\n \
+          \   return datetime.fromtimestamp(ts_ms / 1000.0).strftime(\"%Y-%m-%d %H:%M:%S\")\n\n\n\
+          def main(body):\n    text = str(body or \"\").strip()\n    try:\n     \
+          \   payload = json.loads(text) if text else {}\n    except Exception:\n\
+          \        payload = {\"status\": \"unknown\", \"detail\": \"latest status payload is\
+          \ not valid json\"}\n\n    payload = _as_dict(payload)\n    status = str(payload.get(\"\
+          status\", \"unknown\"))\n    risk = _as_dict(payload.get(\"risk\"))\n  \
+          \  preferred = _as_dict(payload.get(\"preferred_issue\"))\n    top_candidate\
+          \ = _as_dict(payload.get(\"top_candidate\"))\n    latest_file = str(payload.get(\"\
+          latest_file_name\") or payload.get(\"latest_file\") or \"\")\n    detected_at\
+          \ = _format_detected_at(payload.get(\"generated_at_ms\"))\n    fault_type\
+          \ = str(preferred.get(\"fault_type\") or top_candidate.get(\"fault_type\"\
+          ) or \"none\")\n    fault_score = preferred.get(\"score\", top_candidate.get(\"\
+          score\", 0))\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"\
+          ))\n    risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    summary\
+          \ = (\n        f\"检测日期={detected_at}; 状态={status}; 候选故障={fault_type}; 分数={fault_score};\
+          \ \"\n        f\"当前风险={risk_now}; 24h风险={risk_24h}; 最新文件={latest_file}\"\
+          \n    )\n    return {\n        \"status_json\": json.dumps(payload, ensure_ascii=False),\n\
+          \        \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
+          \    }\n"
         code_language: python3
         desc: ''
         outputs:
+          detected_at:
+            children: null
+            type: string
           status_json:
             children: null
             type: string
@@ -460,69 +456,60 @@ workflow:
           completion_params:
             temperature: 0.2
           mode: chat
-          name: qwen-plus-latest
-          provider: langgenius/tongyi/tongyi
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: 6bc4515a-764e-42d2-bf70-6c1a26e71179
           role: system
-          text: |
-            你是电梯在线状态回复助手。你只能依据下面这份“最近一次定时批诊断结果”回答，不能编造不存在的故障、风险或历史。
-            
-            站点名：{{#env.site_name#}}
-            用户问题：{{#sys.query#}}
-            最新状态摘要：{{#status_parse.status_summary#}}
-            最新状态 JSON：
-            {{#status_parse.status_json#}}
-            
-            输出要求：
-            1. 先直接回答用户问题。
-            2. 然后固定输出四行：
-               当前状态：
-               最新候选故障：
-               当前风险：
-               建议动作：
-            3. 如果状态是 normal，明确写“当前未见明确异常证据”。
-            4. 如果状态是 watch_only，明确写“存在可疑特征，建议继续观察或尽快复测”。
-            5. 如果状态是 candidate_faults，明确写“出现高置信候选，建议安排现场复核”。
-            6. 用自然中文，不要输出 JSON，不要夸大结论。
+          text: "你是电梯在线状态回复助手。你只能依据下面这份“最近一次定时批诊断结果”回答，不能编造不存在的故障、风险或历史。\n\n站点名：{{#env.site_name#}}\n\
+            用户问题：{{#sys.query#}}\n最新状态摘要：{{#status_parse.status_summary#}}\n最新状态 JSON：\n\
+            {{#status_parse.status_json#}}\n\n输出要求：\n1. 先直接回答用户问题。\n2. 然后固定输出五行：\n\
+            \   检测日期：\n   当前状态：\n   最新候选故障：\n   当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的\
+            \ generated_at_ms，对用户明确展示具体日期时间。\n4. 如果状态是 normal，明确写“当前未见明确异常证据”。\n\
+            5. 如果状态是 watch_only，明确写“存在可疑特征，建议继续观察或尽快复测”。\n6. 如果状态是 candidate_faults，明确写“出现高置信候选，建议安排现场复核”。\n\
+            7. 用自然中文，不要输出 JSON，不要夸大结论。\n"
         selected: false
         title: 在线状态回答
         type: llm
         variables: []
         vision:
           enabled: false
-      height: 94
+      height: 88
       id: status_llm
       position:
         x: 1403
-        y: 24
+        y: -50.84049105364211
       positionAbsolute:
         x: 1403
-        y: 24
+        y: -50.84049105364211
       selected: false
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 242
     - data:
-        answer: |
+        answer: '
+
           # {{#env.site_name#}} 在线状态
-          
+
+
           {{#status_llm.text#}}
+
+          '
         desc: ''
-        selected: false
+        selected: true
         title: 在线状态输出
         type: answer
         variables: []
-      height: 129
+      height: 123
       id: status_answer
       position:
         x: 1745
-        y: 24
+        y: -50.84049105364211
       positionAbsolute:
         x: 1745
-        y: 24
-      selected: false
+        y: -50.84049105364211
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -550,95 +537,39 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import csv
-          import io
-          import json
-          
-          
-          def _pick_text(value):
-              if isinstance(value, list):
-                  for item in value:
-                      text = str(item).strip()
-                      if text:
-                          return text
-                  return ""
-              return str(value or "").strip()
-          
-          
-          def _from_markdown_table(text):
-              lines = [line.rstrip() for line in text.splitlines() if line.strip()]
-              if len(lines) < 2:
-                  return ""
-              if "|" not in lines[0] or "---" not in lines[1]:
-                  return ""
-          
-              def split_row(line):
-                  return [part.strip() for part in line.strip().strip("|").split("|")]
-          
-              headers = split_row(lines[0])
-              if not headers:
-                  return ""
-          
-              rows = []
-              for line in lines[2:]:
-                  if "|" not in line:
-                      continue
-                  parts = split_row(line)
-                  if len(parts) < len(headers):
-                      parts.extend([""] * (len(headers) - len(parts)))
-                  rows.append(parts[: len(headers)])
-          
-              if not rows:
-                  return ""
-          
-              buffer = io.StringIO()
-              writer = csv.writer(buffer)
-              writer.writerow(headers)
-              writer.writerows(rows)
-              return buffer.getvalue()
-          
-          
-          def _normalize_csv_like(text):
-              sample = text[:2048]
-              try:
-                  dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-              except Exception:
-                  dialect = csv.excel
-          
-              rows = []
-              reader = csv.reader(io.StringIO(text), dialect)
-              for row in reader:
-                  if any(str(cell).strip() for cell in row):
-                      rows.append([str(cell).strip() for cell in row])
-          
-              if len(rows) < 2:
-                  return text
-          
-              width = max(len(row) for row in rows)
-              buffer = io.StringIO()
-              writer = csv.writer(buffer)
-              for row in rows:
-                  writer.writerow(row + [""] * (width - len(row)))
-              return buffer.getvalue()
-          
-          
-          def main(extracted_text, site_name):
-              raw_text = _pick_text(extracted_text)
-              csv_text = _from_markdown_table(raw_text) or _normalize_csv_like(raw_text)
-              diagnosis_body = json.dumps(
-                  {"csv_text": csv_text, "rows": []},
-                  ensure_ascii=False,
-              )
-              maintenance_body = json.dumps(
-                  {"site_name": site_name or "unknown-site"},
-                  ensure_ascii=False,
-              )
-              return {
-                  "csv_text": csv_text,
-                  "diagnosis_body": diagnosis_body,
-                  "maintenance_body": maintenance_body,
-              }
+        code: "import csv\nimport io\nimport json\n\n\ndef _pick_text(value):\n  \
+          \  if isinstance(value, list):\n        for item in value:\n           \
+          \ text = str(item).strip()\n            if text:\n                return\
+          \ text\n        return \"\"\n    return str(value or \"\").strip()\n\n\n\
+          def _from_markdown_table(text):\n    lines = [line.rstrip() for line in\
+          \ text.splitlines() if line.strip()]\n    if len(lines) < 2:\n        return\
+          \ \"\"\n    if \"|\" not in lines[0] or \"---\" not in lines[1]:\n     \
+          \   return \"\"\n\n    def split_row(line):\n        return [part.strip()\
+          \ for part in line.strip().strip(\"|\").split(\"|\")]\n\n    headers = split_row(lines[0])\n\
+          \    if not headers:\n        return \"\"\n\n    rows = []\n    for line\
+          \ in lines[2:]:\n        if \"|\" not in line:\n            continue\n \
+          \       parts = split_row(line)\n        if len(parts) < len(headers):\n\
+          \            parts.extend([\"\"] * (len(headers) - len(parts)))\n      \
+          \  rows.append(parts[: len(headers)])\n\n    if not rows:\n        return\
+          \ \"\"\n\n    buffer = io.StringIO()\n    writer = csv.writer(buffer)\n\
+          \    writer.writerow(headers)\n    writer.writerows(rows)\n    return buffer.getvalue()\n\
+          \n\ndef _normalize_csv_like(text):\n    sample = text[:2048]\n    try:\n\
+          \        dialect = csv.Sniffer().sniff(sample, delimiters=\",;\\t\")\n \
+          \   except Exception:\n        dialect = csv.excel\n\n    rows = []\n  \
+          \  reader = csv.reader(io.StringIO(text), dialect)\n    for row in reader:\n\
+          \        if any(str(cell).strip() for cell in row):\n            rows.append([str(cell).strip()\
+          \ for cell in row])\n\n    if len(rows) < 2:\n        return text\n\n  \
+          \  width = max(len(row) for row in rows)\n    buffer = io.StringIO()\n \
+          \   writer = csv.writer(buffer)\n    for row in rows:\n        writer.writerow(row\
+          \ + [\"\"] * (width - len(row)))\n    return buffer.getvalue()\n\n\ndef\
+          \ main(extracted_text, site_name):\n    raw_text = _pick_text(extracted_text)\n\
+          \    csv_text = _from_markdown_table(raw_text) or _normalize_csv_like(raw_text)\n\
+          \    diagnosis_body = json.dumps(\n        {\"csv_text\": csv_text, \"rows\"\
+          : []},\n        ensure_ascii=False,\n    )\n    maintenance_body = json.dumps(\n\
+          \        {\"site_name\": site_name or \"unknown-site\"},\n        ensure_ascii=False,\n\
+          \    )\n    return {\n        \"csv_text\": csv_text,\n        \"diagnosis_body\"\
+          : diagnosis_body,\n        \"maintenance_body\": maintenance_body,\n   \
+          \ }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -683,7 +614,9 @@ workflow:
           config: null
           type: no-auth
         body:
-          data: '{{#prepare_csv.diagnosis_body#}}'
+          data:
+          - type: text
+            value: '{{#prepare_csv.diagnosis_body#}}'
           type: raw-text
         desc: ''
         headers: Content-Type:application/json
@@ -703,7 +636,7 @@ workflow:
         type: http-request
         url: '{{#env.ip#}}/api/v1/diagnostics/rule-engine'
         variables: []
-      height: 125
+      height: 141
       id: diagnosis_http
       position:
         x: 1403
@@ -741,7 +674,7 @@ workflow:
         type: http-request
         url: '{{#env.ip#}}/api/v1/workflows/maintenance-package'
         variables: []
-      height: 125
+      height: 141
       id: maintenance_http
       position:
         x: 1403
@@ -755,161 +688,70 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import csv
-          import io
-          import json
-          import math
-          
-          
-          def _safe_float(value, default=0.0):
-              try:
-                  return float(value)
-              except Exception:
-                  return default
-          
-          
-          def _safe_int(value):
-              try:
-                  return int(float(value))
-              except Exception:
-                  return None
-          
-          
-          def _rows_from_csv(text):
-              raw = str(text or "").strip()
-              if not raw:
-                  return []
-              return [dict(row) for row in csv.DictReader(io.StringIO(raw))]
-          
-          
-          def _pick_effective_rows(rows, min_real_rows=8):
-              flagged = []
-              has_flag = False
-              for row in rows:
-                  flag = _safe_int(row.get("is_new_frame"))
-                  if flag is None:
-                      continue
-                  has_flag = True
-                  if flag == 1:
-                      flagged.append(row)
-              if has_flag and len(flagged) >= min_real_rows:
-                  return flagged, True
-              return rows, False
-          
-          
-          def _pick(row, *names):
-              for name in names:
-                  if name in row and str(row.get(name)).strip() != "":
-                      return row.get(name)
-              return ""
-          
-          
-          def _extract_series(rows, *names):
-              return [_safe_float(_pick(row, *names), 0.0) for row in rows]
-          
-          
-          def _extract_ts(rows):
-              xs = []
-              for idx, row in enumerate(rows):
-                  value = _safe_int(_pick(row, "ts_ms", "data_ts_ms"))
-                  xs.append(idx if value is None else value)
-              return xs
-          
-          
-          def _downsample(xs, series_list, max_points=180):
-              if len(xs) <= max_points:
-                  return xs, series_list
-              idxs = [round(i * (len(xs) - 1) / max(1, max_points - 1)) for i in range(max_points)]
-              return [xs[i] for i in idxs], [[series[i] for i in idxs] for series in series_list]
-          
-          
-          def _option(title, xs, series_defs):
-              x0 = xs[0] if xs else 0
-              x_data = [round((value - x0) / 1000.0, 3) for value in xs]
-              option = {
-                  "title": {"text": title, "left": "center"},
-                  "tooltip": {"trigger": "axis"},
-                  "legend": {"top": 28, "data": [item["name"] for item in series_defs]},
-                  "grid": {"left": 48, "right": 24, "top": 72, "bottom": 36},
-                  "xAxis": {
-                      "type": "category",
-                      "name": "Time (s)",
-                      "boundaryGap": False,
-                      "data": x_data,
-                  },
-                  "yAxis": {
-                      "type": "value",
-                      "scale": True,
-                  },
-                  "series": [],
-              }
-              for item in series_defs:
-                  option["series"].append(
-                      {
-                          "name": item["name"],
-                          "type": "line",
-                          "showSymbol": False,
-                          "smooth": False,
-                          "lineStyle": {"width": 2, "color": item["color"]},
-                          "itemStyle": {"color": item["color"]},
-                          "data": [round(float(v), 6) for v in item["data"]],
-                      }
-                  )
-              return json.dumps(option, ensure_ascii=False)
-          
-          
-          def main(csv_text):
-              rows = _rows_from_csv(csv_text)
-              rows, used_new_only = _pick_effective_rows(rows)
-              ts = _extract_ts(rows)
-              ax = _extract_series(rows, "Ax", "AX")
-              ay = _extract_series(rows, "Ay", "AY")
-              az = _extract_series(rows, "Az", "AZ")
-              gx = _extract_series(rows, "Gx", "GX")
-              gy = _extract_series(rows, "Gy", "GY")
-              gz = _extract_series(rows, "Gz", "GZ")
-              amag = [math.sqrt(ax[i] * ax[i] + ay[i] * ay[i] + az[i] * az[i]) for i in range(len(ax))]
-          
-              ts_acc, [ax, ay, az] = _downsample(ts, [ax, ay, az])
-              ts_gyr, [gx, gy, gz] = _downsample(ts, [gx, gy, gz])
-              ts_mag, [amag] = _downsample(ts, [amag])
-          
-              acc_chart = _option(
-                  "加速度三轴波形",
-                  ts_acc,
-                  [
-                      {"name": "Ax", "color": "#1F77B4", "data": ax},
-                      {"name": "Ay", "color": "#FF7F0E", "data": ay},
-                      {"name": "Az", "color": "#2CA02C", "data": az},
-                  ],
-              )
-              gyro_chart = _option(
-                  "角速度三轴波形",
-                  ts_gyr,
-                  [
-                      {"name": "Gx", "color": "#9467BD", "data": gx},
-                      {"name": "Gy", "color": "#D62728", "data": gy},
-                      {"name": "Gz", "color": "#8C564B", "data": gz},
-                  ],
-              )
-              mag_chart = _option(
-                  "加速度合成幅值波形",
-                  ts_mag,
-                  [
-                      {"name": "A_mag", "color": "#17BECF", "data": amag},
-                  ],
-              )
-              summary = (
-                  f"本次用于绘图的有效数据点共 {len(rows)} 个，"
-                  f"{'已优先使用 is_new_frame=1 的真实采样点。' if used_new_only else '未检测到足够多的真实采样标记，直接使用原始记录绘图。'}"
-              )
-              return {
-                  "acc_chart": acc_chart,
-                  "gyro_chart": gyro_chart,
-                  "mag_chart": mag_chart,
-                  "waveform_summary": summary,
-              }
+        code: "import csv\nimport io\nimport json\nimport math\n\n\ndef _safe_float(value,\
+          \ default=0.0):\n    try:\n        return float(value)\n    except Exception:\n\
+          \        return default\n\n\ndef _safe_int(value):\n    try:\n        return\
+          \ int(float(value))\n    except Exception:\n        return None\n\n\ndef\
+          \ _rows_from_csv(text):\n    raw = str(text or \"\").strip()\n    if not\
+          \ raw:\n        return []\n    return [dict(row) for row in csv.DictReader(io.StringIO(raw))]\n\
+          \n\ndef _pick_effective_rows(rows, min_real_rows=8):\n    flagged = []\n\
+          \    has_flag = False\n    for row in rows:\n        flag = _safe_int(row.get(\"\
+          is_new_frame\"))\n        if flag is None:\n            continue\n     \
+          \   has_flag = True\n        if flag == 1:\n            flagged.append(row)\n\
+          \    if has_flag and len(flagged) >= min_real_rows:\n        return flagged,\
+          \ True\n    return rows, False\n\n\ndef _pick(row, *names):\n    for name\
+          \ in names:\n        if name in row and str(row.get(name)).strip() != \"\
+          \":\n            return row.get(name)\n    return \"\"\n\n\ndef _extract_series(rows,\
+          \ *names):\n    return [_safe_float(_pick(row, *names), 0.0) for row in\
+          \ rows]\n\n\ndef _extract_ts(rows):\n    xs = []\n    for idx, row in enumerate(rows):\n\
+          \        value = _safe_int(_pick(row, \"ts_ms\", \"data_ts_ms\"))\n    \
+          \    xs.append(idx if value is None else value)\n    return xs\n\n\ndef\
+          \ _downsample(xs, series_list, max_points=180):\n    if len(xs) <= max_points:\n\
+          \        return xs, series_list\n    idxs = [round(i * (len(xs) - 1) / max(1,\
+          \ max_points - 1)) for i in range(max_points)]\n    return [xs[i] for i\
+          \ in idxs], [[series[i] for i in idxs] for series in series_list]\n\n\n\
+          def _option(title, xs, series_defs):\n    x0 = xs[0] if xs else 0\n    x_data\
+          \ = [round((value - x0) / 1000.0, 3) for value in xs]\n    option = {\n\
+          \        \"title\": {\"text\": title, \"left\": \"center\"},\n        \"\
+          tooltip\": {\"trigger\": \"axis\"},\n        \"legend\": {\"top\": 28, \"\
+          data\": [item[\"name\"] for item in series_defs]},\n        \"grid\": {\"\
+          left\": 48, \"right\": 24, \"top\": 72, \"bottom\": 36},\n        \"xAxis\"\
+          : {\n            \"type\": \"category\",\n            \"name\": \"Time (s)\"\
+          ,\n            \"boundaryGap\": False,\n            \"data\": x_data,\n\
+          \        },\n        \"yAxis\": {\n            \"type\": \"value\",\n  \
+          \          \"scale\": True,\n        },\n        \"series\": [],\n    }\n\
+          \    for item in series_defs:\n        option[\"series\"].append(\n    \
+          \        {\n                \"name\": item[\"name\"],\n                \"\
+          type\": \"line\",\n                \"showSymbol\": False,\n            \
+          \    \"smooth\": False,\n                \"lineStyle\": {\"width\": 2, \"\
+          color\": item[\"color\"]},\n                \"itemStyle\": {\"color\": item[\"\
+          color\"]},\n                \"data\": [round(float(v), 6) for v in item[\"\
+          data\"]],\n            }\n        )\n    return json.dumps(option, ensure_ascii=False)\n\
+          \n\ndef main(csv_text):\n    rows = _rows_from_csv(csv_text)\n    rows,\
+          \ used_new_only = _pick_effective_rows(rows)\n    ts = _extract_ts(rows)\n\
+          \    ax = _extract_series(rows, \"Ax\", \"AX\")\n    ay = _extract_series(rows,\
+          \ \"Ay\", \"AY\")\n    az = _extract_series(rows, \"Az\", \"AZ\")\n    gx\
+          \ = _extract_series(rows, \"Gx\", \"GX\")\n    gy = _extract_series(rows,\
+          \ \"Gy\", \"GY\")\n    gz = _extract_series(rows, \"Gz\", \"GZ\")\n    amag\
+          \ = [math.sqrt(ax[i] * ax[i] + ay[i] * ay[i] + az[i] * az[i]) for i in range(len(ax))]\n\
+          \n    ts_acc, [ax, ay, az] = _downsample(ts, [ax, ay, az])\n    ts_gyr,\
+          \ [gx, gy, gz] = _downsample(ts, [gx, gy, gz])\n    ts_mag, [amag] = _downsample(ts,\
+          \ [amag])\n\n    acc_chart = _option(\n        \"加速度三轴波形\",\n        ts_acc,\n\
+          \        [\n            {\"name\": \"Ax\", \"color\": \"#1F77B4\", \"data\"\
+          : ax},\n            {\"name\": \"Ay\", \"color\": \"#FF7F0E\", \"data\"\
+          : ay},\n            {\"name\": \"Az\", \"color\": \"#2CA02C\", \"data\"\
+          : az},\n        ],\n    )\n    gyro_chart = _option(\n        \"角速度三轴波形\"\
+          ,\n        ts_gyr,\n        [\n            {\"name\": \"Gx\", \"color\"\
+          : \"#9467BD\", \"data\": gx},\n            {\"name\": \"Gy\", \"color\"\
+          : \"#D62728\", \"data\": gy},\n            {\"name\": \"Gz\", \"color\"\
+          : \"#8C564B\", \"data\": gz},\n        ],\n    )\n    mag_chart = _option(\n\
+          \        \"加速度合成幅值波形\",\n        ts_mag,\n        [\n            {\"name\"\
+          : \"A_mag\", \"color\": \"#17BECF\", \"data\": amag},\n        ],\n    )\n\
+          \    summary = (\n        f\"本次用于绘图的有效数据点共 {len(rows)} 个，\"\n        f\"\
+          {'已优先使用 is_new_frame=1 的真实采样点。' if used_new_only else '未检测到足够多的真实采样标记，直接使用原始记录绘图。'}\"\
+          \n    )\n    return {\n        \"acc_chart\": acc_chart,\n        \"gyro_chart\"\
+          : gyro_chart,\n        \"mag_chart\": mag_chart,\n        \"waveform_summary\"\
+          : summary,\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -948,27 +790,16 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import json
-          
-          
-          def main(body):
-              text = str(body or "").strip()
-              try:
-                  payload = json.loads(text) if text else {}
-              except Exception:
-                  payload = {}
-              screening = payload.get("screening", {}) if isinstance(payload, dict) else {}
-              status = str(screening.get("status", "unknown"))
-              top_candidate = payload.get("top_candidate", {}) if isinstance(payload, dict) else {}
-              if isinstance(top_candidate, dict) and top_candidate.get("fault_type"):
-                  summary = f"筛查状态：{status}；高置信候选：{top_candidate.get('fault_type')}；分数：{top_candidate.get('score', 0)}。"
-              else:
-                  summary = f"筛查状态：{status}。"
-              return {
-                  "diagnosis_json": json.dumps(payload, ensure_ascii=False),
-                  "diagnosis_summary": summary,
-              }
+        code: "import json\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
+          \    try:\n        payload = json.loads(text) if text else {}\n    except\
+          \ Exception:\n        payload = {}\n    screening = payload.get(\"screening\"\
+          , {}) if isinstance(payload, dict) else {}\n    status = str(screening.get(\"\
+          status\", \"unknown\"))\n    top_candidate = payload.get(\"top_candidate\"\
+          , {}) if isinstance(payload, dict) else {}\n    if isinstance(top_candidate,\
+          \ dict) and top_candidate.get(\"fault_type\"):\n        summary = f\"筛查状态：{status}；高置信候选：{top_candidate.get('fault_type')}；分数：{top_candidate.get('score',\
+          \ 0)}。\"\n    else:\n        summary = f\"筛查状态：{status}。\"\n    return {\n\
+          \        \"diagnosis_json\": json.dumps(payload, ensure_ascii=False),\n\
+          \        \"diagnosis_summary\": summary,\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1001,20 +832,11 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import json
-          
-          
-          def main(body):
-              text = str(body or "").strip()
-              try:
-                  payload = json.loads(text) if text else {}
-              except Exception:
-                  payload = {}
-              return {
-                  "maintenance_json": json.dumps(payload, ensure_ascii=False),
-                  "maintenance_summary": str(payload.get("summary", "")),
-              }
+        code: "import json\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
+          \    try:\n        payload = json.loads(text) if text else {}\n    except\
+          \ Exception:\n        payload = {}\n    return {\n        \"maintenance_json\"\
+          : json.dumps(payload, ensure_ascii=False),\n        \"maintenance_summary\"\
+          : str(payload.get(\"summary\", \"\")),\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1047,33 +869,16 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import json
-          
-          
-          def _loads(text):
-              raw = str(text or "").strip()
-              if not raw:
-                  return {}
-              try:
-                  return json.loads(raw)
-              except Exception:
-                  return {}
-          
-          
-          def main(site_name, csv_text, diagnosis_json, maintenance_json):
-              payload = {
-                  "site_name": site_name or "unknown-site",
-                  "csv_text": csv_text or "",
-                  "diagnosis_result": _loads(diagnosis_json),
-                  "maintenance_package": _loads(maintenance_json),
-                  "include_waveforms": False,
-                  "language": "zh-CN",
-                  "report_style": "standard",
-              }
-              return {
-                  "report_body": json.dumps(payload, ensure_ascii=False),
-              }
+        code: "import json\n\n\ndef _loads(text):\n    raw = str(text or \"\").strip()\n\
+          \    if not raw:\n        return {}\n    try:\n        return json.loads(raw)\n\
+          \    except Exception:\n        return {}\n\n\ndef main(site_name, csv_text,\
+          \ diagnosis_json, maintenance_json):\n    payload = {\n        \"site_name\"\
+          : site_name or \"unknown-site\",\n        \"csv_text\": csv_text or \"\"\
+          ,\n        \"diagnosis_result\": _loads(diagnosis_json),\n        \"maintenance_package\"\
+          : _loads(maintenance_json),\n        \"include_waveforms\": False,\n   \
+          \     \"language\": \"zh-CN\",\n        \"report_style\": \"standard\",\n\
+          \    }\n    return {\n        \"report_body\": json.dumps(payload, ensure_ascii=False),\n\
+          \    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1142,7 +947,7 @@ workflow:
         type: http-request
         url: '{{#env.ip#}}/api/v1/workflows/diagnosis-report'
         variables: []
-      height: 125
+      height: 141
       id: report_http
       position:
         x: 2470
@@ -1156,37 +961,28 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: |
-          import json
-          
-          
-          def main(body):
-              text = str(body or "").strip()
-              try:
-                  payload = json.loads(text) if text else {}
-              except Exception:
-                  payload = {}
-              dify_prompt = str(payload.get("dify_prompt_template", "")).strip()
-              dify_inputs = payload.get("dify_report_inputs", {})
-              return {
-                  "report_title": str(payload.get("report_title", "电梯故障诊断报告")),
-                  "report_markdown": str(payload.get("report_markdown_draft", "")).strip(),
-                  "dify_prompt_template": dify_prompt,
-                  "dify_inputs_json": json.dumps(dify_inputs, ensure_ascii=False, indent=2) if isinstance(dify_inputs, dict) else "{}",
-              }
+        code: "import json\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
+          \    try:\n        payload = json.loads(text) if text else {}\n    except\
+          \ Exception:\n        payload = {}\n    dify_prompt = str(payload.get(\"\
+          dify_prompt_template\", \"\")).strip()\n    dify_inputs = payload.get(\"\
+          dify_report_inputs\", {})\n    return {\n        \"report_title\": str(payload.get(\"\
+          report_title\", \"电梯故障诊断报告\")),\n        \"report_markdown\": str(payload.get(\"\
+          report_markdown_draft\", \"\")).strip(),\n        \"dify_prompt_template\"\
+          : dify_prompt,\n        \"dify_inputs_json\": json.dumps(dify_inputs, ensure_ascii=False,\
+          \ indent=2) if isinstance(dify_inputs, dict) else \"{}\",\n    }\n"
         code_language: python3
         desc: ''
         outputs:
-          report_title:
-            children: null
-            type: string
-          report_markdown:
+          dify_inputs_json:
             children: null
             type: string
           dify_prompt_template:
             children: null
             type: string
-          dify_inputs_json:
+          report_markdown:
+            children: null
+            type: string
+          report_title:
             children: null
             type: string
         selected: false
@@ -1222,41 +1018,24 @@ workflow:
           completion_params:
             temperature: 0.4
           mode: chat
-          name: qwen-plus-latest
-          provider: langgenius/tongyi/tongyi
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: 86f1aaf2-7f56-49d7-8881-8f78ff50f0df
           role: system
-          text: |
-            {{#report_parse.dify_prompt_template#}}
-            
-            下面是后端已经整理好的报告输入，请在此基础上做最终输出润色：
-            {{#report_parse.dify_inputs_json#}}
-            
-            下面是后端草稿，可作为参考，但不要机械照抄：
-            {{#report_parse.report_markdown#}}
-            
-            下面是波形图数据摘要：
-            {{#waveform_code.waveform_summary#}}
-            
-            输出要求：
-            1. 面向普通人，优先说“看到了什么、代表什么、要不要处理”。
-            2. 结构固定为：
-               ## 1. 一句话结论
-               ## 2. 给非专业人员的解释
-               ## 3. 建议怎么做
-               ## 4. 本次判断依据
-               ## 5. 给维保人员的补充参考
-            3. 不要重复一级标题，答案节点会单独拼接标题。
-            4. 不要输出 JSON，不要生成波形图代码块，答案节点会自动拼接。
-            5. 尽量使用自然中文，不要过多直接暴露英文技术字段名。
+          text: "{{#report_parse.dify_prompt_template#}}\n\n下面是后端已经整理好的报告输入，请在此基础上做最终输出润色：\n\
+            {{#report_parse.dify_inputs_json#}}\n\n下面是后端草稿，可作为参考，但不要机械照抄：\n{{#report_parse.report_markdown#}}\n\
+            \n下面是波形图数据摘要：\n{{#waveform_code.waveform_summary#}}\n\n输出要求：\n1. 面向普通人，优先说“看到了什么、代表什么、要不要处理”。\n\
+            2. 结构固定为：\n   ## 1. 一句话结论\n   ## 2. 给非专业人员的解释\n   ## 3. 建议怎么做\n   ## 4.\
+            \ 本次判断依据\n   ## 5. 给维保人员的补充参考\n3. 不要重复一级标题，答案节点会单独拼接标题。\n4. 不要输出 JSON，不要生成波形图代码块，答案节点会自动拼接。\n\
+            5. 尽量使用自然中文，不要过多直接暴露英文技术字段名。\n"
         selected: false
         title: LLM综合润色
         type: llm
         variables: []
         vision:
           enabled: false
-      height: 94
+      height: 88
       id: report_llm
       position:
         x: 3156
@@ -1270,35 +1049,51 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: |
-          # {{#report_parse.report_title#}}
-          
+        answer: '# {{#report_parse.report_title#}}
+
+
           {{#report_llm.text#}}
-          
+
+
           ## 波形图
-          
+
+
           {{#waveform_code.waveform_summary#}}
-          
+
+
           ### 加速度三轴
+
           ```echarts
+
           {{#waveform_code.acc_chart#}}
+
           ```
-          
+
+
           ### 角速度三轴
+
           ```echarts
+
           {{#waveform_code.gyro_chart#}}
+
           ```
-          
+
+
           ### 加速度合成幅值
+
           ```echarts
+
           {{#waveform_code.mag_chart#}}
+
           ```
+
+          '
         desc: ''
         selected: false
         title: 综合报告输出
         type: answer
         variables: []
-      height: 220
+      height: 246
       id: report_answer
       position:
         x: 3506
@@ -1312,7 +1107,7 @@ workflow:
       type: custom
       width: 242
     viewport:
-      x: -280.0
-      y: 52.0
-      zoom: 0.5
+      x: -418.36819616669413
+      y: 224.40238400814155
+      zoom: 0.45628274427172716
   rag_pipeline_variables: []
