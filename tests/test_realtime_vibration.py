@@ -23,15 +23,15 @@ class _FakeDevice:
 
 
 class TestRealtimeVibration(unittest.TestCase):
-    def test_default_parsers_use_60hz(self):
+    def test_default_parsers_use_40hz(self):
         reader_args = build_arg_parser().parse_args([])
         monitor_args = build_monitor_arg_parser().parse_args([])
 
-        self.assertEqual(reader_args.sample_hz, 60.0)
-        self.assertEqual(reader_args.detect_hz, 60)
-        self.assertEqual(reader_args.emit_hz, 60.0)
-        self.assertEqual(monitor_args.sample_hz, 60.0)
-        self.assertEqual(monitor_args.detect_hz, 60)
+        self.assertEqual(reader_args.sample_hz, 40.0)
+        self.assertEqual(reader_args.detect_hz, 40)
+        self.assertEqual(reader_args.emit_hz, 40.0)
+        self.assertEqual(monitor_args.sample_hz, 40.0)
+        self.assertEqual(monitor_args.detect_hz, 40)
 
     def test_build_frame_without_data_returns_none(self):
         device = _FakeDevice()

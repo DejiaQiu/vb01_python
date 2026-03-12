@@ -193,8 +193,8 @@ python -m elevator_monitor.realtime_monitor \
   --port /dev/ttyUSB0 \
   --baud 230400 \
   --addr 0x50 \
-  --sample-hz 60 \
-  --detect-hz 60 \
+  --sample-hz 40 \
+  --detect-hz 40 \
   --reg-count 13 \
   --output-data data/elevator_rt_live.csv \
   --output-alert data/elevator_alerts_live.csv \
@@ -242,23 +242,23 @@ python -m elevator_monitor.realtime_vibration \
   --elevator-id elevator-001 \
   --port /dev/ttyUSB0 \
   --baud 230400 \
-  --sample-hz 60 \
-  --detect-hz 60 \
+  --sample-hz 40 \
+  --detect-hz 40 \
   --reg-count 13 \
   --limit 10
 ```
 
-按固定 60Hz 输出（含 `is_new_frame` 标记）：
+按固定 40Hz 输出（含 `is_new_frame` 标记）：
 ```bash
 python -m elevator_monitor.realtime_vibration \
   --port /dev/ttyUSB0 \
   --baud 230400 \
   --emit-mode fixed \
-  --emit-hz 60 \
-  --detect-hz 60 \
+  --emit-hz 40 \
+  --detect-hz 40 \
   --reg-count 13 \
   --duration-s 30 \
-  --output-csv data/vibration_fixed_60hz.csv \
+  --output-csv data/vibration_fixed_40hz.csv \
   --format csv > /dev/null
 ```
 
@@ -271,8 +271,8 @@ with RealtimeVibrationReader(
     port="/dev/ttyUSB0",
     baud=230400,
     addr=0x50,
-    sample_hz=60.0,
-    detect_hz=60,
+    sample_hz=40.0,
+    detect_hz=40,
     reg_count=13,
 ) as reader:
     frame = reader.read_latest(wait_timeout_s=2.0)
@@ -465,7 +465,7 @@ python3 report/fault_algorithms/rope_looseness_timeline.py \
 ## 关键环境变量（常用）
 完整变量见 `deploy/docker.monitor.env.example`，常用项：
 - 串口与采样：`MONITOR_PORT`、`MONITOR_BAUD`、`MONITOR_ADDR`、`MONITOR_SAMPLE_HZ`
-- 60Hz 链路建议：`MONITOR_DETECT_HZ=60`、`MONITOR_REG_COUNT=13`（按需再扩到 19）、
+- 40Hz 链路建议：`MONITOR_DETECT_HZ=40`、`MONITOR_REG_COUNT=13`（按需再扩到 19）、
   `MONITOR_REG_ADDR=0x34`
 - 输出路径：`MONITOR_OUTPUT_DATA`、`MONITOR_OUTPUT_ALERT`、`MONITOR_OUTPUT_RAIL_WEAR`
 - 规则阈值：`MONITOR_FAULT_VIBRATION_WARNING_Z`、`MONITOR_FAULT_VIBRATION_SHOCK_Z`
@@ -474,7 +474,7 @@ python3 report/fault_algorithms/rope_looseness_timeline.py \
 - 风险预测：`MONITOR_RISK_ENABLED`、`MONITOR_RISK_EMIT_ON_NORMAL`、`MONITOR_RISK_EMIT_MIN_LEVEL`
 - Dify主动回调：`MONITOR_DIFY_ENABLED`、`MONITOR_DIFY_BASE_URL`、`MONITOR_DIFY_API_KEY`、`MONITOR_DIFY_MIN_LEVEL`
 
-## 数据接入最小字段（60Hz）
+## 数据接入最小字段（40Hz）
 必需字段：
 - `elevator_id, ts_ms, ts, Ax, Ay, Az, Gx, Gy, Gz, t`
 
