@@ -11,7 +11,7 @@ class SerialConfig:
     portName = ''
 
     # 波特率
-    baud = 9600
+    baud = 115200
 
 
 # 设备实例

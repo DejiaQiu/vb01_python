@@ -191,7 +191,7 @@ python -m elevator_monitor.feature_requirements requirements/feature_request.md
 python -m elevator_monitor.realtime_monitor \
   --elevator-id elevator-001 \
   --port /dev/ttyUSB0 \
-  --baud 230400 \
+  --baud 115200 \
   --addr 0x50 \
   --sample-hz 40 \
   --detect-hz 40 \
@@ -241,7 +241,7 @@ curl "http://127.0.0.1:8085/api/v1/diagnostics/latest-status?latest_json=data/di
 python -m elevator_monitor.realtime_vibration \
   --elevator-id elevator-001 \
   --port /dev/ttyUSB0 \
-  --baud 230400 \
+  --baud 115200 \
   --sample-hz 40 \
   --detect-hz 40 \
   --reg-count 13 \
@@ -252,7 +252,7 @@ python -m elevator_monitor.realtime_vibration \
 ```bash
 python -m elevator_monitor.realtime_vibration \
   --port /dev/ttyUSB0 \
-  --baud 230400 \
+  --baud 115200 \
   --emit-mode fixed \
   --emit-hz 40 \
   --detect-hz 40 \
@@ -269,7 +269,7 @@ from elevator_monitor import RealtimeVibrationReader
 with RealtimeVibrationReader(
     elevator_id="elevator-001",
     port="/dev/ttyUSB0",
-    baud=230400,
+    baud=115200,
     addr=0x50,
     sample_hz=40.0,
     detect_hz=40,
@@ -283,7 +283,7 @@ with RealtimeVibrationReader(
 ```bash
 python -m elevator_monitor.integrations.vb01_sdk_minimal \
   --port /dev/ttyUSB0 \
-  --baud 9600 \
+  --baud 115200 \
   --addr 0x50 \
   --reg-addr 0x34 \
   --reg-count 19 \

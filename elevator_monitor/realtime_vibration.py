@@ -81,7 +81,7 @@ class RealtimeVibrationReader:
         elevator_id: str = "elevator-unknown",
         device_name: str = DEFAULT_DEVICE_NAME,
         port: str = "/dev/ttyUSB0",
-        baud: int = 230400,
+        baud: int = 115200,
         addr: int = 0x50,
         sample_hz: float = 40.0,
         detect_hz: int = 40,
@@ -296,7 +296,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--elevator-id", default=env_str("MONITOR_ELEVATOR_ID", "elevator-unknown"), help="电梯唯一ID")
     parser.add_argument("--device-name", default=env_str("MONITOR_DEVICE_NAME", DEFAULT_DEVICE_NAME), help="设备名称")
     parser.add_argument("--port", default=env_str("MONITOR_PORT", "/dev/ttyUSB0"), help="串口")
-    parser.add_argument("--baud", type=int, default=env_int("MONITOR_BAUD", 230400), help="波特率")
+    parser.add_argument("--baud", type=int, default=env_int("MONITOR_BAUD", 115200), help="波特率")
     parser.add_argument("--addr", type=_parse_int_auto, default=env_int("MONITOR_ADDR", 0x50), help="设备地址(支持 0x 前缀)")
     parser.add_argument("--sample-hz", type=float, default=env_float("MONITOR_SAMPLE_HZ", 40.0), help="采样频率")
     parser.add_argument("--detect-hz", type=int, default=env_int("MONITOR_DETECT_HZ", 40), help="设备检测周期(寄存器 0x65)")

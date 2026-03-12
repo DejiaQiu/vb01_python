@@ -13,7 +13,7 @@ from ..device_model import DeviceModel
 @dataclass
 class SDKMinimalProbeConfig:
     port: str = "/dev/ttyUSB0"
-    baud: int = 9600
+    baud: int = 115200
     addr: int = 0x50
     reg_addr: int = 0x34
     reg_count: int = 19
@@ -138,7 +138,7 @@ def run_sdk_minimal_probe(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="VB01 官方SDK兼容最小测试单元")
     parser.add_argument("--port", default="/dev/ttyUSB0", help="串口设备路径")
-    parser.add_argument("--baud", type=int, default=9600, help="波特率（官方SDK默认9600）")
+    parser.add_argument("--baud", type=int, default=115200, help="波特率（项目默认 115200）")
     parser.add_argument("--addr", type=_parse_int_auto, default=0x50, help="设备地址，支持0x前缀")
     parser.add_argument("--reg-addr", type=_parse_int_auto, default=0x34, help="轮询起始寄存器")
     parser.add_argument("--reg-count", type=int, default=19, help="轮询寄存器数量（官方SDK默认19）")

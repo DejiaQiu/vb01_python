@@ -12,7 +12,7 @@ class SerialConfig:
     portName = ""
 
     # 波特率
-    baud = 230400
+    baud = 115200
 
 
 # 设备实例
@@ -235,7 +235,7 @@ class DeviceModel:
 
                 frame = self.TempBytes[:frame_len]
                 temp_crc = self.get_crc(frame, frame_len - 2)
-                if (temp_crc >> 8) == frame[frame_len - 2] and (temp_crc & 0xFF) == frame[frame_len - 1]:
+                if (temp_crc & 0xFF) == frame[frame_len - 2] and ((temp_crc >> 8) & 0xFF) == frame[frame_len - 1]:
                     del self.TempBytes[:frame_len]
                     self.processData(payload_len, frame)
                 else:
@@ -366,10 +366,9 @@ class DeviceModel:
         tempBytes[5] = regCount & 0xFF
         # 获得CRC校验
         tempCrc = self.get_crc(tempBytes, len(tempBytes) - 2)
-        # CRC校验高8位
-        tempBytes[6] = (tempCrc >> 8) & 0xFF
-        # CRC校验低8位
-        tempBytes[7] = tempCrc & 0xFF
+        # Modbus RTU CRC 按低字节在前发送
+        tempBytes[6] = tempCrc & 0xFF
+        tempBytes[7] = (tempCrc >> 8) & 0xFF
         return bytes(tempBytes)
 
     # 发送写入指令封装
@@ -389,10 +388,9 @@ class DeviceModel:
         tempBytes[5] = sValue & 0xFF
         # 获得CRC校验
         tempCrc = self.get_crc(tempBytes, len(tempBytes) - 2)
-        # CRC校验高8位
-        tempBytes[6] = (tempCrc >> 8) & 0xFF
-        # CRC校验低8位
-        tempBytes[7] = tempCrc & 0xFF
+        # Modbus RTU CRC 按低字节在前发送
+        tempBytes[6] = tempCrc & 0xFF
+        tempBytes[7] = (tempCrc >> 8) & 0xFF
         return bytes(tempBytes)
 
     # 开始循环读取
