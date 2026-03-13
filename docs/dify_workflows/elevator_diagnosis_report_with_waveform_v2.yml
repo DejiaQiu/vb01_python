@@ -502,34 +502,27 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: '
-
+        answer: |
           # {{#env.site_name#}} 在线状态
-
 
           {{#status_llm.text#}}
 
           ## 波形图
 
           ### 加速度三轴
-
           ```echarts
           {{#status_parse.acc_chart#}}
           ```
 
           ### 角速度三轴
-
           ```echarts
           {{#status_parse.gyro_chart#}}
           ```
 
           ### 加速度合成幅值
-
           ```echarts
           {{#status_parse.mag_chart#}}
           ```
-
-          '
         desc: ''
         selected: true
         title: 在线状态输出

@@ -277,6 +277,9 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("status_parse.acc_chart", workflow_text)
         self.assertIn("status_parse.gyro_chart", workflow_text)
         self.assertIn("status_parse.mag_chart", workflow_text)
+        self.assertIn("answer: |", workflow_text)
+        self.assertIn("```echarts", workflow_text)
+        self.assertIn("{{#status_parse.acc_chart#}}", workflow_text)
 
 
 if __name__ == "__main__":
