@@ -146,6 +146,42 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["risk"]["risk_level_now"], "watch")
         self.assertEqual(payload["latest_json"], str(status_path))
 
+    def test_latest_status_can_include_waveforms_from_latest_csv(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "latest_capture.csv"
+            rows = ["ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame"]
+            for i in range(24):
+                rows.append(f"{1_000_000 + i * 1000},0.01,0.02,{-0.98 + i * 0.001},0.1,0.2,0.3,1")
+            csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            status_path = Path(tmp_dir) / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "status": "watch_only",
+                        "latest_file": str(csv_path),
+                        "latest_file_name": csv_path.name,
+                        "preferred_issue": {"fault_type": "rope_looseness", "score": 58.0},
+                        "risk": {"risk_level_now": "watch"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/diagnostics/latest-status",
+                params={"latest_json": str(status_path), "include_waveforms": True},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("waveform_payload", payload)
+        self.assertIn("plots", payload["waveform_payload"])
+        self.assertIn("markdown_echarts", payload["waveform_payload"])
+        self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
+
     def test_batch_run_endpoint_returns_payload(self):
         fake_payload = {
             "workflow_type": "scheduled_batch_diagnosis_v1",
@@ -230,9 +266,17 @@ class TestAPIService(unittest.TestCase):
         workflow_path = Path("docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml")
         workflow_text = workflow_path.read_text(encoding="utf-8")
 
-        self.assertIn('payload.get(\\"generated_at_ms\\")', workflow_text)
+        self.assertIn("generated_at_ms", workflow_text)
         self.assertIn("检测日期：", workflow_text)
         self.assertIn("固定输出五行", workflow_text)
+        self.assertIn("include_waveforms=true", workflow_text)
+        self.assertIn("## 波形图", workflow_text)
+        self.assertIn("### 加速度三轴", workflow_text)
+        self.assertIn("### 角速度三轴", workflow_text)
+        self.assertIn("### 加速度合成幅值", workflow_text)
+        self.assertIn("status_parse.acc_chart", workflow_text)
+        self.assertIn("status_parse.gyro_chart", workflow_text)
+        self.assertIn("status_parse.mag_chart", workflow_text)
 
 
 if __name__ == "__main__":

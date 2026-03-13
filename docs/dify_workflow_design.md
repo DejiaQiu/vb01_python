@@ -37,16 +37,16 @@ Branch rule:
 Purpose:
 
 - Answer questions like "current status", "latest candidate fault", "should maintenance be arranged now"
-- Only read the latest scheduled batch diagnosis result
+- Read the latest scheduled batch diagnosis result and optionally render the waveform of the latest CSV
 
 Node flow:
 
 1. `Start`
 2. `If/Else`
-3. `HTTP Request` -> `GET /api/v1/diagnostics/latest-status`
+3. `HTTP Request` -> `GET /api/v1/diagnostics/latest-status?include_waveforms=true`
 4. `Code` -> parse the latest status JSON and build a concise summary
 5. `LLM` -> answer in natural Chinese using the structured status
-6. `Answer`
+6. `Answer` -> render the text conclusion first, then always render the three waveform charts when available
 
 Suggested environment variables:
 
@@ -64,6 +64,7 @@ Expected status payload:
 - `recommendation`
 - `latest_file_name`
 - `generated_at_ms`
+- `waveform_payload` when `include_waveforms=true`
 
 Typical answer style:
 
@@ -73,6 +74,7 @@ Typical answer style:
 - 24h risk level
 - latest candidate fault
 - whether to continue observation or arrange inspection
+- then fixed charts in this order: acceleration, gyroscope, acceleration magnitude
 
 ### Branch B: CSV uploaded
 
