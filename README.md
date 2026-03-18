@@ -305,28 +305,71 @@ python report/fault_algorithms/run_all.py \
 
 返回 `ok=true` 说明链路可读；`startup_timeout` 说明当前没有收到首帧。
 
-### 3) Docker 部署（推荐）
+### 3) 边缘部署
+边缘部署建议运行在现场网关/工控机上，负责串口采集、实时分析、本地落盘和可选的边云同步。
+
+本地直接运行：
+```bash
+python -m elevator_monitor.realtime_monitor \
+  --elevator-id elevator-001 \
+  --port /dev/ttyUSB0 \
+  --baud 115200 \
+  --addr 0x50 \
+  --sample-hz 40 \
+  --detect-hz 40 \
+  --reg-count 13 \
+  --output-data data/elevator_rt_live.csv \
+  --output-alert data/elevator_alerts_live.csv \
+  --output-rail-wear-alert data/rail_wear_alerts_live.csv \
+  --health-path data/monitor_health.json \
+  --log-file logs/realtime_monitor.log
+```
+
+Docker Compose 运行：
 ```bash
 cp deploy/docker.monitor.env.example deploy/docker.monitor.env
 # 根据现场修改 deploy/docker.monitor.env
 
 docker compose \
   --env-file deploy/docker.monitor.env \
-  -f deploy/docker-compose.monitor.yml \
+  -f deploy/docker-compose.edge.yml \
   up -d --build
 ```
 
 常用命令：
 ```bash
-docker compose -f deploy/docker-compose.monitor.yml logs -f
-docker compose -f deploy/docker-compose.monitor.yml ps
-docker compose -f deploy/docker-compose.monitor.yml down
+docker compose -f deploy/docker-compose.edge.yml logs -f
+docker compose -f deploy/docker-compose.edge.yml ps
+docker compose -f deploy/docker-compose.edge.yml down
 ```
 
-### 4) 启动统一 API（供 Dify / 工单系统调用）
+兼容说明：
+- 旧文件 `deploy/docker-compose.monitor.yml` 仍保留，作用等同于边缘部署 compose。
+- 边缘端如果需要主动上报到云端，可配置 `MONITOR_EDGE_SYNC_*` 系列环境变量。
+
+### 4) 云端部署
+云端部署建议运行在公司服务器或中心平台上，负责接收边缘事件、提供查询 API、生成报告上下文，并供 Dify / 工单系统调用。
+
+本地直接运行：
 ```bash
-python -m elevator_monitor.api_service --host 0.0.0.0 --port 8085
 nohup python -m elevator_monitor.api.main --host 0.0.0.0 --port 8085 > logs/api_service.log 2>&1 &
+```
+
+Docker Compose 运行：
+```bash
+docker compose -f deploy/docker-compose.api.yml up -d --build
+```
+
+常用命令：
+```bash
+docker compose -f deploy/docker-compose.api.yml logs -f
+docker compose -f deploy/docker-compose.api.yml ps
+docker compose -f deploy/docker-compose.api.yml down
+```
+
+如果需要限制边缘写入权限，可在云端设置：
+```bash
+export MONITOR_INGEST_SHARED_TOKEN=change-me
 ```
 
 核心接口：

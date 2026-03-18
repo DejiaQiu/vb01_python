@@ -1,0 +1,23 @@
+services:
+  elevator-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile.api
+    container_name: elevator-api
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - elevator_monitor.api.main
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8085"
+    environment:
+      - ELEVATOR_CLOUD_STORE_DIR=${ELEVATOR_CLOUD_STORE_DIR:-/app/data/cloud_ingest}
+      - MONITOR_INGEST_SHARED_TOKEN=${MONITOR_INGEST_SHARED_TOKEN:-}
+    ports:
+      - "${API_PORT:-8085}:8085"
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
