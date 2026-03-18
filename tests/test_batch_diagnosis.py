@@ -73,6 +73,28 @@ def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, 
 
 
 class TestBatchDiagnosis(unittest.TestCase):
+    def test_normal_status_does_not_promote_top_fault_to_preferred_issue(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            csv_path = root / "vibration_30s_20260303_101500.csv"
+            _write_csv(csv_path)
+
+            fake_result = _result(
+                "normal",
+                top_fault=_compact_fault("rubber_hardening", 22.0),
+            )
+
+            with patch("elevator_monitor.batch_diagnosis.run_all_rows", return_value=fake_result):
+                payload = run_batch_diagnosis(
+                    input_dir=str(root),
+                    max_files=1,
+                    write_outputs=False,
+                )
+
+        self.assertEqual(payload["status"], "normal")
+        self.assertEqual(payload["preferred_issue"], {})
+        self.assertEqual(payload["latest_result"]["top_fault"]["fault_type"], "rubber_hardening")
+
     def test_run_batch_diagnosis_writes_latest_status_and_history(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

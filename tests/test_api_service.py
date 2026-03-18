@@ -258,12 +258,45 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("waveform_payload", payload)
         self.assertIn("plots", payload["waveform_payload"])
         self.assertIn("markdown_echarts", payload["waveform_payload"])
-        self.assertIn("## 1. 一句话结论", payload["report_markdown_draft"])
-        self.assertIn("## 2. 给非专业人员的解释", payload["report_markdown_draft"])
-        self.assertIn("## 3. 建议怎么做", payload["report_markdown_draft"])
-        self.assertIn("本报告属于振动筛查结果", payload["report_markdown_draft"])
-        self.assertNotIn("## Executive Summary", payload["report_markdown_draft"])
-        self.assertIn("## 波形图", payload["report_markdown_draft"])
+
+    def test_diagnosis_report_keeps_preferred_issue_empty_when_status_is_normal(self):
+        diagnosis_result = {
+            "summary": {"n_raw": 24, "n_effective": 24, "fs_hz": 1.0},
+            "screening": {"status": "normal"},
+            "top_fault": {"fault_type": "rubber_hardening", "score": 28.0, "level": "normal"},
+            "top_candidate": {},
+            "watch_faults": [],
+        }
+        response = self.client.post(
+            "/api/v1/workflows/diagnosis-report",
+            json={
+                "site_name": "Tower C",
+                "diagnosis_result": diagnosis_result,
+                "maintenance_package": {
+                    "site_name": "Tower C",
+                    "elevator_id": "elevator-003",
+                    "priority": "P4",
+                    "summary": "demo summary",
+                    "recommended_actions": [],
+                    "suggested_parts": [],
+                    "risk": {
+                        "risk_score": 0.10,
+                        "risk_level_now": "normal",
+                        "risk_24h": 0.12,
+                        "risk_level_24h": "normal",
+                    },
+                },
+                "include_waveforms": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["preferred_issue"]["fault_type"], "unknown")
+        self.assertEqual(payload["preferred_issue"]["score"], 0.0)
+        self.assertEqual(payload["dify_report_inputs"]["preferred_fault_type"], "unknown")
+        self.assertIn("当前最值得关注的问题：暂无明确故障类型", payload["report_markdown_draft"])
+        self.assertIn("系统故障标签：unknown", payload["report_markdown_draft"])
+        self.assertNotIn("当前最值得关注的问题：减振橡胶硬化", payload["report_markdown_draft"])
 
     def test_dify_workflow_online_status_includes_detection_date(self):
         workflow_path = Path("docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml")

@@ -137,8 +137,7 @@ def _preferred_issue(result: dict[str, Any]) -> dict[str, Any]:
             first = watch_faults[0]
             if isinstance(first, dict):
                 return first
-    top_fault = result.get("top_fault", {})
-    return top_fault if isinstance(top_fault, dict) else {}
+    return {}
 
 
 def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:

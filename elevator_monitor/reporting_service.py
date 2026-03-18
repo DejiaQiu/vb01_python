@@ -224,8 +224,7 @@ def _preferred_issue(diag: dict[str, Any]) -> dict[str, Any]:
             first = watch_faults[0]
             if isinstance(first, dict):
                 return first
-    top_fault = diag.get("top_fault", {})
-    return top_fault if isinstance(top_fault, dict) else {}
+    return {}
 
 
 def _headline_text(status: str, issue: dict[str, Any], dispatch_hours: int) -> str:
@@ -329,8 +328,8 @@ def build_report_context(
     risk_now = _safe_float(risk.get("risk_score"), 0.0)
     risk_24h = _safe_float(risk.get("risk_24h"), 0.0)
     dispatch_hours = _safe_int(package.get("dispatch_within_hours"), 72)
-    preferred_fault_type = str(preferred_issue.get("fault_type", top_fault_type)).strip() or top_fault_type
-    preferred_fault_score = _safe_float(preferred_issue.get("score"), top_fault_score)
+    preferred_fault_type = str(preferred_issue.get("fault_type", "")).strip() or "unknown"
+    preferred_fault_score = _safe_float(preferred_issue.get("score"), 0.0)
 
     report_title = f"{site_name} / {elevator_id} 诊断与维保报告"
     prompt = _build_dify_prompt(language)
@@ -391,7 +390,7 @@ def build_report_context(
             "fault_type": preferred_fault_type,
             "fault_label": _fault_label(preferred_fault_type),
             "score": preferred_fault_score,
-            "level": str(preferred_issue.get("level", top_fault.get("level", "normal"))),
+            "level": str(preferred_issue.get("level", "normal")),
             "quality_factor": _safe_float(preferred_issue.get("quality_factor"), 0.0),
         },
         "risk": {
@@ -522,9 +521,9 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
     actions = package.get("recommended_actions", []) or []
     parts = package.get("suggested_parts", []) or []
     screening_status = str(screening.get("status", "normal")).strip().lower()
-    issue_fault_type = str(preferred_issue.get("fault_type", top_fault.get("fault_type", "unknown"))).strip()
+    issue_fault_type = str(preferred_issue.get("fault_type", "")).strip() or "unknown"
     issue_label = _fault_label(issue_fault_type)
-    issue_score = _safe_float(preferred_issue.get("score", top_fault.get("score")), 0.0)
+    issue_score = _safe_float(preferred_issue.get("score"), 0.0)
     quality_factor = _safe_float(preferred_issue.get("quality_factor"), 0.0)
     dispatch_hours = _safe_int(package.get("dispatch_within_hours"), 72)
     baseline_mode = str(baseline.get("mode", "disabled"))
