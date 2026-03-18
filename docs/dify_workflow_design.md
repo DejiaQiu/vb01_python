@@ -9,12 +9,19 @@ The old realtime rule engine under `elevator_monitor/monitor/` is no longer the 
 
 ## Primary APIs
 
+- `POST /api/v1/ingest/heartbeat`
+- `POST /api/v1/ingest/alert`
+- `POST /api/v1/ingest/context`
+- `GET /api/v1/elevators/{elevator_id}/latest-status`
+- `GET /api/v1/elevators/{elevator_id}/alerts`
+- `GET /api/v1/alerts/{event_id}`
 - `POST /api/v1/diagnostics/rule-engine`
 - `POST /api/v1/diagnostics/batch-run`
 - `GET /api/v1/diagnostics/latest-status`
 - `POST /api/v1/diagnostics/waveform-plot`
 - `POST /api/v1/workflows/maintenance-package`
 - `POST /api/v1/workflows/diagnosis-report`
+- `POST /api/v1/workflows/diagnosis-report-by-event`
 - `GET /api/v1/health/monitor`
 
 Recommended backend address for Dify:
@@ -37,21 +44,24 @@ Branch rule:
 Purpose:
 
 - Answer questions like "current status", "latest candidate fault", "should maintenance be arranged now"
-- Read the latest scheduled batch diagnosis result and optionally render the waveform of the latest CSV
+- In the edge/cloud path, read the latest synchronized elevator status and recent alert event
+- Keep the old scheduled-batch `latest_status.json` query path only as a compatibility fallback
 
 Node flow:
 
 1. `Start`
 2. `If/Else`
-3. `HTTP Request` -> `GET /api/v1/diagnostics/latest-status?include_waveforms=true`
+3. `HTTP Request` -> `GET /api/v1/elevators/{elevator_id}/latest-status`
 4. `Code` -> parse the latest status JSON and build a concise summary
 5. `LLM` -> answer in natural Chinese using the structured status
-6. `Answer` -> render the text conclusion first, then always render the three waveform charts when available
+6. If latest status contains `last_event_id`, optionally call `POST /api/v1/workflows/diagnosis-report-by-event`
+7. `Answer` -> render the text conclusion first, then render waveform charts when the event report contains them
 
 Suggested environment variables:
 
 - `ip`: backend base URL, for example `http://192.168.5.132:8085`
 - `site_name`: display name in the reply
+- `elevator_id`: current elevator identifier for the status query branch
 - `latest_json`: status file path, default `data/diagnosis/latest_status.json`
 
 Expected status payload:
@@ -99,8 +109,10 @@ Current recommended node flow:
 
 Notes:
 
+- Edge/cloud协同模式下，Dify 的主入口应该是状态/事件 API，而不是文件上传。
 - Waveforms are now rendered on the Dify side with `echarts` code blocks.
 - The backend `waveform-plot` API is still available for other clients, but the current Dify report workflow does not need to depend on it.
+- Dify has a per-variable size limit. For uploaded CSV, the workflow should compact and sample the extracted text before storing it in `csv_text`; do not pass the full extracted file text through workflow variables.
 
 ## Scheduled Batch Diagnosis
 

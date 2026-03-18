@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from .routers.diagnostics import router as diagnostics_router
 from .routers.health import router as health_router
+from .routers.ingest import router as ingest_router
 from .routers.meta import router as meta_router
 from .routers.workflows import router as workflows_router
 
@@ -19,6 +20,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(meta_router)
     app.include_router(health_router)
+    app.include_router(ingest_router)
     app.include_router(diagnostics_router)
     app.include_router(workflows_router)
     return app

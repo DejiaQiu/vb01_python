@@ -16,6 +16,13 @@ from ..common import CORE_FIELDS, REG_MAP
 from ..data_recorder import DataRecorder, format_ts_ms, now_ts_ms
 from ..device_model import DeviceModel
 from ..dify_client import DifyWorkflowClient
+from ..edge_sync import (
+    CloudIngestClient,
+    EdgeSyncQueue,
+    build_alert_payload,
+    build_context_payload,
+    build_heartbeat_payload,
+)
 from ..fault_types import FaultTypeEngine
 from ..generated_algorithm import ForecastResult, GeneratedAlgorithmPrediction, GeneratedFaultAlgorithmRunner, OnlineFeatureForecaster
 from ..maintenance_workflow import build_maintenance_package, load_optional_json
@@ -47,6 +54,11 @@ class RealtimeMonitor:
         self.args.reg_addr = int(self.args.reg_addr)
         self.args.dify_timeout_s = max(1.0, float(self.args.dify_timeout_s))
         self.args.dify_cooldown_s = max(0.0, float(self.args.dify_cooldown_s))
+        self.args.edge_sync_timeout_s = max(1.0, float(self.args.edge_sync_timeout_s))
+        self.args.edge_sync_heartbeat_every_s = max(1.0, float(self.args.edge_sync_heartbeat_every_s))
+        self.args.edge_sync_drain_every_s = max(0.5, float(self.args.edge_sync_drain_every_s))
+        self.args.edge_sync_drain_batch_size = max(1, int(self.args.edge_sync_drain_batch_size))
+        self.args.edge_sync_max_context_bytes = max(16_384, int(self.args.edge_sync_max_context_bytes))
         if self.args.dify_response_mode not in {"blocking", "streaming"}:
             self.args.dify_response_mode = "blocking"
         if self.args.dify_min_level not in {"warning", "anomaly"}:
@@ -106,6 +118,8 @@ class RealtimeMonitor:
         self.alert_context_rows: deque[dict[str, Any]] = deque(maxlen=self.args.alert_context_max_rows)
         self._dify_manifest_payload: dict[str, Any] = self._load_dify_manifest()
         self.dify_client = self._build_dify_client()
+        self.edge_sync_queue = self._build_edge_sync_queue()
+        self.edge_sync_client = self._build_edge_sync_client()
 
         self.started_monotonic = time.monotonic()
         self.last_data_monotonic = 0.0
@@ -143,6 +157,11 @@ class RealtimeMonitor:
         self.last_dify_task_id = ""
         self.last_dify_error = ""
         self.dify_dispatch_count = 0
+        self.last_edge_sync_status = ""
+        self.last_edge_sync_error = ""
+        self.edge_sync_dispatch_count = 0
+        self._last_edge_sync_drain = 0.0
+        self._last_edge_sync_heartbeat_ms: Optional[int] = None
 
         self._last_health_write = 0.0
         self.status = "starting"
@@ -167,6 +186,7 @@ class RealtimeMonitor:
             "generated_algo_path=%s generated_algo_loaded=%s generated_algo_min_conf=%s generated_algo_horizon_s=%s "
             "risk_model_path=%s risk_model_loaded=%s risk_model_weight=%s risk_model_pos_label=%s "
             "dify_enabled=%s dify_client_ready=%s dify_base_url=%s dify_min_level=%s dify_cooldown_s=%s "
+            "edge_sync_enabled=%s edge_sync_client_ready=%s edge_sync_base_url=%s edge_sync_queue_path=%s "
             "profile_path=%s profile_loaded=%s",
             self.args.elevator_id,
             self.args.port,
@@ -212,6 +232,10 @@ class RealtimeMonitor:
             self.args.dify_base_url,
             self.args.dify_min_level,
             self.args.dify_cooldown_s,
+            self.args.edge_sync_enabled,
+            self.edge_sync_client is not None,
+            self.args.edge_sync_base_url,
+            self.args.edge_sync_queue_path,
             self.profile_path,
             self.profile_loaded,
         )
@@ -310,6 +334,159 @@ class RealtimeMonitor:
         except Exception as ex:
             self.logger.warning("dify client init failed err=%s", ex)
             return None
+
+    def _build_edge_sync_queue(self) -> Optional[EdgeSyncQueue]:
+        if not self.args.edge_sync_enabled:
+            return None
+        try:
+            return EdgeSyncQueue(self.args.edge_sync_queue_path)
+        except Exception as ex:
+            self.logger.warning("edge sync queue init failed err=%s", ex)
+            return None
+
+    def _build_edge_sync_client(self) -> Optional[CloudIngestClient]:
+        if not self.args.edge_sync_enabled:
+            return None
+
+        base_url = str(self.args.edge_sync_base_url or "").strip()
+        if not base_url:
+            self.logger.warning("edge sync enabled but base_url missing; edge sync dispatch disabled")
+            return None
+
+        try:
+            client = CloudIngestClient(
+                base_url=base_url,
+                api_token=self.args.edge_sync_api_token,
+                timeout_s=self.args.edge_sync_timeout_s,
+                verify_ssl=self.args.edge_sync_verify_ssl,
+            )
+            self.logger.info("edge sync client ready base_url=%s", client.base_url)
+            return client
+        except Exception as ex:
+            self.logger.warning("edge sync client init failed err=%s", ex)
+            return None
+
+    def _edge_site_name(self) -> str:
+        return str(self.args.edge_sync_site_name or self.args.dify_site_name or "").strip()
+
+    def _edge_device_id(self) -> str:
+        return str(self.args.edge_sync_device_id or self.args.elevator_id).strip() or self.args.elevator_id
+
+    def _edge_sync_pending_count(self) -> int:
+        if self.edge_sync_queue is None:
+            return 0
+        try:
+            return int(self.edge_sync_queue.count())
+        except Exception:
+            return 0
+
+    def _drain_edge_sync(self, *, force: bool = False) -> None:
+        if self.edge_sync_queue is None or self.edge_sync_client is None:
+            return
+        now_mono = time.monotonic()
+        if not force and now_mono - self._last_edge_sync_drain < self.args.edge_sync_drain_every_s:
+            return
+        self._last_edge_sync_drain = now_mono
+        try:
+            result = self.edge_sync_queue.drain(
+                client=self.edge_sync_client,
+                limit=self.args.edge_sync_drain_batch_size,
+            )
+            self.edge_sync_dispatch_count += int(result.get("sent", 0))
+            if result.get("failed", 0):
+                self.last_edge_sync_status = "degraded"
+                self.last_edge_sync_error = str(result.get("last_error", ""))
+            elif result.get("sent", 0):
+                self.last_edge_sync_status = "success"
+                self.last_edge_sync_error = ""
+        except Exception as ex:
+            self.last_edge_sync_status = "drain_failed"
+            self.last_edge_sync_error = f"{type(ex).__name__}:{ex}"
+            self.logger.warning("edge sync drain failed err=%s", ex)
+
+    def _enqueue_edge_heartbeat(self, health_payload: dict[str, Any]) -> None:
+        if self.edge_sync_queue is None:
+            return
+        ts_ms = int(health_payload.get("updated_at_ms") or now_ts_ms())
+        if self._last_edge_sync_heartbeat_ms is not None:
+            min_interval_ms = int(self.args.edge_sync_heartbeat_every_s * 1000.0)
+            if ts_ms - self._last_edge_sync_heartbeat_ms < min_interval_ms:
+                return
+        payload = build_heartbeat_payload(
+            elevator_id=self.args.elevator_id,
+            device_id=self._edge_device_id(),
+            site_id=self.args.edge_sync_site_id,
+            site_name=self._edge_site_name(),
+            health_payload=health_payload,
+        )
+        delivery_id = f"heartbeat:{payload['device_id']}:{payload['elevator_id']}:{ts_ms}"
+        try:
+            if self.edge_sync_queue.enqueue(
+                delivery_id=delivery_id,
+                endpoint="/api/v1/ingest/heartbeat",
+                body=payload,
+            ):
+                self._last_edge_sync_heartbeat_ms = ts_ms
+                self.last_edge_sync_status = "queued"
+        except Exception as ex:
+            self.last_edge_sync_status = "queue_failed"
+            self.last_edge_sync_error = f"{type(ex).__name__}:{ex}"
+            self.logger.warning("edge heartbeat queue failed err=%s", ex)
+
+    def _enqueue_edge_alert(self, alert_payload: dict[str, Any], health_payload: dict[str, Any]) -> str:
+        if self.edge_sync_queue is None:
+            return ""
+        payload = build_alert_payload(
+            elevator_id=self.args.elevator_id,
+            device_id=self._edge_device_id(),
+            site_id=self.args.edge_sync_site_id,
+            site_name=self._edge_site_name(),
+            alert_payload=alert_payload,
+            health_payload=health_payload,
+        )
+        event_id = str(payload.get("event_id", "")).strip()
+        if not event_id:
+            return ""
+        try:
+            self.edge_sync_queue.enqueue(
+                delivery_id=f"alert:{event_id}",
+                endpoint="/api/v1/ingest/alert",
+                body=payload,
+            )
+            self.last_edge_sync_status = "queued"
+            return event_id
+        except Exception as ex:
+            self.last_edge_sync_status = "queue_failed"
+            self.last_edge_sync_error = f"{type(ex).__name__}:{ex}"
+            self.logger.warning("edge alert queue failed err=%s", ex)
+            return ""
+
+    def _enqueue_edge_context(self, *, event_id: str, ts_ms: int, csv_path: str) -> None:
+        if self.edge_sync_queue is None or not event_id or not str(csv_path).strip():
+            return
+        try:
+            payload = build_context_payload(
+                event_id=event_id,
+                site_id=self.args.edge_sync_site_id,
+                site_name=self._edge_site_name(),
+                device_id=self._edge_device_id(),
+                elevator_id=self.args.elevator_id,
+                ts_ms=ts_ms,
+                csv_path=csv_path,
+                max_raw_bytes=self.args.edge_sync_max_context_bytes,
+            )
+            self.edge_sync_queue.enqueue(
+                delivery_id=f"context:{event_id}",
+                endpoint="/api/v1/ingest/context",
+                body=payload,
+            )
+            self.last_edge_sync_status = "queued"
+        except FileNotFoundError:
+            return
+        except Exception as ex:
+            self.last_edge_sync_status = "queue_failed"
+            self.last_edge_sync_error = f"{type(ex).__name__}:{ex}"
+            self.logger.warning("edge context queue failed err=%s", ex)
 
     def _build_health_snapshot(self) -> dict[str, Any]:
         return {
@@ -813,6 +990,10 @@ class RealtimeMonitor:
         )
 
         alert_recorder.write(alert)
+        edge_event_id = self._enqueue_edge_alert(alert, self._build_health_snapshot())
+        if edge_event_id and alert_context_csv:
+            self._enqueue_edge_context(event_id=edge_event_id, ts_ms=ts_ms, csv_path=alert_context_csv)
+        self._drain_edge_sync(force=True)
         self._last_alert_emit_ms = ts_ms
         self.alerts_emitted += 1
         self.last_fault_type = str(fault_result.get("fault_type", "unknown"))
@@ -912,6 +1093,14 @@ class RealtimeMonitor:
             "last_dify_workflow_run_id": self.last_dify_workflow_run_id,
             "last_dify_task_id": self.last_dify_task_id,
             "last_dify_error": self.last_dify_error,
+            "edge_sync_enabled": self.args.edge_sync_enabled,
+            "edge_sync_client_ready": self.edge_sync_client is not None,
+            "edge_sync_base_url": self.args.edge_sync_base_url,
+            "edge_sync_queue_path": self.args.edge_sync_queue_path,
+            "edge_sync_pending": self._edge_sync_pending_count(),
+            "edge_sync_dispatch_count": self.edge_sync_dispatch_count,
+            "last_edge_sync_status": self.last_edge_sync_status,
+            "last_edge_sync_error": self.last_edge_sync_error,
             "updated_at_ms": now_ts_ms(),
         }
 
@@ -922,6 +1111,8 @@ class RealtimeMonitor:
         tmp_path.replace(out_path)
 
         self._last_health_write = now_mono
+        self._enqueue_edge_heartbeat(payload)
+        self._drain_edge_sync(force=force)
 
     def _ensure_csv_schema(self, path: str, fieldnames: list[str]) -> None:
         out_path = Path(path)

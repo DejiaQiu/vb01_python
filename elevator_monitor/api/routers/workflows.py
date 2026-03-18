@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from ...ingest_store import get_ingest_store
 from ...maintenance_workflow import build_maintenance_package, load_optional_json, load_recent_alerts
-from ...reporting_service import build_report_context, render_report_markdown
+from ...reporting_service import build_report_context, build_report_context_from_edge_event, render_report_markdown
 from ...waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms.run_all import run_all, run_all_rows
 from ..schemas import (
+    DiagnosisReportByEventRequest,
     DiagnosisReportRequest,
     MaintenancePackageRequest,
     normalize_row_values,
@@ -87,5 +89,32 @@ def diagnosis_report(request: DiagnosisReportRequest) -> dict[str, Any]:
         report_style=request.report_style,
         waveform_payload=waveform_payload,
     )
+    report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
+    return report_ctx
+
+
+@router.post("/diagnosis-report-by-event")
+def diagnosis_report_by_event(request: DiagnosisReportByEventRequest) -> dict[str, Any]:
+    event_id = request.event_id.strip()
+    if not event_id:
+        raise HTTPException(status_code=400, detail="event_id is required")
+
+    store = get_ingest_store()
+    event_payload = store.get_alert(event_id)
+    if not event_payload:
+        raise HTTPException(status_code=404, detail=f"alert event not found: {event_id}")
+
+    report_input = dict(event_payload)
+    if request.site_name.strip():
+        report_input["site_name"] = request.site_name.strip()
+
+    report_ctx = build_report_context_from_edge_event(
+        alert_event=report_input,
+        language=request.language,
+        report_style=request.report_style,
+        include_waveforms=request.include_waveforms,
+    )
+    report_ctx["event_id"] = event_id
+    report_ctx["alert_event"] = dict(event_payload)
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
     return report_ctx

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import csv
+import gzip
+import io
 import json
 import time
+from pathlib import Path
 from typing import Any
+
+from .maintenance_workflow import build_maintenance_package
+from .waveform_service import build_waveform_payload, load_waveform_rows
 
 
 _FAULT_LABELS = {
@@ -401,6 +408,107 @@ def build_report_context(
     }
 
 
+def _screening_status_from_event(event: dict[str, Any]) -> str:
+    level = str(event.get("level", "normal")).strip().lower()
+    fault_type = str(event.get("fault_type", "unknown")).strip().lower()
+    if level == "anomaly":
+        return "candidate_faults"
+    if level == "warning" and fault_type not in {"", "unknown", "normal"}:
+        return "watch_only"
+    return "normal"
+
+
+def _event_issue_payload(event: dict[str, Any], screening_status: str) -> dict[str, Any]:
+    confidence = _safe_float(event.get("fault_confidence"), 0.0)
+    score = confidence * 100.0 if confidence <= 1.0 else confidence
+    return {
+        "fault_type": str(event.get("fault_type", "unknown")),
+        "score": round(score, 2),
+        "level": str(event.get("level", "normal")),
+        "triggered": screening_status in {"candidate_faults", "watch_only"},
+        "quality_factor": 1.0,
+        "reasons": [],
+    }
+
+
+def _load_waveform_payload_from_event_context(event: dict[str, Any]) -> dict[str, Any]:
+    context = event.get("context", {}) if isinstance(event.get("context"), dict) else {}
+    stored_path = str(context.get("stored_path", "")).strip() or str(context.get("local_path", "")).strip()
+    if not stored_path:
+        return {}
+    path = Path(stored_path)
+    if not path.exists():
+        return {}
+    try:
+        if str(context.get("compression", "")).strip().lower() == "gzip":
+            text = gzip.decompress(path.read_bytes()).decode("utf-8", errors="replace")
+            rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
+            if rows:
+                return build_waveform_payload(rows, source=stored_path)
+            return {}
+        rows, source = load_waveform_rows([], "", stored_path)
+        if rows:
+            return build_waveform_payload(rows, source=source)
+    except Exception:
+        return {}
+    return {}
+
+
+def build_report_context_from_edge_event(
+    *,
+    alert_event: dict[str, Any],
+    language: str = "zh-CN",
+    report_style: str = "standard",
+    include_waveforms: bool = True,
+) -> dict[str, Any]:
+    event = dict(alert_event or {})
+    screening_status = _screening_status_from_event(event)
+    issue = _event_issue_payload(event, screening_status)
+    diagnosis_result = {
+        "input": "edge_event",
+        "screening": {"status": screening_status},
+        "summary": {"n_raw": 0, "n_effective": 0, "fs_hz": 0.0},
+        "baseline": {"mode": "disabled"},
+        "top_fault": dict(issue),
+        "top_candidate": dict(issue) if screening_status == "candidate_faults" else {},
+        "watch_faults": [dict(issue)] if screening_status == "watch_only" else [],
+        "preferred_issue": dict(issue),
+    }
+
+    alert_row = {
+        "elevator_id": str(event.get("elevator_id", "")),
+        "ts_ms": str(event.get("ts_ms", "")),
+        "level": str(event.get("level", "normal")),
+        "predictive_only": str(event.get("predictive_only", 0)),
+        "fault_type": str(event.get("fault_type", "unknown")),
+        "fault_confidence": str(event.get("fault_confidence", 0.0)),
+        "risk_score": str(event.get("risk_score", 0.0)),
+        "risk_level_now": str(event.get("risk_level_now", "normal")),
+        "risk_24h": str(event.get("risk_24h", 0.0)),
+        "risk_level_24h": str(event.get("risk_level_24h", "normal")),
+        "alert_context_csv": str(event.get("alert_context_csv", "")),
+    }
+    maintenance_package = build_maintenance_package(
+        alert_rows=[alert_row],
+        health_payload=dict(event.get("health_payload") or {}),
+        site_name=str(event.get("site_name", "")),
+        alert_csv_path="",
+        health_json_path="",
+        manifest_payload={},
+        manifest_path="",
+    )
+    waveform_payload = _load_waveform_payload_from_event_context(event) if include_waveforms else {}
+    report_ctx = build_report_context(
+        diagnosis_result=diagnosis_result,
+        maintenance_package=maintenance_package,
+        language=language,
+        report_style=report_style,
+        waveform_payload=waveform_payload,
+    )
+    report_ctx["event_id"] = str(event.get("event_id", ""))
+    return report_ctx
+
+
 def render_report_markdown(report_context: dict[str, Any]) -> str:
     top_fault = report_context.get("top_fault", {})
     preferred_issue = report_context.get("preferred_issue", {})
@@ -469,3 +577,60 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
         lines.extend(["", waveform_markdown])
 
     return "\n".join(lines).strip() + "\n"
+
+
+def build_diagnosis_result_from_alert(
+    alert_payload: dict[str, Any],
+    *,
+    health_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    alert = alert_payload if isinstance(alert_payload, dict) else {}
+    health = health_payload if isinstance(health_payload, dict) else {}
+
+    level = str(alert.get("level", "normal")).strip().lower()
+    fault_type = str(alert.get("fault_type", "")).strip() or str(health.get("last_fault_type", "unknown")).strip() or "unknown"
+    score = _safe_float(alert.get("fault_confidence"), _safe_float(health.get("last_fault_confidence"), 0.0))
+    if 0.0 <= score <= 1.0:
+        score *= 100.0
+
+    quality_factor = 1.0 if bool(health.get("baseline_ready", False)) else 0.65
+    reasons_text = str(alert.get("fault_reasons", "") or alert.get("reasons", "")).strip()
+    reasons = [item for item in reasons_text.split("|") if item]
+
+    if fault_type not in {"", "unknown", "normal"} and level in {"warning", "anomaly"}:
+        screening_status = "candidate_faults"
+    elif str(alert.get("risk_level_24h", "normal")).strip().lower() in {"watch", "high", "critical"}:
+        screening_status = "watch_only"
+    else:
+        screening_status = "normal"
+
+    top_fault = {
+        "fault_type": fault_type,
+        "score": round(score, 2),
+        "level": level or "normal",
+        "reasons": reasons,
+    }
+    top_candidate = dict(top_fault) if screening_status == "candidate_faults" else {}
+    watch_faults = [dict(top_fault)] if screening_status == "watch_only" else []
+
+    return {
+        "source": "edge_alert_event",
+        "summary": {
+            "n_raw": 0,
+            "n_effective": 0,
+            "fs_hz": 0.0,
+            "event_ts_ms": _safe_int(alert.get("ts_ms"), 0),
+        },
+        "screening": {
+            "status": screening_status,
+            "label": _screening_label(screening_status),
+        },
+        "baseline": {
+            "mode": "edge_event",
+        },
+        "top_fault": top_fault,
+        "top_candidate": top_candidate,
+        "candidate_faults": [dict(top_fault)] if screening_status == "candidate_faults" else [],
+        "watch_faults": watch_faults,
+        "preferred_issue": dict(top_fault) if screening_status != "normal" else {},
+    }

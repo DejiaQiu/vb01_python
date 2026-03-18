@@ -331,13 +331,21 @@ nohup python -m elevator_monitor.api.main --host 0.0.0.0 --port 8085 > logs/api_
 
 核心接口：
 - `GET /api/v1/health/monitor`：读取监控健康状态并校验时效
+- `POST /api/v1/ingest/heartbeat`：边缘设备上报健康状态与最新运行摘要
+- `POST /api/v1/ingest/alert`：边缘设备上报告警事件
+- `POST /api/v1/ingest/context`：边缘设备上传告警上下文证据片段
+- `GET /api/v1/elevators/{elevator_id}/latest-status`：查询某台电梯的边缘同步最新状态
+- `GET /api/v1/elevators/{elevator_id}/alerts`：查询某台电梯最近的边缘同步告警列表
+- `GET /api/v1/alerts/{event_id}`：查询单次告警事件详情
 - `POST /api/v1/diagnostics/rule-engine`：执行 8 类规则诊断，支持 `rows`、`csv_text` 或 `csv_path`
 - `POST /api/v1/workflows/maintenance-package`：生成维保工单包，返回 `dify_inputs`
 - `POST /api/v1/workflows/diagnosis-report`：聚合“诊断结果 + 维保包”并输出 `dify_report_inputs`（供 Dify 生成报告）
+- `POST /api/v1/workflows/diagnosis-report-by-event`：按边缘同步事件生成报告上下文与 Dify 输入
 
 Dify 接法：
 - 直接用 HTTP Request 节点调用上述接口即可，不要求每个算法单独做一个脚本入口
 - 更合理的方式是“算法服务统一对外暴露 JSON API”，由 Dify 只负责编排、通知、知识库和工单流转
+- 在线主链路建议优先读取 `latest-status` / `alerts` / `diagnosis-report-by-event`，上传 CSV 仅保留为调试和离线验证入口
 - 如果要由监控服务主动触发 Dify，再去调用 Dify 的 Workflow API；这时可以是“主动调用 API”，不要求你一定做 webhook
 - 标准节点输入输出设计见 `docs/dify_workflow_design.md`
 
@@ -472,6 +480,8 @@ python3 report/fault_algorithms/rope_looseness_timeline.py \
 - 融合模式：`MONITOR_FAULT_FUSION_MODE=rule_primary|model_primary`
 - 模型路径：`MONITOR_FAULT_MODEL_PATH`、`MONITOR_GENERATED_ALGO_PATH`、`MONITOR_RISK_MODEL_PATH`
 - 风险预测：`MONITOR_RISK_ENABLED`、`MONITOR_RISK_EMIT_ON_NORMAL`、`MONITOR_RISK_EMIT_MIN_LEVEL`
+- 边缘到云端同步：`MONITOR_EDGE_SYNC_ENABLED`、`MONITOR_EDGE_SYNC_BASE_URL`、`MONITOR_EDGE_SYNC_API_TOKEN`、
+  `MONITOR_EDGE_SYNC_QUEUE_PATH`、`MONITOR_EDGE_SYNC_HEARTBEAT_EVERY_S`
 - Dify主动回调：`MONITOR_DIFY_ENABLED`、`MONITOR_DIFY_BASE_URL`、`MONITOR_DIFY_API_KEY`、`MONITOR_DIFY_MIN_LEVEL`
 
 ## 数据接入最小字段（40Hz）

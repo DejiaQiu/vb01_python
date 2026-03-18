@@ -319,7 +319,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=env_str("MONITOR_DIFY_MANIFEST_JSON", ""),
         help="可选：模型 manifest 路径，用于补充 Dify 输入上下文",
     )
-
     parser.add_argument("--reconnect-backoff-s", type=float, default=env_float("MONITOR_RECONNECT_BACKOFF_S", 2.0), help="重连重试间隔")
     parser.add_argument("--reconnect-no-data-s", type=float, default=env_float("MONITOR_RECONNECT_NO_DATA_S", 8.0), help="超过该秒数无新数据则重连")
 
@@ -370,6 +369,78 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--health-path",
         default=env_str("MONITOR_HEALTH_PATH", "data/monitor_health.json"),
         help="健康状态 JSON 路径",
+    )
+    parser.add_argument(
+        "--edge-sync-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("MONITOR_EDGE_SYNC_ENABLED", False),
+        help="是否启用边缘到云端的事件化上报",
+    )
+    parser.add_argument(
+        "--edge-sync-base-url",
+        default=env_str("MONITOR_EDGE_SYNC_BASE_URL", ""),
+        help="云端接入 API 基地址，例如 http://server:8085",
+    )
+    parser.add_argument(
+        "--edge-sync-api-token",
+        default=env_str("MONITOR_EDGE_SYNC_API_TOKEN", ""),
+        help="云端接入 API token（可选）",
+    )
+    parser.add_argument(
+        "--edge-sync-site-id",
+        default=env_str("MONITOR_EDGE_SYNC_SITE_ID", ""),
+        help="站点 ID（可选）",
+    )
+    parser.add_argument(
+        "--edge-sync-site-name",
+        default=env_str("MONITOR_EDGE_SYNC_SITE_NAME", ""),
+        help="站点名称（可选）",
+    )
+    parser.add_argument(
+        "--edge-sync-device-id",
+        default=env_str("MONITOR_EDGE_SYNC_DEVICE_ID", ""),
+        help="边缘设备 ID，默认复用 elevator_id",
+    )
+    parser.add_argument(
+        "--edge-sync-queue-path",
+        default=env_str("MONITOR_EDGE_SYNC_QUEUE_PATH", "data/edge_sync_queue.sqlite3"),
+        help="本地边缘补传队列 SQLite 路径",
+    )
+    parser.add_argument(
+        "--edge-sync-heartbeat-every-s",
+        type=float,
+        default=env_float("MONITOR_EDGE_SYNC_HEARTBEAT_EVERY_S", 10.0),
+        help="边缘心跳最小上报间隔秒数",
+    )
+    parser.add_argument(
+        "--edge-sync-timeout-s",
+        type=float,
+        default=env_float("MONITOR_EDGE_SYNC_TIMEOUT_S", 5.0),
+        help="边缘上报请求超时时间",
+    )
+    parser.add_argument(
+        "--edge-sync-verify-ssl",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("MONITOR_EDGE_SYNC_VERIFY_SSL", True),
+        help="是否校验云端接入 HTTPS 证书",
+    )
+    parser.add_argument(
+        "--edge-sync-drain-every-s",
+        type=float,
+        default=env_float("MONITOR_EDGE_SYNC_DRAIN_EVERY_S", 2.0),
+        help="边缘补传队列轮询发送间隔秒数",
+    )
+    parser.add_argument(
+        "--edge-sync-drain-batch-size",
+        type=int,
+        default=env_int("MONITOR_EDGE_SYNC_DRAIN_BATCH_SIZE", 8),
+        help="每轮最多发送多少条排队事件",
+    )
+    parser.add_argument(
+        "--edge-sync-max-context-bytes",
+        type=int,
+        default=env_int("MONITOR_EDGE_SYNC_MAX_CONTEXT_BYTES", 2_000_000),
+        help="告警上下文上传时允许的最大原始字节数",
     )
 
     parser.add_argument("--print-every-n", type=int, default=env_int("MONITOR_PRINT_EVERY_N", 50), help="每 N 条数据打印一次")

@@ -1,6 +1,9 @@
 import json
+import os
 import tempfile
 import unittest
+from base64 import b64encode
+from gzip import compress
 from pathlib import Path
 from unittest.mock import patch
 
@@ -280,6 +283,127 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("answer: |", workflow_text)
         self.assertIn("```echarts", workflow_text)
         self.assertIn("{{#status_parse.acc_chart#}}", workflow_text)
+
+    def test_ingest_heartbeat_updates_edge_latest_status(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"ELEVATOR_CLOUD_STORE_DIR": tmp_dir}):
+            response = self.client.post(
+                "/api/v1/ingest/heartbeat",
+                json={
+                    "device_id": "edge-001",
+                    "elevator_id": "elevator-100",
+                    "site_name": "Tower D",
+                    "health_payload": {
+                        "status": "running",
+                        "connected": True,
+                        "last_risk_score": 0.22,
+                        "last_risk_level_now": "normal",
+                        "last_risk_24h": 0.41,
+                        "last_risk_level_24h": "watch",
+                        "updated_at_ms": 123456,
+                    },
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+            latest = self.client.get("/api/v1/elevators/elevator-100/latest-status")
+            self.assertEqual(latest.status_code, 200)
+            payload = latest.json()
+            self.assertEqual(payload["elevator_id"], "elevator-100")
+            self.assertEqual(payload["site_name"], "Tower D")
+            self.assertEqual(payload["health_payload"]["status"], "running")
+            self.assertEqual(payload["risk"]["risk_level_24h"], "watch")
+
+    def test_ingest_alert_context_and_report_by_event(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"ELEVATOR_CLOUD_STORE_DIR": tmp_dir}):
+            alert_payload = {
+                "elevator_id": "elevator-101",
+                "ts_ms": 1_000_000,
+                "level": "warning",
+                "predictive_only": 0,
+                "fault_type": "rope_looseness",
+                "fault_confidence": 0.78,
+                "risk_score": 0.61,
+                "risk_level_now": "watch",
+                "risk_24h": 0.83,
+                "risk_level_24h": "high",
+                "degradation_slope": 0.0032,
+            }
+            event_id = "elevator-101-1000000-rope"
+            response = self.client.post(
+                "/api/v1/ingest/alert",
+                json={
+                    "event_id": event_id,
+                    "device_id": "edge-101",
+                    "elevator_id": "elevator-101",
+                    "site_name": "Tower E",
+                    "ts_ms": 1_000_000,
+                    "alert_payload": alert_payload,
+                    "health_payload": {
+                        "status": "running",
+                        "connected": True,
+                        "baseline_ready": True,
+                        "last_fault_type": "rope_looseness",
+                        "last_fault_confidence": 0.78,
+                        "last_risk_score": 0.61,
+                        "last_risk_level_now": "watch",
+                        "last_risk_24h": 0.83,
+                        "last_risk_level_24h": "high",
+                    },
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+            csv_text = "\n".join(
+                [
+                    "ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame",
+                    "1000000,0.01,0.02,-0.98,0.1,0.2,0.3,1",
+                    "1001000,0.02,0.02,-0.97,0.1,0.2,0.3,1",
+                    "1002000,0.03,0.02,-0.96,0.1,0.2,0.3,1",
+                    "1003000,0.04,0.02,-0.95,0.1,0.2,0.3,1",
+                    "1004000,0.05,0.02,-0.94,0.1,0.2,0.3,1",
+                    "1005000,0.04,0.02,-0.95,0.1,0.2,0.3,1",
+                    "1006000,0.03,0.02,-0.96,0.1,0.2,0.3,1",
+                    "1007000,0.02,0.02,-0.97,0.1,0.2,0.3,1",
+                    "1008000,0.01,0.02,-0.98,0.1,0.2,0.3,1",
+                ]
+            )
+            context_response = self.client.post(
+                "/api/v1/ingest/context",
+                json={
+                    "event_id": event_id,
+                    "device_id": "edge-101",
+                    "elevator_id": "elevator-101",
+                    "site_name": "Tower E",
+                    "ts_ms": 1_000_000,
+                    "file_name": "alert_context.csv.gz",
+                    "content_type": "text/csv",
+                    "compression": "gzip",
+                    "content_b64": b64encode(compress(csv_text.encode("utf-8"))).decode("ascii"),
+                },
+            )
+            self.assertEqual(context_response.status_code, 200)
+
+            alerts = self.client.get("/api/v1/elevators/elevator-101/alerts")
+            self.assertEqual(alerts.status_code, 200)
+            self.assertEqual(alerts.json()["count"], 1)
+
+            detail = self.client.get(f"/api/v1/alerts/{event_id}")
+            self.assertEqual(detail.status_code, 200)
+            detail_payload = detail.json()
+            self.assertEqual(detail_payload["alert_payload"]["fault_type"], "rope_looseness")
+            self.assertTrue(detail_payload["context"]["stored_path"].endswith(".gz"))
+
+            report = self.client.post(
+                "/api/v1/workflows/diagnosis-report-by-event",
+                json={"event_id": event_id, "include_waveforms": True},
+            )
+            self.assertEqual(report.status_code, 200)
+            report_payload = report.json()
+            self.assertEqual(report_payload["event_id"], event_id)
+            self.assertIn("dify_report_inputs", report_payload)
+            self.assertIn("report_markdown_draft", report_payload)
+            self.assertIn("波形图", report_payload["report_markdown_draft"])
+            self.assertIn("waveform_payload", report_payload)
 
 
 if __name__ == "__main__":

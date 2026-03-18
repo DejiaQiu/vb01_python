@@ -65,6 +65,47 @@ class BatchDiagnosisRequest(BaseModel):
     write_outputs: bool = True
 
 
+class IngestHeartbeatRequest(BaseModel):
+    device_id: str = ""
+    elevator_id: str = ""
+    site_id: str = ""
+    site_name: str = ""
+    health_payload: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestAlertRequest(BaseModel):
+    event_id: str = ""
+    device_id: str = ""
+    elevator_id: str = ""
+    site_id: str = ""
+    site_name: str = ""
+    ts_ms: int = 0
+    alert_payload: dict[str, Any] = Field(default_factory=dict)
+    health_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestContextRequest(BaseModel):
+    event_id: str = ""
+    device_id: str = ""
+    elevator_id: str = ""
+    site_id: str = ""
+    site_name: str = ""
+    ts_ms: int = 0
+    file_name: str = ""
+    content_type: str = "application/octet-stream"
+    compression: str = ""
+    content_b64: str = ""
+
+
+class DiagnosisReportByEventRequest(BaseModel):
+    event_id: str = ""
+    site_name: str = ""
+    language: str = "zh-CN"
+    report_style: str = "standard"
+    include_waveforms: bool = True
+
+
 def normalize_row_values(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     for row in rows:

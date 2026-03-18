@@ -589,14 +589,35 @@ workflow:
           \  width = max(len(row) for row in rows)\n    buffer = io.StringIO()\n \
           \   writer = csv.writer(buffer)\n    for row in rows:\n        writer.writerow(row\
           \ + [\"\"] * (width - len(row)))\n    return buffer.getvalue()\n\n\ndef\
-          \ main(extracted_text, site_name):\n    raw_text = _pick_text(extracted_text)\n\
-          \    csv_text = _from_markdown_table(raw_text) or _normalize_csv_like(raw_text)\n\
-          \    diagnosis_body = json.dumps(\n        {\"csv_text\": csv_text, \"rows\"\
-          : []},\n        ensure_ascii=False,\n    )\n    maintenance_body = json.dumps(\n\
-          \        {\"site_name\": site_name or \"unknown-site\"},\n        ensure_ascii=False,\n\
-          \    )\n    return {\n        \"csv_text\": csv_text,\n        \"diagnosis_body\"\
-          : diagnosis_body,\n        \"maintenance_body\": maintenance_body,\n   \
-          \ }\n"
+          \ _sample_rows(rows, limit):\n    if len(rows) <= limit:\n        return\
+          \ rows\n    if limit <= 1:\n        return rows[:1]\n    idxs = []\n   \
+          \ for i in range(limit):\n        idx = round(i * (len(rows) - 1) / max(1,\
+          \ limit - 1))\n        if not idxs or idx != idxs[-1]:\n            idxs.append(idx)\n\
+          \    return [rows[i] for i in idxs]\n\n\n\
+          def _compact_csv_text(text, max_rows=2000, max_chars=280000):\n    raw\
+          \ = str(text or \"\").strip()\n    if not raw:\n        return \"\"\n \
+          \   parsed = list(csv.reader(io.StringIO(raw)))\n    if len(parsed) <= 1:\n\
+          \        return raw[:max_chars]\n\n    header = [str(cell).strip() for\
+          \ cell in parsed[0]]\n    data_rows = [[str(cell).strip() for cell in row]\
+          \ for row in parsed[1:] if any(str(cell).strip() for cell in row)]\n   \
+          \ if not data_rows:\n        buffer = io.StringIO()\n        writer = csv.writer(buffer)\n\
+          \        writer.writerow(header)\n        return buffer.getvalue()[:max_chars]\n\
+          \n    current_limit = max_rows\n    while True:\n        sampled = _sample_rows(data_rows,\
+          \ current_limit)\n        width = max([len(header)] + [len(row) for row\
+          \ in sampled])\n        buffer = io.StringIO()\n        writer = csv.writer(buffer)\n\
+          \        writer.writerow(header + [\"\"] * (width - len(header)))\n    \
+          \    for row in sampled:\n            writer.writerow(row + [\"\"] * (width\
+          \ - len(row)))\n        compact = buffer.getvalue()\n        if len(compact)\
+          \ <= max_chars or current_limit <= 64:\n            return compact[:max_chars]\n\
+          \        current_limit = max(64, int(current_limit * 0.7))\n\n\ndef main(extracted_text,\
+          \ site_name):\n    raw_text = _pick_text(extracted_text)\n    normalized\
+          \ = _from_markdown_table(raw_text) or _normalize_csv_like(raw_text)\n  \
+          \  csv_text = _compact_csv_text(normalized)\n    diagnosis_body = json.dumps(\n\
+          \        {\"csv_text\": csv_text, \"rows\": []},\n        ensure_ascii=False,\n\
+          \    )\n    maintenance_body = json.dumps(\n        {\"site_name\": site_name\
+          \ or \"unknown-site\"},\n        ensure_ascii=False,\n    )\n    return\
+          \ {\n        \"csv_text\": csv_text,\n        \"diagnosis_body\": diagnosis_body,\n\
+          \        \"maintenance_body\": maintenance_body,\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -898,14 +919,13 @@ workflow:
     - data:
         code: "import json\n\n\ndef _loads(text):\n    raw = str(text or \"\").strip()\n\
           \    if not raw:\n        return {}\n    try:\n        return json.loads(raw)\n\
-          \    except Exception:\n        return {}\n\n\ndef main(site_name, csv_text,\
-          \ diagnosis_json, maintenance_json):\n    payload = {\n        \"site_name\"\
-          : site_name or \"unknown-site\",\n        \"csv_text\": csv_text or \"\"\
-          ,\n        \"diagnosis_result\": _loads(diagnosis_json),\n        \"maintenance_package\"\
-          : _loads(maintenance_json),\n        \"include_waveforms\": False,\n   \
-          \     \"language\": \"zh-CN\",\n        \"report_style\": \"standard\",\n\
-          \    }\n    return {\n        \"report_body\": json.dumps(payload, ensure_ascii=False),\n\
-          \    }\n"
+          \    except Exception:\n        return {}\n\n\ndef main(site_name, diagnosis_json,\
+          \ maintenance_json):\n    payload = {\n        \"site_name\": site_name\
+          \ or \"unknown-site\",\n        \"diagnosis_result\": _loads(diagnosis_json),\n\
+          \        \"maintenance_package\": _loads(maintenance_json),\n        \"\
+          include_waveforms\": False,\n        \"language\": \"zh-CN\",\n        \"\
+          report_style\": \"standard\",\n    }\n    return {\n        \"report_body\"\
+          : json.dumps(payload, ensure_ascii=False),\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -921,11 +941,6 @@ workflow:
           - site_name
           value_type: string
           variable: site_name
-        - value_selector:
-          - prepare_csv
-          - csv_text
-          value_type: string
-          variable: csv_text
         - value_selector:
           - diagnosis_parse
           - diagnosis_json
