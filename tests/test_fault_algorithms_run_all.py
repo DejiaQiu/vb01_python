@@ -45,6 +45,12 @@ def _result(fault_type: str, score: float, *, triggered: bool, quality_factor: f
 
 
 class TestFaultAlgorithmsRunAll(unittest.TestCase):
+    def test_default_detectors_only_keep_rope_and_rubber(self):
+        self.assertEqual(
+            [detector.__module__.rsplit(".", 1)[-1] for detector in run_all_module.DETECTORS],
+            ["detect_rope_looseness", "detect_rubber_hardening"],
+        )
+
     def test_normal_sample_returns_no_high_confidence_candidates(self):
         fake_detectors = [
             lambda features: _result("mechanical_looseness", 18.0, triggered=False),

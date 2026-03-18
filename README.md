@@ -136,7 +136,7 @@ alerts.csv]  alerts.csv]
 - Manifest 版本清单
 
 ### 专项诊断
-- `report/fault_algorithms` 支持 8 类故障规则算法
+- `report/fault_algorithms` 当前总控默认启用 2 类故障规则算法（钢丝绳松动、橡胶圈硬化）
 - 可对单个 CSV 或批量 CSV 进行离线诊断
 - 支持时间序列确认（如松绳连续窗口确认）
 

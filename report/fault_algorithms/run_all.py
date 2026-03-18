@@ -8,24 +8,10 @@ from typing import Any, Callable
 
 try:
     from ._base import build_feature_baseline, build_feature_pack, load_rows
-    from .detect_bearing_wear import detect as detect_bearing_wear
-    from .detect_brake_jitter import detect as detect_brake_jitter
-    from .detect_car_imbalance import detect as detect_car_imbalance
-    from .detect_coupling_misalignment import detect as detect_coupling_misalignment
-    from .detect_impact_shock import detect as detect_impact_shock
-    from .detect_mechanical_looseness import detect as detect_mechanical_looseness
-    from .detect_rail_wear import detect as detect_rail_wear
     from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
     from .detect_rubber_hardening import RUBBER_BASELINE_KEYS, detect as detect_rubber_hardening
 except ImportError:  # pragma: no cover
     from _base import build_feature_baseline, build_feature_pack, load_rows
-    from detect_bearing_wear import detect as detect_bearing_wear
-    from detect_brake_jitter import detect as detect_brake_jitter
-    from detect_car_imbalance import detect as detect_car_imbalance
-    from detect_coupling_misalignment import detect as detect_coupling_misalignment
-    from detect_impact_shock import detect as detect_impact_shock
-    from detect_mechanical_looseness import detect as detect_mechanical_looseness
-    from detect_rail_wear import detect as detect_rail_wear
     from detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
     from detect_rubber_hardening import RUBBER_BASELINE_KEYS, detect as detect_rubber_hardening
 
@@ -40,15 +26,8 @@ MIN_EFFECTIVE_SAMPLES = 8
 BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS + RUBBER_BASELINE_KEYS))
 
 DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [
-    detect_mechanical_looseness,
-    detect_impact_shock,
-    detect_rail_wear,
     detect_rope_looseness,
     detect_rubber_hardening,
-    detect_bearing_wear,
-    detect_coupling_misalignment,
-    detect_brake_jitter,
-    detect_car_imbalance,
 ]
 
 
