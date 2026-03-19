@@ -396,21 +396,32 @@ workflow:
           def _option_json(payload, key):\n    echarts = _as_dict(payload.get(\"echarts\"\
           ))\n    item = _as_dict(echarts.get(key))\n    return str(item.get(\"option_json\"\
           ) or \"\").strip()\n\n\n\
+          def _fault_text(primary, preferred, candidate):\n    fault_type = str(primary.get(\"\
+          fault_type\") or preferred.get(\"fault_type\") or candidate.get(\"fault_type\") or \"\
+          none\")\n    if fault_type == \"rope_tension_abnormal\":\n        return \"钢丝绳状态异常\"\
+          \n    if fault_type == \"rope_looseness\":\n        return \"钢丝绳松动或张力不均\"\
+          \n    if fault_type == \"rubber_hardening\":\n        return \"橡胶圈硬化\"\
+          \n    return fault_type\n\n\n\
           def main(body):\n    text = str(body or \"\").strip()\n    try:\n     \
           \   payload = json.loads(text) if text else {}\n    except Exception:\n\
           \        payload = {\"status\": \"unknown\", \"detail\": \"latest status payload is\
           \ not valid json\"}\n\n    payload = _as_dict(payload)\n    status = str(payload.get(\"\
           status\", \"unknown\"))\n    risk = _as_dict(payload.get(\"risk\"))\n  \
-          \  preferred = _as_dict(payload.get(\"preferred_issue\"))\n    top_candidate\
-          \ = _as_dict(payload.get(\"top_candidate\"))\n    waveforms = _as_dict(payload.get(\"\
-          waveform_payload\"))\n    latest_file = str(payload.get(\"latest_file_name\"\
-          ) or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
-          generated_at_ms\"))\n    fault_type = str(preferred.get(\"fault_type\")\
-          \ or top_candidate.get(\"fault_type\") or \"none\")\n    fault_score = preferred.get(\"\
-          score\", top_candidate.get(\"score\", 0))\n    risk_now = str(risk.get(\"risk_level_now\"\
-          , \"unknown\"))\n    risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"\
-          ))\n    summary = (\n        f\"检测日期={detected_at}; 状态={status}; 候选故障={fault_type};\
-          \ 分数={fault_score}; \"\n        f\"当前风险={risk_now}; 24h风险={risk_24h}; 最新文件={latest_file}\"\
+          \  rope_primary = _as_dict(payload.get(\"rope_primary\"))\n    preferred = _as_dict(payload.get(\"\
+          preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
+          ))\n    auxiliary_results = payload.get(\"auxiliary_results\", []) if isinstance(payload.get(\"\
+          auxiliary_results\"), list) else []\n    first_aux = auxiliary_results[0] if auxiliary_results and isinstance(auxiliary_results[0], dict) else {}\n\
+          \    waveforms = _as_dict(payload.get(\"waveform_payload\"))\n    latest_file = str(payload.get(\"\
+          latest_file_name\") or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
+          generated_at_ms\"))\n    fault_type = _fault_text(rope_primary, preferred, top_candidate)\n\
+          \    fault_score = rope_primary.get(\"score\", preferred.get(\"score\", top_candidate.get(\"\
+          score\", 0)))\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"\
+          ))\n    risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    rope_branch = str(rope_primary.get(\"\
+          rope_branch\", \"\")).strip()\n    aux_fault = str(first_aux.get(\"fault_type\"\
+          , \"none\") or \"none\")\n    aux_score = first_aux.get(\"score\", 0)\n    summary\
+          \ = (\n        f\"检测日期={detected_at}; 状态={status}; 钢丝绳主判断={fault_type};\
+          \ 分数={fault_score}; \"\n        f\"分支={rope_branch or 'unknown'}; 当前风险={risk_now};\
+          \ 24h风险={risk_24h}; 辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file}\"\
           \n    )\n    return {\n        \"status_json\": json.dumps(payload, ensure_ascii=False),\n\
           \        \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
           \        \"acc_chart\": _option_json(waveforms, \"acceleration\"),\n   \
@@ -478,10 +489,10 @@ workflow:
           text: "你是电梯在线状态回复助手。你只能依据下面这份“最近一次定时批诊断结果”回答，不能编造不存在的故障、风险或历史。\n\n站点名：{{#env.site_name#}}\n\
             用户问题：{{#sys.query#}}\n最新状态摘要：{{#status_parse.status_summary#}}\n最新状态 JSON：\n\
             {{#status_parse.status_json#}}\n\n输出要求：\n1. 先直接回答用户问题。\n2. 然后固定输出五行：\n\
-            \   检测日期：\n   当前状态：\n   最新候选故障：\n   当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的\
+            \   检测日期：\n   当前状态：\n   钢丝绳主判断：\n   当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的\
             \ generated_at_ms，对用户明确展示具体日期时间。\n4. 如果附带波形图，可在正文里简要引用波形观察，但不要编造图上没有的信息。\n\
-            5. 如果状态是 normal，明确写“当前未见明确异常证据”。\n6. 如果状态是 watch_only，明确写“存在可疑特征，建议继续观察或尽快复测”。\n\
-            7. 如果状态是 candidate_faults，明确写“出现高置信候选，建议安排现场复核”。\n8. 用自然中文，不要输出 JSON，不要夸大结论。\n"
+            5. 如果状态是 normal，明确写“当前未见明确异常证据”。\n6. 如果状态是 watch_only，明确写“钢丝绳存在可疑特征，建议继续观察或尽快复测”。\n\
+            7. 如果状态是 candidate_faults，明确写“钢丝绳状态异常高置信，建议安排现场复核”。\n8. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n9. 用自然中文，不要输出 JSON，不要夸大结论。\n"
         selected: false
         title: 在线状态回答
         type: llm
@@ -838,15 +849,26 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: "import json\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
-          \    try:\n        payload = json.loads(text) if text else {}\n    except\
-          \ Exception:\n        payload = {}\n    screening = payload.get(\"screening\"\
-          , {}) if isinstance(payload, dict) else {}\n    status = str(screening.get(\"\
-          status\", \"unknown\"))\n    top_candidate = payload.get(\"top_candidate\"\
-          , {}) if isinstance(payload, dict) else {}\n    if isinstance(top_candidate,\
-          \ dict) and top_candidate.get(\"fault_type\"):\n        summary = f\"筛查状态：{status}；高置信候选：{top_candidate.get('fault_type')}；分数：{top_candidate.get('score',\
-          \ 0)}。\"\n    else:\n        summary = f\"筛查状态：{status}。\"\n    return {\n\
-          \        \"diagnosis_json\": json.dumps(payload, ensure_ascii=False),\n\
+        code: "import json\n\n\ndef _as_dict(value):\n    return value if isinstance(value,\
+          \ dict) else {}\n\n\ndef _fault_text(primary, candidate):\n    fault_type\
+          \ = str(primary.get(\"fault_type\") or candidate.get(\"fault_type\") or \"none\")\n\
+          \    if fault_type == \"rope_tension_abnormal\":\n        return \"钢丝绳状态异常\"\
+          \n    if fault_type == \"rope_looseness\":\n        return \"钢丝绳松动或张力不均\"\
+          \n    return fault_type\n\n\ndef main(body):\n    text = str(body or \"\
+          \").strip()\n    try:\n        payload = json.loads(text) if text else\
+          \ {}\n    except Exception:\n        payload = {}\n    payload = payload\
+          \ if isinstance(payload, dict) else {}\n    screening = _as_dict(payload.get(\"screening\"\
+          ))\n    status = str(screening.get(\"status\", \"unknown\"))\n    rope_primary\
+          \ = _as_dict(payload.get(\"rope_primary\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
+          ))\n    auxiliary_results = payload.get(\"auxiliary_results\", []) if isinstance(payload.get(\"\
+          auxiliary_results\"), list) else []\n    first_aux = auxiliary_results[0] if auxiliary_results and isinstance(auxiliary_results[0], dict) else {}\n\
+          \    branch = str(rope_primary.get(\"rope_branch\", \"\")).strip()\n   \
+          \ if rope_primary.get(\"fault_type\") or top_candidate.get(\"fault_type\"\
+          ):\n        summary = (\n            f\"筛查状态：{status}；钢丝绳主判断：{_fault_text(rope_primary,\
+          \ top_candidate)}；\"\n            f\"分数：{rope_primary.get('score', top_candidate.get('score',\
+          \ 0))}；分支：{branch or 'unknown'}；\"\n            f\"辅助异常：{first_aux.get('fault_type',\
+          \ 'none')}。\"\n        )\n    else:\n        summary = f\"筛查状态：{status}。\"\
+          \n    return {\n        \"diagnosis_json\": json.dumps(payload, ensure_ascii=False),\n\
           \        \"diagnosis_summary\": summary,\n    }\n"
         code_language: python3
         desc: ''

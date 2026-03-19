@@ -23,6 +23,7 @@ _FAULT_LABELS = {
     "mechanical_looseness": "机械连接松动",
     "rail_wear": "导轨磨损",
     "rope_looseness": "钢丝绳松动或张力不均",
+    "rope_tension_abnormal": "钢丝绳状态异常",
     "rubber_hardening": "减振橡胶硬化",
     "unknown": "暂无明确故障类型",
 }
@@ -38,6 +39,7 @@ _FAULT_EXPLANATIONS = {
     "mechanical_looseness": "系统看到连接件松动类振动特征，建议检查紧固件、底座和连接部位。",
     "rail_wear": "系统看到与导轨或导靴磨损相似的振动模式，建议结合现场磨痕一起判断。",
     "rope_looseness": "系统看到与钢丝绳张力不均或松动相似的振动模式，建议优先检查钢丝绳受力是否均衡。",
+    "rope_tension_abnormal": "系统看到与钢丝绳张力状态异常相似的振动模式，建议优先检查钢丝绳张力、张力均衡和曳引轮接触状态。",
     "rubber_hardening": "系统看到减振橡胶变硬后常见的竖向响应和耦合变化，建议检查减振橡胶老化情况。",
     "unknown": "当前没有足够证据把问题稳定归到某一类具体故障。",
 }
@@ -266,11 +268,11 @@ def _default_actions(status: str, issue_fault_type: str, dispatch_hours: int) ->
             "如果现场已经出现异响、抖动或乘坐不适，再补采一次数据做复核。",
             "建议持续积累健康样本，后续对比会更稳定。",
         ]
-    if issue_fault_type == "rope_looseness":
+    if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
         return [
-            f"建议在 {max(1, dispatch_hours)} 小时内检查各根钢丝绳张力是否均衡。",
+            f"建议在 {max(1, dispatch_hours)} 小时内检查各根钢丝绳的张力状态和张力均衡。",
             "检查曳引轮绳槽磨损、打滑痕迹和钢丝绳外观状态。",
-            "处理后再复测一次，确认异常是否回落。",
+            "处理后再复测一次，确认钢丝绳异常信号是否回落。",
         ]
     if issue_fault_type == "rubber_hardening":
         return [
@@ -313,6 +315,7 @@ def build_report_context(
     package = maintenance_package if isinstance(maintenance_package, dict) else {}
     waveforms = waveform_payload if isinstance(waveform_payload, dict) else {}
     top_fault = dict(diag.get("top_fault", {})) if isinstance(diag.get("top_fault"), dict) else {}
+    rope_primary = dict(diag.get("rope_primary", {})) if isinstance(diag.get("rope_primary"), dict) else {}
     summary = dict(diag.get("summary", {})) if isinstance(diag.get("summary"), dict) else {}
     screening = dict(diag.get("screening", {})) if isinstance(diag.get("screening"), dict) else {}
     risk = dict(package.get("risk", {})) if isinstance(package.get("risk"), dict) else {}
@@ -350,6 +353,9 @@ def build_report_context(
         "preferred_fault_type": preferred_fault_type,
         "preferred_fault_label": _fault_label(preferred_fault_type),
         "preferred_fault_score": preferred_fault_score,
+        "rope_branch": str(rope_primary.get("rope_branch", "")),
+        "rope_rule_score": _safe_float(rope_primary.get("rope_rule_score"), 0.0),
+        "rope_model_probability": _safe_float(rope_primary.get("rope_model_probability"), 0.0),
         "risk_score_now": risk_now,
         "risk_24h": risk_24h,
         "risk_level_now": str(risk.get("risk_level_now", "normal")),
@@ -386,6 +392,7 @@ def build_report_context(
             "level": str(top_fault.get("level", "normal")),
             "reasons": list(top_fault.get("reasons", [])) if isinstance(top_fault.get("reasons"), list) else [],
         },
+        "rope_primary": rope_primary,
         "preferred_issue": {
             "fault_type": preferred_fault_type,
             "fault_label": _fault_label(preferred_fault_type),

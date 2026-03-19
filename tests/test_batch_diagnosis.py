@@ -64,6 +64,16 @@ def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, 
             "candidate_count": len(candidate_faults),
             "watch_count": len(watch_faults),
         },
+        "rope_primary": {
+            "fault_type": top_fault.get("fault_type", ""),
+            "score": top_fault.get("score", 0.0),
+            "level": top_fault.get("level", "normal"),
+            "triggered": bool(top_fault.get("triggered", False)),
+            "rope_rule_score": top_fault.get("score", 0.0),
+            "rope_model_probability": 0.0,
+            "rope_branch": "",
+            "rope_spectral_snapshot": {},
+        },
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,
@@ -94,6 +104,7 @@ class TestBatchDiagnosis(unittest.TestCase):
         self.assertEqual(payload["status"], "normal")
         self.assertEqual(payload["preferred_issue"], {})
         self.assertEqual(payload["latest_result"]["top_fault"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rubber_hardening")
 
     def test_run_batch_diagnosis_writes_latest_status_and_history(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -138,6 +149,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertEqual(payload["status"], "candidate_faults")
             self.assertEqual(payload["preferred_issue"]["fault_type"], "rope_looseness")
             self.assertIn("risk", payload)
+            self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rope_looseness")
             self.assertTrue(latest_json.exists())
             self.assertTrue(history_jsonl.exists())
 

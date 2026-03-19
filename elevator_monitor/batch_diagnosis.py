@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from report.fault_algorithms._base import build_feature_baseline, build_feature_pack, load_rows
+from report.fault_algorithms._base import build_clean_feature_baseline, build_feature_pack, load_rows
 from report.fault_algorithms.detect_rope_looseness import ROPE_BASELINE_KEYS
 from report.fault_algorithms.detect_rubber_hardening import RUBBER_BASELINE_KEYS
 from report.fault_algorithms.run_all import MIN_EFFECTIVE_SAMPLES, run_all_rows
@@ -96,7 +96,7 @@ def _build_baseline_summary(
         )
         feature_rows = [build_feature_pack(load_rows(path)) for path in files]
         if feature_rows:
-            payload = build_feature_baseline(feature_rows, _BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
+            payload = build_clean_feature_baseline(feature_rows, _BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
             payload["source"] = str(root)
             payload["window"] = {"start_hhmm": baseline_start_hhmm, "end_hhmm": baseline_end_hhmm}
             stats = payload.get("stats", {})
@@ -235,8 +235,8 @@ def _build_risk(history: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _status_recommendation(status: str, fault_type: str) -> str:
     if status == "candidate_faults":
-        if fault_type == "rope_looseness":
-            return "建议尽快检查钢丝绳张力均衡、曳引轮绳槽和钢丝绳外观。"
+        if fault_type in {"rope_looseness", "rope_tension_abnormal"}:
+            return "建议尽快检查钢丝绳张力状态、张力均衡、曳引轮绳槽和钢丝绳外观。"
         if fault_type == "rubber_hardening":
             return "建议尽快检查曳引机减振橡胶是否老化、变硬或开裂。"
         return "建议尽快安排现场复核，确认候选故障是否成立。"
@@ -340,10 +340,12 @@ def run_batch_diagnosis(
         "latest_result": {
             "summary": dict(latest_result.get("summary", {})) if isinstance(latest_result.get("summary"), dict) else {},
             "screening": dict(latest_result.get("screening", {})) if isinstance(latest_result.get("screening"), dict) else {},
+            "rope_primary": dict(latest_result.get("rope_primary", {})) if isinstance(latest_result.get("rope_primary"), dict) else {},
             "top_fault": _compact_fault(latest_result.get("top_fault", {})),
             "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
             "candidate_faults": [_compact_fault(item) for item in latest_result.get("candidate_faults", []) if isinstance(item, dict)],
             "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
+            "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
         },
         "history": history,
     }

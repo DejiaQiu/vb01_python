@@ -43,7 +43,7 @@ Branch rule:
 
 Purpose:
 
-- Answer questions like "current status", "latest candidate fault", "should maintenance be arranged now"
+- Answer questions like "current status", "steel rope main diagnosis", "should maintenance be arranged now"
 - In the edge/cloud path, read the latest synchronized elevator status and recent alert event
 - Keep the old scheduled-batch `latest_status.json` query path only as a compatibility fallback
 
@@ -67,8 +67,10 @@ Suggested environment variables:
 Expected status payload:
 
 - `status`
-- `preferred_issue`
-- `top_candidate`
+- `rope_primary`
+- `auxiliary_results`
+- `preferred_issue` as a compatibility field
+- `top_candidate` as a compatibility field
 - `watch_faults`
 - `risk`
 - `recommendation`
@@ -82,7 +84,8 @@ Typical answer style:
 - current status
 - risk level now
 - 24h risk level
-- latest candidate fault
+- steel rope main diagnosis
+- auxiliary abnormal clues when present
 - whether to continue observation or arrange inspection
 - then fixed charts in this order: acceleration, gyroscope, acceleration magnitude
 
@@ -136,7 +139,7 @@ What it does:
 
 - pick the latest batch of CSV files
 - reuse `report/fault_algorithms/run_all.py`
-- keep rope looseness and rubber hardening as the main candidate-fault scripts
+- keep `rope_tension_abnormal` as the main screening result and `rubber_hardening` as an auxiliary explanation result
 - compute a trend-aware risk score from repeated appearances, score trend, and data quality
 - write a stable `latest_status.json` for Dify to query
 
@@ -192,6 +195,8 @@ Output:
 - `workflow_type`
 - `generated_at_ms`
 - `status`
+- `rope_primary`
+- `auxiliary_results`
 - `preferred_issue`
 - `top_candidate`
 - `watch_faults`
@@ -222,10 +227,12 @@ Output:
 
 - `summary`
 - `screening`
+- `rope_primary`
 - `top_fault`
 - `top_candidate`
 - `candidate_faults`
 - `watch_faults`
+- `auxiliary_results`
 - `results`
 
 ### `POST /api/v1/workflows/diagnosis-report`
@@ -237,6 +244,13 @@ Output:
 - `dify_report_inputs`
 - `report_markdown_draft`
 - `waveform_payload` when enabled or supplied
+
+Important Dify mapping rule:
+
+- Prefer `rope_primary` as the main diagnosis source
+- Treat `preferred_issue` and `top_candidate` as compatibility fallbacks only
+- Treat `auxiliary_results` as optional secondary clues and do not elevate them above `rope_primary`
+- When available, expose `rope_branch`, `rope_rule_score`, and `rope_model_probability` in report rendering
 
 ## Recommended Product Split
 

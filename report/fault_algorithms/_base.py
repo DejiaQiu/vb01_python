@@ -92,6 +92,66 @@ def build_feature_baseline(
     }
 
 
+def build_clean_feature_baseline(
+    feature_rows: list[dict[str, Any]],
+    keys: tuple[str, ...],
+    *,
+    min_samples: int = 8,
+    z_threshold: float = 3.5,
+    max_drop_ratio: float = 0.20,
+) -> dict[str, Any]:
+    baseline = build_feature_baseline(feature_rows, keys, min_samples=min_samples)
+    stats = baseline.get("stats", {}) if isinstance(baseline.get("stats"), dict) else {}
+    eligible_rows = [row for row in feature_rows if parse_int(row.get("n")) is not None and int(parse_int(row.get("n")) or 0) >= min_samples]
+    rows_to_use = eligible_rows if len(eligible_rows) >= 3 else feature_rows
+    if len(rows_to_use) < 5 or not stats:
+        baseline["cleaning"] = {
+            "mode": "skipped",
+            "candidate_count": int(len(rows_to_use)),
+            "kept_count": int(len(rows_to_use)),
+            "dropped_count": 0,
+            "z_threshold": float(z_threshold),
+        }
+        return baseline
+
+    scored_rows: list[tuple[float, dict[str, Any]]] = []
+    for row in rows_to_use:
+        z_values: list[float] = []
+        for key, item in stats.items():
+            value = parse_float(row.get(key))
+            if value is None or not math.isfinite(value):
+                continue
+            median = parse_float(item.get("median"))
+            scale = parse_float(item.get("scale"))
+            if median is None or scale is None or scale <= EPS:
+                continue
+            z_values.append(abs((float(value) - float(median)) / max(float(scale), 1e-6)))
+        scored_rows.append((safe_mean(z_values), row))
+
+    outliers = [(score, row) for score, row in scored_rows if score > float(z_threshold)]
+    drop_ratio = len(outliers) / max(1, len(scored_rows))
+    if not outliers:
+        kept_rows = [row for _, row in scored_rows]
+        mode = "none"
+    elif drop_ratio <= max(0.0, float(max_drop_ratio)):
+        kept_rows = [row for score, row in scored_rows if score <= float(z_threshold)]
+        mode = "threshold"
+    else:
+        keep_n = max(3, int(math.ceil(len(scored_rows) * (1.0 - max(0.0, float(max_drop_ratio))))))
+        kept_rows = [row for _, row in sorted(scored_rows, key=lambda item: item[0])[:keep_n]]
+        mode = "top80"
+
+    cleaned = build_feature_baseline(kept_rows, keys, min_samples=min_samples)
+    cleaned["cleaning"] = {
+        "mode": mode,
+        "candidate_count": int(len(scored_rows)),
+        "kept_count": int(len(kept_rows)),
+        "dropped_count": int(max(0, len(scored_rows) - len(kept_rows))),
+        "z_threshold": float(z_threshold),
+    }
+    return cleaned
+
+
 def safe_mean(xs: list[float]) -> float:
     if not xs:
         return 0.0
@@ -130,6 +190,79 @@ def qspread(xs: list[float], low_q: float = 5.0, high_q: float = 95.0) -> float:
     if not xs:
         return 0.0
     return float(safe_percentile(xs, high_q) - safe_percentile(xs, low_q))
+
+
+def _hann_window(size: int) -> list[float]:
+    if size <= 1:
+        return [1.0] * max(1, size)
+    return [0.5 - 0.5 * math.cos((2.0 * math.pi * idx) / (size - 1)) for idx in range(size)]
+
+
+def _goertzel_power(xs: list[float], fs_hz: float, target_hz: float) -> float:
+    if len(xs) < 4 or fs_hz <= EPS or target_hz <= 0.0 or target_hz >= fs_hz / 2.0:
+        return 0.0
+    omega = 2.0 * math.pi * target_hz / fs_hz
+    coeff = 2.0 * math.cos(omega)
+    prev = 0.0
+    prev2 = 0.0
+    for value in xs:
+        cur = value + coeff * prev - prev2
+        prev2 = prev
+        prev = cur
+    power = prev2 * prev2 + prev * prev - coeff * prev * prev2
+    return float(max(0.0, power))
+
+
+def _scan_spectrum(
+    xs: list[float],
+    fs_hz: float,
+    *,
+    freq_min_hz: float = 0.3,
+    freq_max_hz: float = 8.0,
+    step_hz: float = 0.1,
+) -> list[tuple[float, float]]:
+    if len(xs) < 8 or fs_hz <= EPS or step_hz <= EPS:
+        return []
+    centered = [float(value) - safe_mean(xs) for value in xs]
+    if not any(abs(value) > EPS for value in centered):
+        return []
+    window = _hann_window(len(centered))
+    windowed = [centered[idx] * window[idx] for idx in range(len(centered))]
+    max_freq = min(float(freq_max_hz), fs_hz / 2.0 - 0.05)
+    if max_freq <= freq_min_hz:
+        return []
+
+    bins: list[tuple[float, float]] = []
+    freq = max(0.05, float(freq_min_hz))
+    while freq <= max_freq + 1e-9:
+        bins.append((round(freq, 4), _goertzel_power(windowed, fs_hz=fs_hz, target_hz=freq)))
+        freq += step_hz
+    return bins
+
+
+def spectral_features(
+    xs: list[float],
+    fs_hz: float,
+    *,
+    low_band_hz: tuple[float, float] = (0.3, 1.8),
+    freq_min_hz: float = 0.3,
+    freq_max_hz: float = 8.0,
+    step_hz: float = 0.1,
+) -> dict[str, float]:
+    bins = _scan_spectrum(xs, fs_hz, freq_min_hz=freq_min_hz, freq_max_hz=freq_max_hz, step_hz=step_hz)
+    if not bins:
+        return {"dom_freq_hz": 0.0, "peak_ratio": 0.0, "low_band_ratio": 0.0}
+    total_power = sum(power for _, power in bins)
+    if total_power <= EPS:
+        return {"dom_freq_hz": 0.0, "peak_ratio": 0.0, "low_band_ratio": 0.0}
+    dom_freq_hz, dom_power = max(bins, key=lambda item: item[1])
+    low_lo, low_hi = low_band_hz
+    low_band_power = sum(power for freq, power in bins if low_lo <= freq <= low_hi)
+    return {
+        "dom_freq_hz": float(dom_freq_hz),
+        "peak_ratio": float(dom_power / total_power),
+        "low_band_ratio": float(low_band_power / total_power),
+    }
 
 
 def rms_ac(xs: list[float]) -> float:
@@ -358,6 +491,16 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
 
     energy_x_over_y = float(ax_pack["rms_ac"] / max(ay_pack["rms_ac"], EPS))
     energy_z_over_xy = float(az_pack["rms_ac"] / max(0.5 * (ax_pack["rms_ac"] + ay_pack["rms_ac"]), EPS))
+    ax_mean = safe_mean(ax)
+    ay_mean = safe_mean(ay)
+    az_mean = safe_mean(az)
+    lateral_signal = [
+        math.sqrt((ax[idx] - ax_mean) * (ax[idx] - ax_mean) + (ay[idx] - ay_mean) * (ay[idx] - ay_mean))
+        for idx in range(n)
+    ]
+    vertical_signal = [az[idx] - az_mean for idx in range(n)]
+    lateral_spectrum = spectral_features(lateral_signal, fs_hz=fs_hz)
+    vertical_spectrum = spectral_features(vertical_signal, fs_hz=fs_hz)
 
     temp_rise = 0.0
     if t_arr:
@@ -393,6 +536,12 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
         "corr_yz": float(corr_yz),
         "energy_x_over_y": float(energy_x_over_y),
         "energy_z_over_xy": float(energy_z_over_xy),
+        "lat_dom_freq_hz": float(lateral_spectrum["dom_freq_hz"]),
+        "lat_peak_ratio": float(lateral_spectrum["peak_ratio"]),
+        "lat_low_band_ratio": float(lateral_spectrum["low_band_ratio"]),
+        "z_dom_freq_hz": float(vertical_spectrum["dom_freq_hz"]),
+        "z_peak_ratio": float(vertical_spectrum["peak_ratio"]),
+        "z_low_band_ratio": float(vertical_spectrum["low_band_ratio"]),
         "temp_rise": float(temp_rise),
         "sx_std": float(safe_std(sx)),
         "sy_std": float(safe_std(sy)),
@@ -456,6 +605,10 @@ def build_result(
             "peak_rate_hz": round(float(features.get("peak_rate_hz", 0.0)), 6),
             "lateral_ratio": round(float(features.get("lateral_ratio", 0.0)), 4),
             "ag_corr": round(float(features.get("ag_corr", 0.0)), 4),
+            "lat_dom_freq_hz": round(float(features.get("lat_dom_freq_hz", 0.0)), 4),
+            "lat_peak_ratio": round(float(features.get("lat_peak_ratio", 0.0)), 4),
+            "z_dom_freq_hz": round(float(features.get("z_dom_freq_hz", 0.0)), 4),
+            "z_peak_ratio": round(float(features.get("z_peak_ratio", 0.0)), 4),
             "used_new_only": bool(features.get("used_new_only", False)),
             "new_ratio": round(float(features.get("new_ratio", 0.0)), 4),
         },

@@ -1,8 +1,10 @@
+import math
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from report.fault_algorithms._base import build_feature_pack
 from report.fault_algorithms.detect_rope_looseness import detect
 from report.fault_algorithms.rope_looseness_timeline import run_timeline
 
@@ -52,12 +54,38 @@ def _feature_overrides(**kwargs):
         "gx_ax_corr": 0.10,
         "gy_ay_corr": 0.10,
         "jerk_rms": 0.002,
+        "rope_disable_model": True,
     }
     base.update(kwargs)
     return base
 
 
 class TestRopeLoosenessDetector(unittest.TestCase):
+    def test_feature_pack_extracts_frequency_features(self):
+        rows = []
+        ts0 = 1_000_000
+        for i in range(120):
+            angle = (2.0 * math.pi * i) / 20.0
+            rows.append(
+                {
+                    "ts_ms": ts0 + i * 50,
+                    "Ax": 0.03 * math.sin(angle),
+                    "Ay": 0.02 * math.cos(angle),
+                    "Az": -0.98 + 0.08 * math.sin(angle),
+                    "Gx": 0.1,
+                    "Gy": 0.2,
+                    "Gz": 0.3,
+                    "is_new_frame": 1,
+                }
+            )
+
+        features = build_feature_pack(rows)
+
+        self.assertGreater(features["lat_dom_freq_hz"], 0.4)
+        self.assertGreater(features["lat_peak_ratio"], 0.01)
+        self.assertGreater(features["z_dom_freq_hz"], 0.4)
+        self.assertGreater(features["z_peak_ratio"], 0.01)
+
     def test_scale_invariant_when_using_baseline(self):
         base_result = detect(
             _feature_overrides(
@@ -171,7 +199,7 @@ class TestRopeLoosenessDetector(unittest.TestCase):
         self.assertGreaterEqual(result["score"], 60.0, msg=result)
         self.assertTrue(result["triggered"], msg=result)
         self.assertTrue(
-            ("confirm=structural_single_window_pass" in result["reasons"]) or ("confirm=swing_single_window_pass" in result["reasons"]),
+            ("confirm=loose_like_pass" in result["reasons"]) or ("confirm=tight_like_pass" in result["reasons"]),
             msg=result,
         )
 

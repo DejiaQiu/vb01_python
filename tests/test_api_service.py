@@ -48,6 +48,8 @@ class TestAPIService(unittest.TestCase):
 
         payload = response.json()
         self.assertIn("top_fault", payload)
+        self.assertIn("rope_primary", payload)
+        self.assertIn("auxiliary_results", payload)
         self.assertIn("results", payload)
         self.assertEqual(payload["input"], "inline_rows")
 

@@ -1,24 +1,55 @@
-"""钢丝绳松动单窗诊断流程。
+"""钢丝绳状态异常单窗诊断。
 
-1. 先从窗口特征中读取摆动、横向失衡、加角耦合、尖峰冲击等核心指标。
-2. 如果有健康基线，就用 median + MAD 做 robust 相对评分；没有基线时退回无量纲 fallback 评分。
-3. 再做运行态门控：正常情况依赖运行幅值，低幅值但结构证据很强时允许 structural rescue。
-4. 最后做高精度优先的单窗确认：证据不足就封顶到 watch，只把高置信窗口直接触发为 rope_looseness。
-5. build_result 会继续结合样本数、质量因子等通用规则输出最终结果。
+当前实现不再把目标限定为“低频横摆型松绳”，而是统一输出
+`rope_tension_abnormal`，并在内部区分两类更常见的振动画像：
+
+1. loose_like
+   更偏横向摆动、低频能量和加角耦合增强。
+2. tight_like
+   更偏竖向传递、jerk / 角速度增强和谱峰集中。
+
+如果仓库里存在 centroid 二分类模型，则最终分数会融合模型概率；
+否则退回规则分数，保证离线/API 不会因为模型文件缺失而直接失效。
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import math
+import os
+import sys
+from pathlib import Path
+from typing import Any, Optional
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from ._base import build_result, clamp, parse_float, ratio_to_100, run_detector_cli
+    from elevator_monitor.training.centroid_model import CentroidModel, fit_centroid_classifier
 except ImportError:  # pragma: no cover
-    from _base import build_result, clamp, parse_float, ratio_to_100, run_detector_cli
+    CentroidModel = None  # type: ignore[assignment]
+    fit_centroid_classifier = None  # type: ignore[assignment]
 
-FAULT_TYPE = "rope_looseness"
+try:
+    from ._base import (
+        build_clean_feature_baseline,
+        build_feature_pack,
+        build_result,
+        clamp,
+        load_rows,
+        parse_float,
+        ratio_to_100,
+    )
+except ImportError:  # pragma: no cover
+    from _base import build_clean_feature_baseline, build_feature_pack, build_result, clamp, load_rows, parse_float, ratio_to_100
 
-# 优先使用健康基线对特征做 robust 归一化；当缺少基线时，回退到无量纲自归一化公式。
+
+FAULT_TYPE = "rope_tension_abnormal"
+DEFAULT_MODEL_PATH = Path("data/models/rope_tension_abnormal_centroid.json")
+MODEL_ENV_KEY = "ROPE_TENSION_MODEL_JSON"
+
 ROPE_BASELINE_KEYS = (
     "a_rms_ac",
     "a_p2p",
@@ -31,24 +62,45 @@ ROPE_BASELINE_KEYS = (
     "peak_rate_hz",
     "a_crest",
     "a_kurt",
+    "energy_z_over_xy",
+    "az_p2p",
+    "az_cv",
+    "az_jerk_rms",
+    "corr_xz",
+    "corr_yz",
+    "lat_dom_freq_hz",
+    "lat_peak_ratio",
+    "lat_low_band_ratio",
+    "z_dom_freq_hz",
+    "z_peak_ratio",
+    "z_low_band_ratio",
 )
 
-# 这组阈值服务于“高精度优先”的单窗确认：
-# 只有横向失衡、低频摆动、耦合增强、运行态这几类证据同时成立，才允许单窗直接触发。
-# 否则最多保留到 watch 分数，避免把正常工况波动直接推成维保告警。
-CONSERVATIVE_ALARM_ENABLED = True
-CONSERVATIVE_SCORE_CAP = 59.0
-SWING_CONFIRM_MIN_SCORE = 68.0
-SWING_CONFIRM_MIN_COMPONENT = 36.0
-SWING_CONFIRM_MIN_SWAY = 28.0
-SWING_CONFIRM_MAX_SPIKY = 58.0
-SWING_CONFIRM_MIN_RUN = 42.0
-STRUCTURAL_CONFIRM_MIN_SCORE = 66.0
-STRUCTURAL_CONFIRM_MIN_COMPONENT = 58.0
-STRUCTURAL_CONFIRM_MAX_SPIKY = 42.0
-STRUCTURAL_RESCUE_MIN_SCORE = 40.0
+ROPE_MODEL_FIELDS = (
+    "lateral_ratio_rel",
+    "energy_z_over_xy_rel",
+    "a_rms_ac_rel",
+    "a_p2p_rel",
+    "g_std_rel",
+    "az_p2p_rel",
+    "az_cv_rel",
+    "az_jerk_rms_rel",
+    "ag_corr_rel",
+    "corr_xz_shift",
+    "corr_yz_shift",
+    "lat_dom_freq_low",
+    "lat_peak_ratio_rel",
+    "lat_low_band_ratio_rel",
+    "z_dom_freq_shift",
+    "z_peak_ratio_rel",
+    "z_low_band_ratio_rel",
+)
+
+MIN_SCORE_WATCH = 45.0
+MIN_SCORE_TRIGGER = 60.0
 
 EPS = 1e-9
+_MODEL_CACHE: dict[str, tuple[float, Optional["CentroidModel"]]] = {}
 
 
 def _to_float(value: object, default: float = 0.0) -> float:
@@ -56,8 +108,14 @@ def _to_float(value: object, default: float = 0.0) -> float:
     return float(parsed if parsed is not None else default)
 
 
-def _baseline_stats(features: dict) -> dict[str, tuple[float, float]]:
-    # baseline 既可能是 {"stats": {...}}，也可能直接是特征统计字典，这里统一解包。
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _baseline_stats(features: dict[str, Any]) -> dict[str, tuple[float, float]]:
     payload = features.get("baseline")
     if not isinstance(payload, dict):
         return {}
@@ -69,7 +127,6 @@ def _baseline_stats(features: dict) -> dict[str, tuple[float, float]]:
             continue
         med = parse_float(item.get("median"))
         scale = parse_float(item.get("scale"))
-        # scale 来自 robust MAD 尺度，必须为正；过小则兜底到极小正数防止除零。
         if med is None or scale is None or scale <= EPS:
             continue
         stats[str(key)] = (float(med), float(max(scale, 1e-6)))
@@ -77,7 +134,6 @@ def _baseline_stats(features: dict) -> dict[str, tuple[float, float]]:
 
 
 def _positive_z(value: float, stat: tuple[float, float] | None) -> float:
-    # 只关心“比正常更大”的偏移。比如横向比、耦合、波动幅值升高通常更可疑。
     if stat is None:
         return 0.0
     med, scale = stat
@@ -85,210 +141,464 @@ def _positive_z(value: float, stat: tuple[float, float] | None) -> float:
 
 
 def _negative_z(value: float, stat: tuple[float, float] | None) -> float:
-    # 只关心“比正常更小”的偏移。这里主要用于低频摇摆指标 zc_rate_hz 的下降。
     if stat is None:
         return 0.0
     med, scale = stat
     return max(0.0, (med - float(value)) / max(scale, 1e-6))
 
 
-def _z_to_100(z_value: float, softness: float = 2.2) -> float:
-    # z-score 不是直接拿来当最终分数，而是压到 0~100，避免某个单一特征极端放大后主导总分。
+def _abs_shift_z(value: float, stat: tuple[float, float] | None) -> float:
+    if stat is None:
+        return 0.0
+    med, scale = stat
+    return abs(float(value) - med) / max(scale, 1e-6)
+
+
+def _z_to_100(z_value: float, softness: float = 2.0) -> float:
     z_pos = max(0.0, float(z_value))
     if z_pos <= 0.0:
         return 0.0
-    return 100.0 * (1.0 - math.exp(-z_pos / max(0.4, float(softness))))
+    return 100.0 * (1.0 - math.exp(-z_pos / max(0.35, float(softness))))
 
 
 def _normalize_weight(count: int, total: int) -> float:
-    # 基线覆盖特征越多，robust 基线分数权重越高；覆盖不足时自动向 fallback 倾斜。
     if total <= 0:
         return 0.0
     coverage = max(0.0, min(1.0, float(count) / float(total)))
-    return 0.82 * coverage
+    return 0.85 * coverage
 
 
-def detect(features: dict) -> dict:
-    # 运行态门控改为无量纲比值，避免把某一台梯子的绝对幅值写死。
+def _score_to_level(score: float) -> str:
+    if score >= 80.0:
+        return "alarm"
+    if score >= 60.0:
+        return "warning"
+    if score >= 45.0:
+        return "watch"
+    return "normal"
+
+
+def _branch_fallback_components(features: dict[str, Any]) -> dict[str, float]:
     a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
     g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
-    a_rms_ac = _to_float(features.get("a_rms_ac"))
+    az_rms_ac = max(abs(_to_float(features.get("az_rms_ac"), 0.01)), 1e-4)
+    lateral_ratio = _to_float(features.get("lateral_ratio"), 1.0)
+    zc_rate_hz = _to_float(features.get("zc_rate_hz"))
     a_p2p = _to_float(features.get("a_p2p"))
+    g_std = _to_float(features.get("g_std"))
+    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
     a_crest = _to_float(features.get("a_crest"))
     a_kurt = _to_float(features.get("a_kurt"))
-    g_std = _to_float(features.get("g_std"))
-    zc_rate_hz = _to_float(features.get("zc_rate_hz"))
-    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
-    lateral_ratio = _to_float(features.get("lateral_ratio"), 1.0)
+    energy_z_over_xy = _to_float(features.get("energy_z_over_xy"), 1.0)
+    az_p2p = _to_float(features.get("az_p2p"))
+    az_cv = _to_float(features.get("az_cv"))
+    az_jerk_rms = _to_float(features.get("az_jerk_rms"))
     ag_corr = _to_float(features.get("ag_corr"))
     gx_ax_corr = _to_float(features.get("gx_ax_corr"))
     gy_ay_corr = _to_float(features.get("gy_ay_corr"))
+    corr_xz = _to_float(features.get("corr_xz"))
+    corr_yz = _to_float(features.get("corr_yz"))
+    lat_dom_freq_hz = _to_float(features.get("lat_dom_freq_hz"))
+    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
+    lat_low_band_ratio = _to_float(features.get("lat_low_band_ratio"))
+    z_dom_freq_hz = _to_float(features.get("z_dom_freq_hz"))
+    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
+    z_low_band_ratio = _to_float(features.get("z_low_band_ratio"))
+
     corr_major = max(ag_corr, gx_ax_corr, gy_ay_corr)
-
-    # 先判断“这窗像不像有效运行数据”。
-    # 这里不直接把低运行态样本剔除，而是给后续总分一个抑制系数，
-    # 这样既能保守压低停梯/微动误报，又能给结构型异常留一条救援通道。
-    run_a_ratio = a_rms_ac / max(a_mean, EPS)
-    run_g_ratio = g_std / max(g_mean, EPS)
-    run_state_score = (
-        0.55 * ratio_to_100(run_a_ratio, 0.0015, 0.020)
-        + 0.25 * ratio_to_100(run_g_ratio, 0.015, 0.350)
-        + 0.20 * ratio_to_100(zc_rate_hz, 0.05, 3.00)
+    loose_lateral = (
+        0.55 * ratio_to_100(lateral_ratio, 1.05, 1.75)
+        + 0.45 * ratio_to_100(lat_low_band_ratio, 0.22, 0.70)
+    )
+    loose_lowfreq = (
+        0.70 * (100.0 - ratio_to_100(lat_dom_freq_hz, 1.40, 4.80))
+        + 0.30 * (100.0 - ratio_to_100(zc_rate_hz, 0.80, 6.00))
+    )
+    loose_coupling = (
+        0.65 * ratio_to_100(corr_major, 0.10, 0.60)
+        + 0.35 * ratio_to_100(max(abs(corr_xz), abs(corr_yz)), 0.06, 0.40)
+    )
+    loose_energy = (
+        0.55 * ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
+        + 0.45 * ratio_to_100(g_std / max(g_mean, EPS), 0.020, 0.260)
     )
 
-    # 回退公式：全用无量纲比值和相关性，尽量减少对单梯绝对幅值的依赖。
-    # 适用于没有健康基线的梯子，此时目标不是精确分级，而是保守筛出“像松绳”的模式。
-    sway_energy_ratio = (a_p2p / max(a_mean, EPS)) * max(lateral_ratio, 1.0)
-    s_lateral_rel = ratio_to_100(lateral_ratio, 1.05, 2.50)
-    s_lowfreq_rel = 100.0 - ratio_to_100(zc_rate_hz, 0.80, 6.00)
-    s_coupling_rel = ratio_to_100(corr_major, 0.10, 0.70)
-    s_sway_rel = ratio_to_100(sway_energy_ratio, 0.020, 0.240)
-    p_spiky_rel = (
-        0.40 * ratio_to_100(a_crest, 1.8, 4.2)
-        + 0.30 * ratio_to_100(a_kurt, 1.0, 5.5)
-        + 0.20 * ratio_to_100(peak_rate_hz / max(zc_rate_hz, 0.20), 1.5, 7.0)
-        + 0.10 * ratio_to_100(peak_rate_hz, 0.4, 4.0)
+    tight_vertical = (
+        0.45 * ratio_to_100(energy_z_over_xy, 0.95, 1.85)
+        + 0.30 * ratio_to_100(az_p2p, 0.10, 0.28)
+        + 0.25 * ratio_to_100(az_cv, 0.45, 1.30)
     )
-    fallback_score = (
-        0.33 * s_lateral_rel
-        + 0.28 * s_lowfreq_rel
-        + 0.23 * s_coupling_rel
-        + 0.16 * s_sway_rel
-        - 0.35 * p_spiky_rel
+    tight_dynamic = (
+        0.55 * ratio_to_100(az_jerk_rms / max(az_rms_ac, EPS), 0.85, 2.50)
+        + 0.45 * ratio_to_100(g_std / max(g_mean, EPS), 0.020, 0.260)
     )
-    fallback_score = clamp(fallback_score, 0.0, 100.0)
+    tight_spectral = (
+        0.50 * ratio_to_100(z_peak_ratio, 0.16, 0.58)
+        + 0.25 * ratio_to_100(z_low_band_ratio, 0.18, 0.68)
+        + 0.25 * ratio_to_100(lat_peak_ratio, 0.16, 0.52)
+    )
 
-    baseline_stats = _baseline_stats(features)
-    baseline_count = len([key for key in ROPE_BASELINE_KEYS if key in baseline_stats])
-    baseline_weight = _normalize_weight(baseline_count, len(ROPE_BASELINE_KEYS))
-    baseline_mode = "robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback"
-
-    # robust 通道的物理含义：
-    # - lateral: 横向失衡是否高于健康状态
-    # - lowfreq: 摆动频率是否变慢，更像松绳后的低频摇摆
-    # - amp: 动态包络/角速度波动是否高于正常
-    # - coupling: 加速度与角速度耦合是否增强
-    # - spiky: 是否更像冲击/敲击，而不是松绳摆振
-    robust_lateral = _z_to_100(_positive_z(lateral_ratio, baseline_stats.get("lateral_ratio")))
-    robust_lowfreq = _z_to_100(_negative_z(zc_rate_hz, baseline_stats.get("zc_rate_hz")))
-    robust_amp = _z_to_100(
-        max(
-            _positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")),
-            _positive_z(a_p2p, baseline_stats.get("a_p2p")),
-            0.65 * _positive_z(g_std, baseline_stats.get("g_std")),
-        )
+    spiky_penalty = (
+        0.45 * ratio_to_100(a_crest, 1.8, 4.2)
+        + 0.35 * ratio_to_100(a_kurt, 1.0, 6.0)
+        + 0.20 * ratio_to_100(peak_rate_hz, 0.40, 4.00)
     )
-    robust_coupling = _z_to_100(
+
+    return {
+        "loose_lateral": float(loose_lateral),
+        "loose_lowfreq": float(loose_lowfreq),
+        "loose_coupling": float(loose_coupling),
+        "loose_energy": float(loose_energy),
+        "tight_vertical": float(tight_vertical),
+        "tight_dynamic": float(tight_dynamic),
+        "tight_spectral": float(tight_spectral),
+        "spiky_penalty": float(spiky_penalty),
+        "corr_major": float(corr_major),
+        "lat_dom_freq_hz": float(lat_dom_freq_hz),
+        "lat_peak_ratio": float(lat_peak_ratio),
+        "lat_low_band_ratio": float(lat_low_band_ratio),
+        "z_dom_freq_hz": float(z_dom_freq_hz),
+        "z_peak_ratio": float(z_peak_ratio),
+        "z_low_band_ratio": float(z_low_band_ratio),
+    }
+
+
+def _branch_robust_components(features: dict[str, Any], baseline_stats: dict[str, tuple[float, float]]) -> dict[str, float]:
+    lateral_ratio = _to_float(features.get("lateral_ratio"), 1.0)
+    zc_rate_hz = _to_float(features.get("zc_rate_hz"))
+    a_rms_ac = _to_float(features.get("a_rms_ac"))
+    a_p2p = _to_float(features.get("a_p2p"))
+    g_std = _to_float(features.get("g_std"))
+    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
+    a_crest = _to_float(features.get("a_crest"))
+    a_kurt = _to_float(features.get("a_kurt"))
+    energy_z_over_xy = _to_float(features.get("energy_z_over_xy"), 1.0)
+    az_p2p = _to_float(features.get("az_p2p"))
+    az_cv = _to_float(features.get("az_cv"))
+    az_jerk_rms = _to_float(features.get("az_jerk_rms"))
+    ag_corr = _to_float(features.get("ag_corr"))
+    gx_ax_corr = _to_float(features.get("gx_ax_corr"))
+    gy_ay_corr = _to_float(features.get("gy_ay_corr"))
+    corr_xz = _to_float(features.get("corr_xz"))
+    corr_yz = _to_float(features.get("corr_yz"))
+    lat_dom_freq_hz = _to_float(features.get("lat_dom_freq_hz"))
+    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
+    lat_low_band_ratio = _to_float(features.get("lat_low_band_ratio"))
+    z_dom_freq_hz = _to_float(features.get("z_dom_freq_hz"))
+    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
+    z_low_band_ratio = _to_float(features.get("z_low_band_ratio"))
+
+    loose_lateral = _z_to_100(
+        0.60 * _positive_z(lateral_ratio, baseline_stats.get("lateral_ratio"))
+        + 0.40 * _positive_z(lat_low_band_ratio, baseline_stats.get("lat_low_band_ratio"))
+    )
+    loose_lowfreq = _z_to_100(
+        0.70 * _negative_z(lat_dom_freq_hz, baseline_stats.get("lat_dom_freq_hz"))
+        + 0.30 * _negative_z(zc_rate_hz, baseline_stats.get("zc_rate_hz"))
+    )
+    loose_coupling = _z_to_100(
         max(
             _positive_z(ag_corr, baseline_stats.get("ag_corr")),
             _positive_z(gx_ax_corr, baseline_stats.get("gx_ax_corr")),
             _positive_z(gy_ay_corr, baseline_stats.get("gy_ay_corr")),
+            0.75 * _abs_shift_z(corr_xz, baseline_stats.get("corr_xz")),
+            0.75 * _abs_shift_z(corr_yz, baseline_stats.get("corr_yz")),
         )
     )
-    robust_spiky = _z_to_100(
+    loose_energy = _z_to_100(
+        max(
+            _positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")),
+            _positive_z(a_p2p, baseline_stats.get("a_p2p")),
+            0.70 * _positive_z(g_std, baseline_stats.get("g_std")),
+            0.50 * _positive_z(lat_peak_ratio, baseline_stats.get("lat_peak_ratio")),
+        )
+    )
+
+    tight_vertical = _z_to_100(
+        max(
+            _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy")),
+            _positive_z(az_p2p, baseline_stats.get("az_p2p")),
+            0.75 * _positive_z(az_cv, baseline_stats.get("az_cv")),
+        )
+    )
+    tight_dynamic = _z_to_100(
+        max(
+            _positive_z(az_jerk_rms, baseline_stats.get("az_jerk_rms")),
+            0.75 * _positive_z(g_std, baseline_stats.get("g_std")),
+            0.45 * _positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")),
+        )
+    )
+    tight_spectral = _z_to_100(
+        max(
+            _positive_z(z_peak_ratio, baseline_stats.get("z_peak_ratio")),
+            _positive_z(z_low_band_ratio, baseline_stats.get("z_low_band_ratio")),
+            0.60 * _positive_z(lat_peak_ratio, baseline_stats.get("lat_peak_ratio")),
+            0.55 * _abs_shift_z(z_dom_freq_hz, baseline_stats.get("z_dom_freq_hz")),
+        )
+    )
+    spiky_penalty = _z_to_100(
         0.45 * _positive_z(a_crest, baseline_stats.get("a_crest"))
         + 0.35 * _positive_z(a_kurt, baseline_stats.get("a_kurt"))
         + 0.20 * _positive_z(peak_rate_hz, baseline_stats.get("peak_rate_hz"))
     )
-    robust_score = (
-        0.30 * robust_lateral
-        + 0.24 * robust_lowfreq
-        + 0.24 * robust_amp
-        + 0.22 * robust_coupling
-        - 0.32 * robust_spiky
+
+    corr_major = max(ag_corr, gx_ax_corr, gy_ay_corr)
+    return {
+        "loose_lateral": float(loose_lateral),
+        "loose_lowfreq": float(loose_lowfreq),
+        "loose_coupling": float(loose_coupling),
+        "loose_energy": float(loose_energy),
+        "tight_vertical": float(tight_vertical),
+        "tight_dynamic": float(tight_dynamic),
+        "tight_spectral": float(tight_spectral),
+        "spiky_penalty": float(spiky_penalty),
+        "corr_major": float(corr_major),
+        "lat_dom_freq_hz": float(lat_dom_freq_hz),
+        "lat_peak_ratio": float(lat_peak_ratio),
+        "lat_low_band_ratio": float(lat_low_band_ratio),
+        "z_dom_freq_hz": float(z_dom_freq_hz),
+        "z_peak_ratio": float(z_peak_ratio),
+        "z_low_band_ratio": float(z_low_band_ratio),
+    }
+
+
+def _mix_components(
+    baseline_weight: float,
+    robust: dict[str, float],
+    fallback: dict[str, float],
+) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for key in fallback.keys():
+        out[key] = float(baseline_weight * robust.get(key, 0.0) + (1.0 - baseline_weight) * fallback.get(key, 0.0))
+    return out
+
+
+def _build_model_row(features: dict[str, Any], mixed: dict[str, float], baseline_stats: dict[str, tuple[float, float]]) -> dict[str, float]:
+    a_rms_ac = _to_float(features.get("a_rms_ac"))
+    a_p2p = _to_float(features.get("a_p2p"))
+    g_std = _to_float(features.get("g_std"))
+    energy_z_over_xy = _to_float(features.get("energy_z_over_xy"))
+    az_p2p = _to_float(features.get("az_p2p"))
+    az_cv = _to_float(features.get("az_cv"))
+    az_jerk_rms = _to_float(features.get("az_jerk_rms"))
+    ag_corr = _to_float(features.get("ag_corr"))
+    corr_xz = _to_float(features.get("corr_xz"))
+    corr_yz = _to_float(features.get("corr_yz"))
+    lat_dom_freq_hz = _to_float(features.get("lat_dom_freq_hz"))
+    z_dom_freq_hz = _to_float(features.get("z_dom_freq_hz"))
+    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
+    lat_low_band_ratio = _to_float(features.get("lat_low_band_ratio"))
+    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
+    z_low_band_ratio = _to_float(features.get("z_low_band_ratio"))
+
+    return {
+        "lateral_ratio_rel": float(mixed.get("loose_lateral", 0.0)),
+        "energy_z_over_xy_rel": float(mixed.get("tight_vertical", 0.0)),
+        "a_rms_ac_rel": float(_z_to_100(_positive_z(a_rms_ac, baseline_stats.get("a_rms_ac"))) if baseline_stats else ratio_to_100(a_rms_ac, 0.004, 0.025)),
+        "a_p2p_rel": float(_z_to_100(_positive_z(a_p2p, baseline_stats.get("a_p2p"))) if baseline_stats else ratio_to_100(a_p2p, 0.08, 0.30)),
+        "g_std_rel": float(_z_to_100(_positive_z(g_std, baseline_stats.get("g_std"))) if baseline_stats else ratio_to_100(g_std, 0.04, 0.30)),
+        "az_p2p_rel": float(_z_to_100(_positive_z(az_p2p, baseline_stats.get("az_p2p"))) if baseline_stats else ratio_to_100(az_p2p, 0.08, 0.26)),
+        "az_cv_rel": float(_z_to_100(_positive_z(az_cv, baseline_stats.get("az_cv"))) if baseline_stats else ratio_to_100(az_cv, 0.35, 1.30)),
+        "az_jerk_rms_rel": float(_z_to_100(_positive_z(az_jerk_rms, baseline_stats.get("az_jerk_rms"))) if baseline_stats else ratio_to_100(az_jerk_rms, 0.25, 1.20)),
+        "ag_corr_rel": float(_z_to_100(_positive_z(ag_corr, baseline_stats.get("ag_corr"))) if baseline_stats else ratio_to_100(ag_corr, 0.08, 0.60)),
+        "corr_xz_shift": float(_z_to_100(_abs_shift_z(corr_xz, baseline_stats.get("corr_xz"))) if baseline_stats else ratio_to_100(abs(corr_xz), 0.05, 0.40)),
+        "corr_yz_shift": float(_z_to_100(_abs_shift_z(corr_yz, baseline_stats.get("corr_yz"))) if baseline_stats else ratio_to_100(abs(corr_yz), 0.05, 0.40)),
+        "lat_dom_freq_low": float(_z_to_100(_negative_z(lat_dom_freq_hz, baseline_stats.get("lat_dom_freq_hz"))) if baseline_stats else 100.0 - ratio_to_100(lat_dom_freq_hz, 1.40, 4.80)),
+        "lat_peak_ratio_rel": float(_z_to_100(_positive_z(lat_peak_ratio, baseline_stats.get("lat_peak_ratio"))) if baseline_stats else ratio_to_100(lat_peak_ratio, 0.16, 0.55)),
+        "lat_low_band_ratio_rel": float(_z_to_100(_positive_z(lat_low_band_ratio, baseline_stats.get("lat_low_band_ratio"))) if baseline_stats else ratio_to_100(lat_low_band_ratio, 0.20, 0.70)),
+        "z_dom_freq_shift": float(_z_to_100(_abs_shift_z(z_dom_freq_hz, baseline_stats.get("z_dom_freq_hz"))) if baseline_stats else ratio_to_100(abs(z_dom_freq_hz - 2.5), 0.10, 3.00)),
+        "z_peak_ratio_rel": float(_z_to_100(_positive_z(z_peak_ratio, baseline_stats.get("z_peak_ratio"))) if baseline_stats else ratio_to_100(z_peak_ratio, 0.16, 0.55)),
+        "z_low_band_ratio_rel": float(_z_to_100(_positive_z(z_low_band_ratio, baseline_stats.get("z_low_band_ratio"))) if baseline_stats else ratio_to_100(z_low_band_ratio, 0.18, 0.68)),
+    }
+
+
+def _resolve_model_path(features: dict[str, Any]) -> Optional[Path]:
+    explicit = str(features.get("rope_model_path", "")).strip()
+    if explicit:
+        path = Path(explicit).expanduser().resolve()
+        return path if path.exists() else None
+    env_path = str(os.getenv(MODEL_ENV_KEY, "")).strip()
+    if env_path:
+        path = Path(env_path).expanduser().resolve()
+        return path if path.exists() else None
+    path = DEFAULT_MODEL_PATH.expanduser().resolve()
+    return path if path.exists() else None
+
+
+def _load_model(features: dict[str, Any]) -> Optional["CentroidModel"]:
+    if bool(features.get("rope_disable_model", False)):
+        return None
+    model_obj = features.get("rope_model")
+    if CentroidModel is None:
+        return None
+    if isinstance(model_obj, CentroidModel):
+        return model_obj
+    if isinstance(model_obj, dict):
+        return CentroidModel.from_dict(model_obj)
+
+    path = _resolve_model_path(features)
+    if path is None:
+        return None
+
+    cache_key = str(path)
+    mtime = path.stat().st_mtime
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached is not None and abs(cached[0] - mtime) < 1e-9:
+        return cached[1]
+
+    model = CentroidModel.load(str(path))
+    _MODEL_CACHE[cache_key] = (mtime, model)
+    return model
+
+
+def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
+    a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
+    g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
+    a_rms_ac = _to_float(features.get("a_rms_ac"))
+    g_std = _to_float(features.get("g_std"))
+    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
+    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
+    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
+
+    run_a_ratio = a_rms_ac / max(a_mean, EPS)
+    run_g_ratio = g_std / max(g_mean, EPS)
+    run_state_score = (
+        0.45 * ratio_to_100(run_a_ratio, 0.0015, 0.020)
+        + 0.35 * ratio_to_100(run_g_ratio, 0.015, 0.320)
+        + 0.20 * ratio_to_100(max(lat_peak_ratio, z_peak_ratio), 0.10, 0.50)
     )
-    robust_score = clamp(robust_score, 0.0, 100.0)
 
-    # 最终单窗分数是“robust 基线分数 + fallback 分数”的加权混合：
-    # 基线越完整，越相信单梯历史；基线越弱，越退回到通用无量纲规则。
-    score = baseline_weight * robust_score + (1.0 - baseline_weight) * fallback_score
-    score = clamp(score, 0.0, 100.0)
-    mode = "robust_relative_sway"
+    baseline_stats = _baseline_stats(features)
+    baseline_count = len([key for key in ROPE_BASELINE_KEYS if key in baseline_stats])
+    baseline_weight = _normalize_weight(baseline_count, len(ROPE_BASELINE_KEYS))
+    fallback = _branch_fallback_components(features)
+    robust = _branch_robust_components(features, baseline_stats) if baseline_stats else {key: 0.0 for key in fallback.keys()}
+    mixed = _mix_components(baseline_weight, robust, fallback)
 
-    # 组件证据统一到同一尺度，用于后续保守确认。
-    lateral_component = baseline_weight * robust_lateral + (1.0 - baseline_weight) * s_lateral_rel
-    lowfreq_component = baseline_weight * robust_lowfreq + (1.0 - baseline_weight) * s_lowfreq_rel
-    coupling_component = baseline_weight * robust_coupling + (1.0 - baseline_weight) * s_coupling_rel
-    sway_component = baseline_weight * robust_amp + (1.0 - baseline_weight) * s_sway_rel
-    spiky_penalty = baseline_weight * robust_spiky + (1.0 - baseline_weight) * p_spiky_rel
-    structural_component = 0.45 * lateral_component + 0.35 * coupling_component + 0.20 * lowfreq_component
-    gate_rescue_score = structural_component - 0.35 * spiky_penalty
+    loose_score = (
+        0.30 * mixed["loose_lateral"]
+        + 0.24 * mixed["loose_lowfreq"]
+        + 0.24 * mixed["loose_coupling"]
+        + 0.22 * mixed["loose_energy"]
+    )
+    tight_score = (
+        0.36 * mixed["tight_vertical"]
+        + 0.34 * mixed["tight_dynamic"]
+        + 0.30 * mixed["tight_spectral"]
+    )
+    dominant_branch = "loose_like" if loose_score >= tight_score else "tight_like"
+    branch_score = max(loose_score, tight_score)
+    rule_score = clamp(branch_score - 0.30 * mixed["spiky_penalty"], 0.0, 100.0)
 
-    # 运行态门控分两路：
-    # - 正常情况靠 run_state_score 判断这窗是不是有效运行窗
-    # - 如果幅值不大，但结构型证据很强，则允许 structural rescue 兜底
-    # 这是为了减少“低振幅松绳窗”被误压成正常。
+    gate_rescue_score = branch_score - 0.25 * mixed["spiky_penalty"]
     effective_run_score = max(run_state_score, gate_rescue_score)
     gate_mode = "running"
     if effective_run_score < 30.0:
-        score *= 0.35
+        rule_score *= 0.40
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
-        score *= 0.70
+        rule_score *= 0.72
         gate_mode = "weak_running_suppressed"
-    elif run_state_score < 30.0 and gate_rescue_score >= STRUCTURAL_RESCUE_MIN_SCORE:
-        gate_mode = "structural_rescue"
+    rule_score = clamp(rule_score, 0.0, 100.0)
+
+    if dominant_branch == "loose_like":
+        branch_pass = (
+            rule_score >= 62.0
+            and mixed["loose_lateral"] >= 32.0
+            and mixed["loose_coupling"] >= 28.0
+            and mixed["loose_lowfreq"] >= 22.0
+            and mixed["spiky_penalty"] <= 58.0
+            and effective_run_score >= 35.0
+        )
+    else:
+        branch_pass = (
+            rule_score >= 60.0
+            and mixed["tight_vertical"] >= 34.0
+            and mixed["tight_dynamic"] >= 32.0
+            and mixed["tight_spectral"] >= 28.0
+            and mixed["spiky_penalty"] <= 58.0
+            and effective_run_score >= 35.0
+        )
+    confirm_mode = f"{dominant_branch}_pass" if branch_pass else "suppressed_single_window"
+    if not branch_pass:
+        rule_score = min(rule_score, 59.0)
+
+    return {
+        "baseline_count": baseline_count,
+        "baseline_weight": baseline_weight,
+        "baseline_mode": "robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback",
+        "run_state_score": float(run_state_score),
+        "effective_run_score": float(effective_run_score),
+        "gate_rescue_score": float(gate_rescue_score),
+        "gate_mode": gate_mode,
+        "confirm_mode": confirm_mode,
+        "fallback": fallback,
+        "robust": robust,
+        "mixed": mixed,
+        "loose_score": float(loose_score),
+        "tight_score": float(tight_score),
+        "dominant_branch": dominant_branch,
+        "rule_score": float(rule_score),
+        "model_row": _build_model_row(features, mixed, baseline_stats),
+        "spectral_snapshot": {
+            "lat_dom_freq_hz": round(mixed["lat_dom_freq_hz"], 4),
+            "lat_peak_ratio": round(mixed["lat_peak_ratio"], 4),
+            "lat_low_band_ratio": round(mixed["lat_low_band_ratio"], 4),
+            "z_dom_freq_hz": round(mixed["z_dom_freq_hz"], 4),
+            "z_peak_ratio": round(mixed["z_peak_ratio"], 4),
+            "z_low_band_ratio": round(mixed["z_low_band_ratio"], 4),
+        },
+    }
+
+
+def detect(features: dict[str, Any]) -> dict[str, Any]:
+    analysis = _analyze_rope_signature(features)
+    model_probability = 0.0
+    model = _load_model(features)
+    if model is not None:
+        proba = model.predict_proba_vec([analysis["model_row"][name] for name in model.feature_names])
+        model_probability = float(proba.get(FAULT_TYPE, 0.0))
+
+    if model is not None:
+        score = 0.65 * (model_probability * 100.0) + 0.35 * float(analysis["rule_score"])
+    else:
+        score = float(analysis["rule_score"])
+    if str(analysis["confirm_mode"]) == "suppressed_single_window":
+        score = min(score, 59.0)
     score = clamp(score, 0.0, 100.0)
 
-    confirm_mode = "conservative_disabled"
-    if CONSERVATIVE_ALARM_ENABLED:
-        # swing 通道偏向传统“摆振型松绳”：
-        # 横向、低频、耦合、摆动幅值都要到位，且不能太像尖峰冲击。
-        swing_single_window_pass = (
-            score >= SWING_CONFIRM_MIN_SCORE
-            and lateral_component >= SWING_CONFIRM_MIN_COMPONENT
-            and lowfreq_component >= SWING_CONFIRM_MIN_COMPONENT
-            and coupling_component >= SWING_CONFIRM_MIN_COMPONENT
-            and sway_component >= SWING_CONFIRM_MIN_SWAY
-            and spiky_penalty <= SWING_CONFIRM_MAX_SPIKY
-            and effective_run_score >= SWING_CONFIRM_MIN_RUN
-        )
-        # structural 通道偏向“低幅值但结构非常像松绳”的情况。
-        # 它不要求 sway_component 很高，但要求横向失衡、耦合、低频同时强成立。
-        structural_single_window_pass = (
-            score >= STRUCTURAL_CONFIRM_MIN_SCORE
-            and min(lateral_component, coupling_component, lowfreq_component) >= STRUCTURAL_CONFIRM_MIN_COMPONENT
-            and spiky_penalty <= STRUCTURAL_CONFIRM_MAX_SPIKY
-            and effective_run_score >= STRUCTURAL_RESCUE_MIN_SCORE
-        )
-        if swing_single_window_pass:
-            confirm_mode = "swing_single_window_pass"
-        elif structural_single_window_pass:
-            confirm_mode = "structural_single_window_pass"
-        else:
-            # 单窗证据不足时把分数封顶到 watch 区，交给时间序列连续确认再决定。
-            score = min(score, CONSERVATIVE_SCORE_CAP)
-            confirm_mode = "suppressed_single_window"
-        score = clamp(score, 0.0, 100.0)
-
-    # reasons 里保留中间量，方便现场复盘：
-    # 既能看最终分数，也能看是被 gate 压低、被 conservative 封顶，还是哪类组件证据不足。
     reasons = [
-        f"mode={mode}",
-        f"baseline_mode={baseline_mode}",
-        f"baseline_features={baseline_count}",
-        f"baseline_weight={baseline_weight:.3f}",
-        f"gate={gate_mode}",
-        f"confirm={confirm_mode}",
-        f"run_state_score={run_state_score:.2f}",
-        f"effective_run_score={effective_run_score:.2f}",
-        f"gate_rescue_score={gate_rescue_score:.2f}",
-        f"score_fallback={fallback_score:.2f}",
-        f"score_robust={robust_score:.2f}",
-        f"component_lateral={lateral_component:.2f}",
-        f"component_lowfreq={lowfreq_component:.2f}",
-        f"component_coupling={coupling_component:.2f}",
-        f"component_sway={sway_component:.2f}",
-        f"component_structural={structural_component:.2f}",
-        f"spiky_penalty={spiky_penalty:.2f}",
-        f"corr_major={corr_major:.4f}",
-        f"zc_rate_hz={zc_rate_hz:.6f}",
-        f"lateral_ratio={lateral_ratio:.4f}",
-        f"a_rms_ratio={run_a_ratio:.6f}",
-        f"g_std_ratio={run_g_ratio:.6f}",
+        "mode=rope_tension_abnormal_v2",
+        f"baseline_mode={analysis['baseline_mode']}",
+        f"baseline_features={analysis['baseline_count']}",
+        f"baseline_weight={analysis['baseline_weight']:.3f}",
+        f"gate={analysis['gate_mode']}",
+        f"confirm={analysis['confirm_mode']}",
+        f"rope_branch={analysis['dominant_branch']}",
+        f"rope_rule_score={analysis['rule_score']:.2f}",
+        f"rope_model_probability={model_probability:.4f}",
+        f"score_loose_like={analysis['loose_score']:.2f}",
+        f"score_tight_like={analysis['tight_score']:.2f}",
+        f"run_state_score={analysis['run_state_score']:.2f}",
+        f"effective_run_score={analysis['effective_run_score']:.2f}",
+        f"gate_rescue_score={analysis['gate_rescue_score']:.2f}",
+        f"component_loose_lateral={analysis['mixed']['loose_lateral']:.2f}",
+        f"component_loose_lowfreq={analysis['mixed']['loose_lowfreq']:.2f}",
+        f"component_loose_coupling={analysis['mixed']['loose_coupling']:.2f}",
+        f"component_loose_energy={analysis['mixed']['loose_energy']:.2f}",
+        f"component_tight_vertical={analysis['mixed']['tight_vertical']:.2f}",
+        f"component_tight_dynamic={analysis['mixed']['tight_dynamic']:.2f}",
+        f"component_tight_spectral={analysis['mixed']['tight_spectral']:.2f}",
+        f"spiky_penalty={analysis['mixed']['spiky_penalty']:.2f}",
+        f"lat_dom_freq_hz={analysis['mixed']['lat_dom_freq_hz']:.4f}",
+        f"lat_peak_ratio={analysis['mixed']['lat_peak_ratio']:.4f}",
+        f"lat_low_band_ratio={analysis['mixed']['lat_low_band_ratio']:.4f}",
+        f"z_dom_freq_hz={analysis['mixed']['z_dom_freq_hz']:.4f}",
+        f"z_peak_ratio={analysis['mixed']['z_peak_ratio']:.4f}",
+        f"z_low_band_ratio={analysis['mixed']['z_low_band_ratio']:.4f}",
     ]
 
-    return build_result(
+    result = build_result(
         fault_type=FAULT_TYPE,
         score=score,
         reasons=reasons,
@@ -296,7 +606,222 @@ def detect(features: dict) -> dict:
         min_samples=8,
         penalize_low_fs=False,
     )
+    result["rope_rule_score"] = round(float(analysis["rule_score"]), 2)
+    result["rope_model_probability"] = round(float(model_probability), 4)
+    result["rope_branch"] = str(analysis["dominant_branch"])
+    result["rope_spectral_snapshot"] = dict(analysis["spectral_snapshot"])
+    return result
+
+
+def _select_csv_files(root: Path) -> list[Path]:
+    if not root.exists():
+        raise FileNotFoundError(f"dataset dir not found: {root}")
+    preferred = sorted(root.rglob("vibration_30s_*.csv"))
+    if preferred:
+        return preferred
+    return sorted(root.rglob("*.csv"))
+
+
+def _build_baseline_from_dir(root: Path) -> dict[str, Any]:
+    feature_rows = [build_feature_pack(load_rows(path)) for path in _select_csv_files(root)]
+    baseline = build_clean_feature_baseline(feature_rows, ROPE_BASELINE_KEYS, min_samples=8)
+    baseline["source"] = str(root)
+    return baseline
+
+
+def _dataset_samples(dir_path: Path, *, label: str, baseline: dict[str, Any]) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    for path in _select_csv_files(dir_path):
+        features = build_feature_pack(load_rows(path))
+        features["baseline"] = baseline
+        analysis = _analyze_rope_signature(features)
+        samples.append(
+            {
+                "path": str(path),
+                "name": path.name,
+                "label": label,
+                "features": dict(analysis["model_row"]),
+                "result": detect(features),
+            }
+        )
+    return samples
+
+
+def _fit_model_from_samples(samples: list[dict[str, Any]]) -> "CentroidModel":
+    if CentroidModel is None or fit_centroid_classifier is None:
+        raise RuntimeError("centroid model support is unavailable")
+    feature_rows = [sample["features"] for sample in samples]
+    labels = [str(sample["label"]) for sample in samples]
+    matrix = [[_safe_float(row.get(name), 0.0) for name in ROPE_MODEL_FIELDS] for row in feature_rows]
+    return fit_centroid_classifier(
+        features=matrix,
+        labels=labels,
+        feature_names=list(ROPE_MODEL_FIELDS),
+        task="rope_tension_abnormal",
+    )
+
+
+def _evaluate_group(dir_path: Path, *, baseline: dict[str, Any], model: "CentroidModel", expected_positive: bool) -> dict[str, Any]:
+    paths = _select_csv_files(dir_path)
+    windows: list[dict[str, Any]] = []
+    candidate_count = 0
+    watch_count = 0
+    branch_counts = {"loose_like": 0, "tight_like": 0}
+
+    for path in paths:
+        features = build_feature_pack(load_rows(path))
+        features["baseline"] = baseline
+        features["rope_model"] = model
+        result = detect(features)
+        score = _safe_float(result.get("score"), 0.0)
+        branch = str(result.get("rope_branch", ""))
+        if branch in branch_counts:
+            branch_counts[branch] += 1
+        if score >= MIN_SCORE_TRIGGER and bool(result.get("triggered", False)):
+            candidate_count += 1
+        elif score >= MIN_SCORE_WATCH:
+            watch_count += 1
+        windows.append({"file": path.name, "score": round(score, 2), "branch": branch, "triggered": bool(result.get("triggered", False))})
+
+    count = len(windows)
+    candidate_ratio = candidate_count / max(1, count)
+    watch_ratio = watch_count / max(1, count)
+    if candidate_ratio >= 0.30 or candidate_count >= 2:
+        group_status = "candidate_faults"
+    elif watch_ratio >= 0.30 or watch_count >= 2:
+        group_status = "watch_only"
+    else:
+        group_status = "normal"
+
+    pass_condition = group_status != "normal" if expected_positive else candidate_count == 0
+    return {
+        "group": dir_path.name,
+        "count": count,
+        "candidate_count": candidate_count,
+        "watch_count": watch_count,
+        "candidate_ratio": round(candidate_ratio, 4),
+        "watch_ratio": round(watch_ratio, 4),
+        "group_status": group_status,
+        "expected_positive": expected_positive,
+        "pass": pass_condition,
+        "branch_distribution": branch_counts,
+        "windows": windows,
+    }
+
+
+def _cross_validate(data_root: Path, output_model: Path) -> dict[str, Any]:
+    required_dirs = {
+        "01_normal": data_root / "01_normal",
+        "02_normal": data_root / "02_normal",
+        "01_gangsisheng": data_root / "01_gangsisheng",
+        "02_gangsisheng": data_root / "02_gangsisheng",
+    }
+    optional_dirs = {
+        "01_xiangjiaoquan": data_root / "01_xiangjiaoquan",
+        "02_xiangjiaoquan": data_root / "02_xiangjiaoquan",
+    }
+    for name, path in required_dirs.items():
+        if not path.exists():
+            raise FileNotFoundError(f"missing validation dir: {name} -> {path}")
+
+    fold_specs = [
+        {
+            "name": "fold_01_to_02",
+            "train_normal": required_dirs["01_normal"],
+            "train_rope": required_dirs["01_gangsisheng"],
+            "eval_normal": required_dirs["02_normal"],
+            "eval_rope": required_dirs["02_gangsisheng"],
+            "eval_rubber": optional_dirs["02_xiangjiaoquan"],
+        },
+        {
+            "name": "fold_02_to_01",
+            "train_normal": required_dirs["02_normal"],
+            "train_rope": required_dirs["02_gangsisheng"],
+            "eval_normal": required_dirs["01_normal"],
+            "eval_rope": required_dirs["01_gangsisheng"],
+            "eval_rubber": optional_dirs["01_xiangjiaoquan"],
+        },
+    ]
+
+    folds: list[dict[str, Any]] = []
+    for spec in fold_specs:
+        train_baseline = _build_baseline_from_dir(spec["train_normal"])
+        train_samples = _dataset_samples(spec["train_normal"], label="normal", baseline=train_baseline)
+        train_samples.extend(_dataset_samples(spec["train_rope"], label=FAULT_TYPE, baseline=train_baseline))
+        model = _fit_model_from_samples(train_samples)
+
+        eval_baseline = _build_baseline_from_dir(spec["eval_normal"])
+        normal_metrics = _evaluate_group(spec["eval_normal"], baseline=eval_baseline, model=model, expected_positive=False)
+        rope_metrics = _evaluate_group(spec["eval_rope"], baseline=eval_baseline, model=model, expected_positive=True)
+        rubber_metrics = None
+        if spec["eval_rubber"].exists():
+            rubber_metrics = _evaluate_group(spec["eval_rubber"], baseline=eval_baseline, model=model, expected_positive=False)
+
+        folds.append(
+            {
+                "name": spec["name"],
+                "train_baseline_cleaning": dict(train_baseline.get("cleaning", {})),
+                "eval_baseline_cleaning": dict(eval_baseline.get("cleaning", {})),
+                "train_samples": len(train_samples),
+                "normal": normal_metrics,
+                "rope": rope_metrics,
+                "rubber": rubber_metrics,
+                "pass": bool(normal_metrics["pass"] and rope_metrics["pass"] and (rubber_metrics is None or rubber_metrics["pass"])),
+            }
+        )
+
+    baseline_01 = _build_baseline_from_dir(required_dirs["01_normal"])
+    baseline_02 = _build_baseline_from_dir(required_dirs["02_normal"])
+    final_samples = _dataset_samples(required_dirs["01_normal"], label="normal", baseline=baseline_01)
+    final_samples.extend(_dataset_samples(required_dirs["01_gangsisheng"], label=FAULT_TYPE, baseline=baseline_01))
+    final_samples.extend(_dataset_samples(required_dirs["02_normal"], label="normal", baseline=baseline_02))
+    final_samples.extend(_dataset_samples(required_dirs["02_gangsisheng"], label=FAULT_TYPE, baseline=baseline_02))
+    final_model = _fit_model_from_samples(final_samples)
+    final_model.metrics["cross_validation"] = folds
+    final_model.metrics["positive_label"] = FAULT_TYPE
+    final_model.metrics["negative_label"] = "normal"
+    final_model.metrics["sample_count"] = len(final_samples)
+    final_model.save(str(output_model))
+
+    return {
+        "data_root": str(data_root),
+        "output_model": str(output_model),
+        "folds": folds,
+        "final_model_metrics": dict(final_model.metrics),
+        "pass": all(bool(fold["pass"]) for fold in folds),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="钢丝绳状态异常识别与跨梯验证")
+    parser.add_argument("--input", default="", help="输入 CSV，用于单文件诊断")
+    parser.add_argument("--pretty", action="store_true", help="格式化输出 JSON")
+    parser.add_argument("--cross-validate", action="store_true", help="运行 1号梯<->2号梯 跨梯验证并训练最终模型")
+    parser.add_argument("--data-root", default="", help="跨梯验证数据根目录，需包含 01_normal/02_normal/01_gangsisheng/02_gangsisheng")
+    parser.add_argument("--output-model", default=str(DEFAULT_MODEL_PATH), help="跨梯验证完成后输出模型 JSON")
+    args = parser.parse_args()
+
+    if args.cross_validate:
+        if not str(args.data_root).strip():
+            raise SystemExit("--data-root is required with --cross-validate")
+        payload = _cross_validate(Path(args.data_root).expanduser().resolve(), Path(args.output_model).expanduser().resolve())
+        if args.pretty:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    if not str(args.input).strip():
+        raise SystemExit("--input is required unless --cross-validate is used")
+    rows = load_rows(Path(args.input))
+    features = build_feature_pack(rows)
+    result = detect(features)
+    if args.pretty:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(result, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(run_detector_cli(detect, description="钢丝绳松动识别（基线相对评分+低频摆动耦合）"))
+    raise SystemExit(main())

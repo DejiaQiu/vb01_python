@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
-    from ._base import build_feature_baseline, build_feature_pack, load_rows
+    from ._base import build_clean_feature_baseline, build_feature_pack, load_rows
     from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
     from .detect_rubber_hardening import RUBBER_BASELINE_KEYS, detect as detect_rubber_hardening
 except ImportError:  # pragma: no cover
-    from _base import build_feature_baseline, build_feature_pack, load_rows
+    from _base import build_clean_feature_baseline, build_feature_pack, load_rows
     from detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
     from detect_rubber_hardening import RUBBER_BASELINE_KEYS, detect as detect_rubber_hardening
 
@@ -24,11 +24,9 @@ HIGH_CONFIDENCE_QUALITY = 0.80
 WATCH_QUALITY = 0.60
 MIN_EFFECTIVE_SAMPLES = 8
 BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS + RUBBER_BASELINE_KEYS))
-
-DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [
-    detect_rope_looseness,
-    detect_rubber_hardening,
-]
+PRIMARY_DETECTOR: Callable[[dict[str, Any]], dict[str, Any]] = detect_rope_looseness
+AUXILIARY_DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [detect_rubber_hardening]
+DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [PRIMARY_DETECTOR, *AUXILIARY_DETECTORS]
 
 
 def _hhmmss(path: Path) -> str:
@@ -57,7 +55,7 @@ def _build_baseline_from_dir(input_dir: Path, start_hhmm: str, end_hhmm: str) ->
     feature_rows = [build_feature_pack(load_rows(path)) for path in _select_files(input_dir, start_hhmm, end_hhmm)]
     if not feature_rows:
         return None
-    baseline = build_feature_baseline(feature_rows, BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
+    baseline = build_clean_feature_baseline(feature_rows, BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
     baseline["source"] = str(input_dir)
     baseline["window"] = {"start_hhmm": start_hhmm, "end_hhmm": end_hhmm}
     return baseline
@@ -77,22 +75,19 @@ def _copy_result(result: dict[str, Any], *, screening: str) -> dict[str, Any]:
     return payload
 
 
-def _screen_results(results: list[dict[str, Any]], features: dict[str, Any]) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+def _screen_primary(result: dict[str, Any], features: dict[str, Any]) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     n_effective = int(features.get("n", 0))
     quality_ok = n_effective >= MIN_EFFECTIVE_SAMPLES
-
+    score = _score(result)
+    quality = _quality(result)
+    triggered = bool(result.get("triggered", False))
     candidates: list[dict[str, Any]] = []
     watch_faults: list[dict[str, Any]] = []
 
-    for result in results:
-        score = _score(result)
-        quality = _quality(result)
-        triggered = bool(result.get("triggered", False))
-        if quality_ok and triggered and score >= HIGH_CONFIDENCE_SCORE and quality >= HIGH_CONFIDENCE_QUALITY:
-            candidates.append(_copy_result(result, screening="high_confidence"))
-            continue
-        if quality_ok and score >= WATCH_SCORE and quality >= WATCH_QUALITY:
-            watch_faults.append(_copy_result(result, screening="watch"))
+    if quality_ok and triggered and score >= HIGH_CONFIDENCE_SCORE and quality >= HIGH_CONFIDENCE_QUALITY:
+        candidates.append(_copy_result(result, screening="high_confidence"))
+    elif quality_ok and score >= WATCH_SCORE and quality >= WATCH_QUALITY:
+        watch_faults.append(_copy_result(result, screening="watch"))
 
     if not quality_ok:
         status = "low_quality"
@@ -117,11 +112,13 @@ def run_all_rows(
     if baseline is not None:
         detector_features["baseline"] = baseline
 
-    results = [detector(detector_features) for detector in DETECTORS]
-    results = sorted(results, key=_score, reverse=True)
+    detectors = DETECTORS if DETECTORS else [PRIMARY_DETECTOR, *AUXILIARY_DETECTORS]
+    primary_result = detectors[0](detector_features)
+    auxiliary_results = [detector(detector_features) for detector in detectors[1:]]
+    auxiliary_results = sorted(auxiliary_results, key=_score, reverse=True)
 
-    screening_status, candidate_faults, watch_faults = _screen_results(results, detector_features)
-    top_fault = results[0] if results else {}
+    screening_status, candidate_faults, watch_faults = _screen_primary(primary_result, detector_features)
+    top_fault = primary_result if primary_result else {}
     top_candidate = candidate_faults[0] if candidate_faults else {}
 
     return {
@@ -142,11 +139,24 @@ def run_all_rows(
             "candidate_count": len(candidate_faults),
             "watch_count": len(watch_faults),
         },
+        "rope_primary": {
+            "fault_type": str(primary_result.get("fault_type", "")),
+            "score": _score(primary_result),
+            "level": str(primary_result.get("level", "normal")),
+            "triggered": bool(primary_result.get("triggered", False)),
+            "rope_rule_score": float(primary_result.get("rope_rule_score", 0.0)),
+            "rope_model_probability": float(primary_result.get("rope_model_probability", 0.0)),
+            "rope_branch": str(primary_result.get("rope_branch", "")),
+            "rope_spectral_snapshot": dict(primary_result.get("rope_spectral_snapshot", {}))
+            if isinstance(primary_result.get("rope_spectral_snapshot"), dict)
+            else {},
+        },
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,
         "watch_faults": watch_faults,
-        "results": results,
+        "auxiliary_results": auxiliary_results,
+        "results": [top_fault, *auxiliary_results] if top_fault else auxiliary_results,
     }
 
 
