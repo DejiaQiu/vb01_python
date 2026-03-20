@@ -1,0 +1,154 @@
+{
+  "stats": {
+    "a_rms_ac": {
+      "median": 0.0013256126675371884,
+      "scale": 0.00011583699975061002,
+      "count": 9.0
+    },
+    "a_p2p": {
+      "median": 0.009973969990024312,
+      "scale": 0.0035721310050236426,
+      "count": 9.0
+    },
+    "g_std": {
+      "median": 0.08214205217412597,
+      "scale": 0.007674345194759935,
+      "count": 9.0
+    },
+    "lateral_ratio": {
+      "median": 0.8286684550218911,
+      "scale": 0.07667211114399758,
+      "count": 9.0
+    },
+    "ag_corr": {
+      "median": 0.03880923138213074,
+      "scale": 0.023741854575801847,
+      "count": 9.0
+    },
+    "gx_ax_corr": {
+      "median": 0.04927884991159365,
+      "scale": 0.0407327148669803,
+      "count": 9.0
+    },
+    "gy_ay_corr": {
+      "median": 0.05201855947856788,
+      "scale": 0.036029404983270424,
+      "count": 9.0
+    },
+    "peak_rate_hz": {
+      "median": 0.08675284115554785,
+      "scale": 0.06029088405958965,
+      "count": 9.0
+    },
+    "a_crest": {
+      "median": 1.005068492079699,
+      "scale": 0.001770568590835899,
+      "count": 9.0
+    },
+    "a_kurt": {
+      "median": 0.5013699657793205,
+      "scale": 0.7681102768978422,
+      "count": 9.0
+    },
+    "energy_z_over_xy": {
+      "median": 1.2067552396133876,
+      "scale": 0.11908619139540935,
+      "count": 9.0
+    },
+    "az_p2p": {
+      "median": 0.009765625,
+      "scale": 0.0014478515625,
+      "count": 9.0
+    },
+    "az_jerk_rms": {
+      "median": 0.09629405515759619,
+      "scale": 0.012343790453002025,
+      "count": 9.0
+    },
+    "lat_dom_freq_hz": {
+      "median": 2.6,
+      "scale": 3.40998,
+      "count": 9.0
+    },
+    "lat_low_band_ratio": {
+      "median": 0.21703061642609606,
+      "scale": 0.06538867245141705,
+      "count": 9.0
+    },
+    "z_dom_freq_hz": {
+      "median": 4.4,
+      "scale": 1.4826000000000006,
+      "count": 9.0
+    },
+    "z_peak_ratio": {
+      "median": 0.05928662677730341,
+      "scale": 0.017841147082037847,
+      "count": 9.0
+    },
+    "az_cv": {
+      "median": 0.085980132334586,
+      "scale": 0.005969138261169309,
+      "count": 9.0
+    },
+    "az_std": {
+      "median": 0.0016321373157441102,
+      "scale": 0.00012699870226701106,
+      "count": 9.0
+    },
+    "corr_xy": {
+      "median": -0.005561950545728184,
+      "scale": 0.05756992551893687,
+      "count": 9.0
+    },
+    "corr_xz": {
+      "median": -0.035613525883110134,
+      "scale": 0.03272837037449003,
+      "count": 9.0
+    },
+    "corr_yz": {
+      "median": -0.039204713232045316,
+      "scale": 0.06611658648792723,
+      "count": 9.0
+    }
+  },
+  "count": 9,
+  "source_count": 9,
+  "eligible_count": 9,
+  "min_samples": 8,
+  "keys": [
+    "a_rms_ac",
+    "a_p2p",
+    "g_std",
+    "lateral_ratio",
+    "ag_corr",
+    "gx_ax_corr",
+    "gy_ay_corr",
+    "peak_rate_hz",
+    "a_crest",
+    "a_kurt",
+    "energy_z_over_xy",
+    "az_p2p",
+    "az_jerk_rms",
+    "lat_dom_freq_hz",
+    "lat_low_band_ratio",
+    "z_dom_freq_hz",
+    "z_peak_ratio",
+    "az_cv",
+    "az_std",
+    "corr_xy",
+    "corr_xz",
+    "corr_yz"
+  ],
+  "cleaning": {
+    "mode": "top80",
+    "candidate_count": 11,
+    "kept_count": 9,
+    "dropped_count": 2,
+    "z_threshold": 3.5
+  },
+  "source": "/Users/qiudejia/Downloads/vb01_python/data/baselines/elevator_002/healthy",
+  "window": {
+    "start_hhmm": "0000",
+    "end_hhmm": "2359"
+  }
+}
