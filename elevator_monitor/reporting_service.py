@@ -327,6 +327,26 @@ def _render_parts_lines(parts: list[Any]) -> list[str]:
     return [f"- {item}" for item in translated]
 
 
+def _md_cell(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    return text.replace("\n", "<br>").replace("|", "/")
+
+
+def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
+    if not headers or not rows:
+        return []
+    table = [
+        "| " + " | ".join(_md_cell(header) for header in headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for row in rows:
+        padded = list(row[: len(headers)]) + [""] * max(0, len(headers) - len(row))
+        table.append("| " + " | ".join(_md_cell(item) for item in padded[: len(headers)]) + " |")
+    return table
+
+
 def build_report_context(
     *,
     diagnosis_result: dict[str, Any],
@@ -581,29 +601,28 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
 
     lines.extend(_render_action_lines(actions, screening_status, issue_fault_type, dispatch_hours))
 
-    lines.extend(
-        [
-            "",
-            "## 4. 本次判断依据",
-            f"- 筛查状态：{_screening_label(screening_status)}",
-            f"- 当前最值得关注的问题：{issue_label}",
-            f"- 参考匹配分数：{issue_score:.1f}/100（分数越高，越像对应故障模式；当前可信度为“{_confidence_text(issue_score, screening_status)}”）",
-            f"- 数据情况：{n_effective} 个有效点 / {n_raw} 个原始点，采样频率约 {fs_hz:.2f} Hz，{_quality_text(quality_factor)}",
-            f"- 风险判断：当前 {_risk_label(str(risk.get('risk_level_now', 'normal')))}，24 小时内 {_risk_label(str(risk.get('risk_level_24h', 'normal')))}",
-            f"- 处理优先级：{_priority_label(str(report_context.get('priority', 'P4')))}",
-            f"- 基线说明：{_baseline_text(baseline_mode)}",
-            f"- 故障解释：{_fault_explanation(issue_fault_type)}",
-            "- 说明：本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。",
-            "",
-            "## 5. 给维保人员的补充参考",
-            f"- 系统故障标签：{issue_fault_type or 'unknown'}",
-            f"- 原始最高分故障：{_fault_label(str(top_fault.get('fault_type', 'unknown')))} / {_safe_float(top_fault.get('score'), 0.0):.1f}",
-            f"- 维保时限建议：{max(1, dispatch_hours)} 小时内",
-            "- 备件与工具参考：",
-        ]
-    )
+    basis_rows = [
+        ["筛查状态", _screening_label(screening_status)],
+        ["当前最值得关注的问题", issue_label],
+        ["参考匹配分数", f"{issue_score:.1f}/100（当前可信度：{_confidence_text(issue_score, screening_status)}）"],
+        ["数据情况", f"{n_effective} 个有效点 / {n_raw} 个原始点，采样频率约 {fs_hz:.2f} Hz，{_quality_text(quality_factor)}"],
+        ["风险判断", f"当前 {_risk_label(str(risk.get('risk_level_now', 'normal')))}，24 小时内 {_risk_label(str(risk.get('risk_level_24h', 'normal')))}"],
+        ["处理优先级", _priority_label(str(report_context.get("priority", "P4")))],
+        ["基线说明", _baseline_text(baseline_mode)],
+        ["故障解释", _fault_explanation(issue_fault_type)],
+        ["说明", "本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。"],
+    ]
+    maintenance_rows = [
+        ["系统故障标签", issue_fault_type or "unknown"],
+        ["原始最高分故障", f"{_fault_label(str(top_fault.get('fault_type', 'unknown')))} / {_safe_float(top_fault.get('score'), 0.0):.1f}"],
+        ["维保时限建议", f"{max(1, dispatch_hours)} 小时内"],
+        ["备件与工具参考", "<br>".join(line.removeprefix("- ").strip() for line in _render_parts_lines(parts))],
+    ]
 
-    lines.extend(_render_parts_lines(parts))
+    lines.extend(["", "## 4. 本次判断依据"])
+    lines.extend(_markdown_table(["项目", "内容"], basis_rows))
+    lines.extend(["", "## 5. 给维保人员的补充参考"])
+    lines.extend(_markdown_table(["项目", "内容"], maintenance_rows))
 
     waveform_markdown = ""
     if isinstance(waveforms, dict):
