@@ -41,16 +41,17 @@ RUBBER_BASELINE_KEYS = (
 )
 
 RUBBER_RULE_CONFIG = {
-    "watch_score": 45.0,
-    "candidate_score": 60.0,
-    "rubber_core_min": 50.0,
-    "watch_specific_min": 36.0,
+    "watch_score": 52.0,
+    "candidate_score": 72.0,
+    "feature_hit_min": 45.0,
+    "feature_strong_min": 60.0,
+    "watch_hit_min": 2,
+    "candidate_hit_min": 3,
+    "candidate_strong_min": 2,
     "watch_run_min": 30.0,
     "candidate_run_min": 35.0,
     "watch_score_cap": 59.0,
-    "vertical_min": 35.0,
-    "damping_min": 35.0,
-    "spiky_penalty_max": 55.0,
+    "spiky_penalty_max": 60.0,
 }
 
 EPS = 1e-9
@@ -112,6 +113,10 @@ def _normalize_weight(count: int, total: int) -> float:
         return 0.0
     coverage = max(0.0, min(1.0, float(count) / float(total)))
     return 0.85 * coverage
+
+
+def _count_hits(values: list[float], min_score: float) -> int:
+    return sum(1 for value in values if float(value) >= float(min_score))
 
 
 def detect(features: dict) -> dict:
@@ -204,78 +209,75 @@ def detect(features: dict) -> dict:
     coupling_component = baseline_weight * robust_coupling + (1.0 - baseline_weight) * fallback_coupling
     damping_component = baseline_weight * robust_damping + (1.0 - baseline_weight) * fallback_damping
     spiky_penalty = baseline_weight * robust_spiky + (1.0 - baseline_weight) * fallback_spiky
-    rubber_specific_score = clamp(
-        (vertical_component + damping_component + coupling_component) / 3.0,
-        0.0,
-        100.0,
-    )
-    baseline_deviation_score = clamp(
-        0.75 * shared_abnormal_score + 0.25 * directional_component,
-        0.0,
-        100.0,
-    )
-    candidate_signal = clamp(
-        rubber_specific_score - 0.18 * spiky_penalty,
-        0.0,
-        100.0,
-    )
-    watch_signal = clamp(
-        0.85 * rubber_specific_score + 0.15 * max(vertical_component, damping_component) - 0.10 * spiky_penalty,
-        0.0,
-        100.0,
-    )
+    energy_component = baseline_weight * _z_to_100(_positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy"))) + (
+        1.0 - baseline_weight
+    ) * ratio_to_100(energy_z_over_xy, 0.85, 1.85)
+    p2p_component = baseline_weight * _z_to_100(_positive_z(az_p2p, baseline_stats.get("az_p2p"))) + (
+        1.0 - baseline_weight
+    ) * ratio_to_100(az_p2p, 0.038, 0.062)
+    cv_component = baseline_weight * _z_to_100(_positive_z(az_cv, baseline_stats.get("az_cv"))) + (
+        1.0 - baseline_weight
+    ) * ratio_to_100(az_cv, 0.80, 1.60)
+    jerk_component = baseline_weight * _z_to_100(_positive_z(az_jerk_rms, baseline_stats.get("az_jerk_rms"))) + (
+        1.0 - baseline_weight
+    ) * ratio_to_100(az_jerk_rms, 0.014, 0.032)
+
+    rubber_core_values = [
+        energy_component,
+        p2p_component,
+        cv_component,
+        jerk_component,
+        coupling_component,
+    ]
+    rubber_hits = _count_hits(rubber_core_values, rule_cfg["feature_hit_min"])
+    rubber_strong_hits = _count_hits(rubber_core_values, rule_cfg["feature_strong_min"])
+    rubber_specific_score = clamp(sum(rubber_core_values) / len(rubber_core_values), 0.0, 100.0)
+    baseline_deviation_score = clamp(shared_abnormal_score, 0.0, 100.0)
+    candidate_signal = 0.0
+    watch_signal = 0.0
     mode = "support_stiffness_shift"
 
-    gate_rescue_score = max(candidate_signal, watch_signal)
+    gate_rescue_score = rubber_specific_score
     effective_run_score = max(run_state_score, gate_rescue_score)
 
     gate_mode = "running"
     if effective_run_score < rule_cfg["watch_run_min"]:
-        candidate_signal *= 0.30
-        watch_signal *= 0.30
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
-        candidate_signal *= 0.65
-        watch_signal *= 0.65
         gate_mode = "weak_running_suppressed"
-    candidate_signal = clamp(candidate_signal, 0.0, 100.0)
-    watch_signal = clamp(watch_signal, 0.0, 100.0)
 
-    baseline_relative_pass = (
-        baseline_weight >= 0.30
-        and rubber_specific_score >= rule_cfg["rubber_core_min"]
-        and vertical_component >= rule_cfg["vertical_min"]
-        and damping_component >= rule_cfg["damping_min"]
-        and spiky_penalty <= rule_cfg["spiky_penalty_max"]
+    candidate_ready = (
+        rubber_hits >= rule_cfg["candidate_hit_min"]
+        and rubber_strong_hits >= rule_cfg["candidate_strong_min"]
         and effective_run_score >= rule_cfg["candidate_run_min"]
-    )
-    fallback_extreme_pass = (
-        baseline_weight < 0.30
-        and rubber_specific_score >= rule_cfg["rubber_core_min"]
-        and vertical_component >= rule_cfg["vertical_min"] + 5.0
-        and damping_component >= rule_cfg["damping_min"] + 5.0
-        and coupling_component >= 30.0
         and spiky_penalty <= rule_cfg["spiky_penalty_max"]
-        and effective_run_score >= rule_cfg["candidate_run_min"]
     )
-    watch_pass = (
-        watch_signal >= rule_cfg["watch_score"]
-        and rubber_specific_score >= rule_cfg["watch_specific_min"]
+    watch_ready = (
+        rubber_hits >= rule_cfg["watch_hit_min"]
         and effective_run_score >= rule_cfg["watch_run_min"]
     )
 
-    if baseline_relative_pass:
-        confirm_mode = "baseline_relative_pass"
-        score = max(candidate_signal, rule_cfg["candidate_score"])
-    elif fallback_extreme_pass:
-        confirm_mode = "fallback_extreme_pass"
-        score = max(candidate_signal, rule_cfg["candidate_score"])
-    elif watch_pass:
-        confirm_mode = "watch_gate_only"
-        score = clamp(max(watch_signal, rule_cfg["watch_score"]), rule_cfg["watch_score"], rule_cfg["watch_score_cap"])
+    if candidate_ready:
+        confirm_mode = "candidate_hits_pass"
+        candidate_signal = clamp(
+            rule_cfg["candidate_score"] + 4.0 * max(0, rubber_strong_hits - rule_cfg["candidate_strong_min"]) + 2.0 * max(0, rubber_hits - rule_cfg["candidate_hit_min"]),
+            0.0,
+            100.0,
+        )
+        watch_signal = candidate_signal
+        score = candidate_signal
+    elif watch_ready:
+        confirm_mode = "watch_hits_pass"
+        watch_signal = clamp(
+            rule_cfg["watch_score"] + 3.0 * max(0, rubber_hits - rule_cfg["watch_hit_min"]) + 2.0 * max(0, rubber_strong_hits - 1),
+            rule_cfg["watch_score"],
+            rule_cfg["watch_score_cap"],
+        )
+        score = watch_signal
     else:
         confirm_mode = "suppressed_single_window"
-        score = min(max(candidate_signal, watch_signal), rule_cfg["watch_score_cap"])
+        watch_signal = 20.0 + 6.0 * rubber_hits + 3.0 * rubber_strong_hits
+        score = min(watch_signal, 44.0)
     score = clamp(score, 0.0, 100.0)
 
     reasons = [
@@ -290,10 +292,16 @@ def detect(features: dict) -> dict:
         f"gate_rescue_score={gate_rescue_score:.2f}",
         f"candidate_signal={candidate_signal:.2f}",
         f"watch_signal={watch_signal:.2f}",
+        f"core_hits={rubber_hits}",
+        f"core_strong_hits={rubber_strong_hits}",
         f"component_vertical={vertical_component:.2f}",
         f"component_directional={directional_component:.2f}",
         f"component_coupling={coupling_component:.2f}",
         f"component_damping={damping_component:.2f}",
+        f"component_energy={energy_component:.2f}",
+        f"component_p2p={p2p_component:.2f}",
+        f"component_cv={cv_component:.2f}",
+        f"component_jerk={jerk_component:.2f}",
         f"spiky_penalty={spiky_penalty:.2f}",
         f"energy_z_over_xy={energy_z_over_xy:.4f}",
         f"corr_major={corr_major:.4f}",
@@ -323,8 +331,10 @@ def detect(features: dict) -> dict:
     result["spiky_penalty_score"] = round(float(spiky_penalty), 2)
     result["run_state_score"] = round(float(run_state_score), 2)
     result["effective_run_score"] = round(float(effective_run_score), 2)
-    result["specialized_ready"] = confirm_mode in {"baseline_relative_pass", "fallback_extreme_pass"}
-    result["type_watch_ready"] = confirm_mode in {"baseline_relative_pass", "fallback_extreme_pass", "watch_gate_only"}
+    result["core_hits"] = int(rubber_hits)
+    result["core_strong_hits"] = int(rubber_strong_hits)
+    result["specialized_ready"] = confirm_mode == "candidate_hits_pass"
+    result["type_watch_ready"] = confirm_mode in {"candidate_hits_pass", "watch_hits_pass"}
     return result
 
 

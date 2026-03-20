@@ -195,7 +195,14 @@ def _translate_part(part: Any) -> str:
     return _PART_TRANSLATIONS.get(text, text)
 
 
-def _confidence_text(score: float) -> str:
+def _confidence_text(score: float, status: str) -> str:
+    screening_status = str(status or "").strip().lower()
+    if screening_status == "watch_only":
+        return "较低（待复测确认）"
+    if screening_status == "normal":
+        return "无明确异常"
+    if screening_status == "low_quality":
+        return "数据不足"
     if score >= 80.0:
         return "很高"
     if score >= 60.0:
@@ -580,7 +587,7 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
             "## 4. 本次判断依据",
             f"- 筛查状态：{_screening_label(screening_status)}",
             f"- 当前最值得关注的问题：{issue_label}",
-            f"- 参考匹配分数：{issue_score:.1f}/100（分数越高，越像对应故障模式；当前可信度为“{_confidence_text(issue_score)}”）",
+            f"- 参考匹配分数：{issue_score:.1f}/100（分数越高，越像对应故障模式；当前可信度为“{_confidence_text(issue_score, screening_status)}”）",
             f"- 数据情况：{n_effective} 个有效点 / {n_raw} 个原始点，采样频率约 {fs_hz:.2f} Hz，{_quality_text(quality_factor)}",
             f"- 风险判断：当前 {_risk_label(str(risk.get('risk_level_now', 'normal')))}，24 小时内 {_risk_label(str(risk.get('risk_level_24h', 'normal')))}",
             f"- 处理优先级：{_priority_label(str(report_context.get('priority', 'P4')))}",

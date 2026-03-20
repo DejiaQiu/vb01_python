@@ -456,6 +456,7 @@ workflow:
           \n    if fault_type == \"rope_looseness\":\n        return \"钢丝绳松动或张力不均\"\
           \n    if fault_type == \"rubber_hardening\":\n        return \"橡胶圈硬化\"\
           \n    if fault_type == \"unknown\":\n        return \"异常类型待确认\"\n    return fault_type\n\n\n\
+          def _display_conclusion(status, fault_text):\n    if status == \"normal\":\n        return \"当前未见明确异常证据\"\n    if status == \"watch_only\" and fault_text == \"异常类型待确认\":\n        return \"已检测到异常，但类型待确认\"\n    return fault_text\n\n\n\
           def main(body):\n    text = str(body or \"\").strip()\n    try:\n     \
           \   payload = json.loads(text) if text else {}\n    except Exception:\n\
           \        payload = {\"status\": \"unknown\", \"detail\": \"latest status payload is\
@@ -468,18 +469,20 @@ workflow:
           \    waveforms = _as_dict(payload.get(\"waveform_payload\"))\n    report_markdown_draft = str(payload.get(\"report_markdown_draft\", \"\")).strip()\n    requested_elevator_id = str(payload.get(\"requested_elevator_id\", \"\")).strip()\n    latest_file = str(payload.get(\"\
           latest_file_name\") or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
           generated_at_ms\"))\n    fault_type = _fault_text(primary_issue, preferred, top_candidate)\n\
+          \    display_conclusion = _display_conclusion(status, fault_type)\n\
           \    fault_score = primary_issue.get(\"score\", preferred.get(\"score\", top_candidate.get(\"\
           score\", 0)))\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"\
           ))\n    risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    rope_branch = str(rope_primary.get(\"\
           rope_branch\", \"\")).strip()\n    aux_fault = str(first_aux.get(\"fault_type\"\
           , \"none\") or \"none\")\n    aux_score = first_aux.get(\"score\", 0)\n    summary\
-          \ = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={fault_type};\
+          \ = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
           \ 分数={fault_score}; \"\n        f\"分支={rope_branch or 'unknown'}; 当前风险={risk_now};\
           \ 24h风险={risk_24h}; 目标电梯={requested_elevator_id or 'default'}; 辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file};\
           \ 后端报告={'已生成' if report_markdown_draft else '未生成'}\"\
           \n    )\n    return {\n        \"status_json\": json.dumps(payload, ensure_ascii=False),\n\
           \        \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
           \        \"report_markdown_draft\": report_markdown_draft,\n\
+          \        \"display_conclusion\": display_conclusion,\n\
           \        \"acc_chart\": _option_json(waveforms, \"acceleration\"),\n   \
           \     \"gyro_chart\": _option_json(waveforms, \"gyroscope\"),\n        \"\
           mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"),\n    }\n"
@@ -493,6 +496,9 @@ workflow:
             children: null
             type: string
           status_summary:
+            children: null
+            type: string
+          display_conclusion:
             children: null
             type: string
           report_markdown_draft:
@@ -551,7 +557,7 @@ workflow:
             \   检测日期：\n   当前状态：\n   主结论：\n   当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的\
             \ generated_at_ms，对用户明确展示具体日期时间。\n4. 如果附带波形图，可在正文里简要引用波形观察，但不要编造图上没有的信息。\n\
             5. 如果后端报告草稿存在，优先沿用其中的一句话结论、解释和建议，不要重新发明一套相互矛盾的说法。\n6. 如果状态是 normal，明确写“当前未见明确异常证据”。\n7. 如果状态是 watch_only，明确写“检测到异常变化，但建议继续观察或尽快复测”。\n\
-            8. 如果状态是 candidate_faults，明确写“存在高置信异常，建议安排现场复核”。\n9. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n10. 用自然中文，不要输出 JSON，不要夸大结论。\n"
+            8. 如果状态是 watch_only 且主结论为 unknown，必须直接写“已检测到异常，但类型待确认”，不要写成“没有异常”或“无法判断”。\n9. 如果状态是 candidate_faults，明确写“存在高置信异常，建议安排现场复核”。\n10. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n11. 用自然中文，不要输出 JSON，不要夸大结论。\n"
         selected: false
         title: 在线状态回答
         type: llm

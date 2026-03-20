@@ -96,7 +96,7 @@ class TestRubberHardeningDetector(unittest.TestCase):
 
         self.assertGreaterEqual(result["score"], 60.0, msg=result)
         self.assertTrue(result["triggered"], msg=result)
-        self.assertIn("confirm=baseline_relative_pass", result["reasons"])
+        self.assertIn("confirm=candidate_hits_pass", result["reasons"])
 
     def test_fallback_mode_requires_clear_directional_and_damping_evidence(self):
         result = detect(

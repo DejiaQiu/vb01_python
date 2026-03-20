@@ -333,6 +333,41 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("系统故障标签：unknown", payload["report_markdown_draft"])
         self.assertNotIn("当前最值得关注的问题：减振橡胶硬化", payload["report_markdown_draft"])
 
+    def test_diagnosis_report_uses_conservative_confidence_text_for_watch_only(self):
+        diagnosis_result = {
+            "summary": {"n_raw": 24, "n_effective": 24, "fs_hz": 1.0},
+            "screening": {"status": "watch_only"},
+            "top_fault": {"fault_type": "rubber_hardening", "score": 59.0, "level": "watch"},
+            "primary_issue": {"fault_type": "rubber_hardening", "score": 59.0, "level": "watch"},
+            "top_candidate": {},
+            "watch_faults": [{"fault_type": "rubber_hardening", "score": 59.0, "level": "watch"}],
+        }
+        response = self.client.post(
+            "/api/v1/workflows/diagnosis-report",
+            json={
+                "site_name": "Tower C",
+                "diagnosis_result": diagnosis_result,
+                "maintenance_package": {
+                    "site_name": "Tower C",
+                    "elevator_id": "elevator-003",
+                    "priority": "P3",
+                    "summary": "demo summary",
+                    "recommended_actions": [],
+                    "suggested_parts": [],
+                    "risk": {
+                        "risk_score": 0.52,
+                        "risk_level_now": "watch",
+                        "risk_24h": 0.68,
+                        "risk_level_24h": "high",
+                    },
+                },
+                "include_waveforms": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("当前可信度为“较低（待复测确认）”", payload["report_markdown_draft"])
+
     def test_dify_workflow_online_status_includes_detection_date(self):
         workflow_path = Path("docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml")
         workflow_text = workflow_path.read_text(encoding="utf-8")

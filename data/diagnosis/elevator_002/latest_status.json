@@ -1,6 +1,6 @@
 {
   "workflow_type": "scheduled_batch_diagnosis_v1",
-  "generated_at_ms": 1773987140353,
+  "generated_at_ms": 1773991022573,
   "input_dir": "/Users/qiudejia/Downloads/vb01_python/data/captures/three/002/gangsisheng",
   "files_scanned": 12,
   "latest_file": "/Users/qiudejia/Downloads/vb01_python/data/captures/three/002/gangsisheng/part_0015.csv",
@@ -13,17 +13,17 @@
     "path": "/Users/qiudejia/Downloads/vb01_python/data/baselines/elevator_002/baseline.json"
   },
   "primary_issue": {
-    "fault_type": "rubber_hardening",
-    "score": 59.0,
-    "level": "watch",
+    "fault_type": "unknown",
+    "score": 76.0,
+    "level": "warning",
     "triggered": false,
     "quality_factor": 1.0,
     "screening": "watch"
   },
   "preferred_issue": {
-    "fault_type": "rubber_hardening",
-    "score": 59.0,
-    "level": "watch",
+    "fault_type": "unknown",
+    "score": 76.0,
+    "level": "warning",
     "triggered": false,
     "quality_factor": 1.0,
     "screening": "watch"
@@ -46,7 +46,7 @@
   },
   "system_abnormality": {
     "fault_type": "unknown",
-    "score": 68.0,
+    "score": 76.0,
     "level": "normal",
     "triggered": false,
     "quality_factor": 0.0,
@@ -55,17 +55,9 @@
   "top_candidate": {},
   "watch_faults": [
     {
-      "fault_type": "rubber_hardening",
-      "score": 59.0,
-      "level": "watch",
-      "triggered": false,
-      "quality_factor": 1.0,
-      "screening": "watch"
-    },
-    {
-      "fault_type": "rope_tension_abnormal",
-      "score": 59.0,
-      "level": "watch",
+      "fault_type": "unknown",
+      "score": 76.0,
+      "level": "warning",
       "triggered": false,
       "quality_factor": 1.0,
       "screening": "watch"
@@ -79,19 +71,26 @@
       "triggered": false,
       "quality_factor": 1.0,
       "screening": ""
+    },
+    {
+      "fault_type": "rubber_hardening",
+      "score": 59.0,
+      "level": "watch",
+      "triggered": false,
+      "quality_factor": 1.0,
+      "screening": ""
     }
   ],
   "risk": {
-    "risk_score": 0.6155,
-    "risk_level_now": "watch",
-    "risk_24h": 0.7655,
+    "risk_score": 0.692,
+    "risk_level_now": "high",
+    "risk_24h": 0.842,
     "risk_level_24h": "high",
     "reasons": [
-      "current=0.59",
+      "current=0.76",
       "persistence=1.00",
       "trend=0.00",
-      "quality=1.00",
-      "focus_fault=rubber_hardening"
+      "quality=1.00"
     ]
   },
   "recommendation": "建议继续观察或尽快复测，不建议仅凭一次筛查结果直接拆检。",
@@ -102,16 +101,16 @@
       "label": "重点关注"
     },
     "preferred_issue": {
-      "fault_type": "rubber_hardening",
-      "fault_label": "减振橡胶硬化",
-      "score": 59.0,
-      "level": "watch",
+      "fault_type": "unknown",
+      "fault_label": "暂无明确故障类型",
+      "score": 76.0,
+      "level": "warning",
       "quality_factor": 1.0
     },
     "priority": "P2",
     "language": "zh-CN"
   },
-  "report_markdown_draft": "# unknown-site / elevator-002 诊断与维保报告\n\n## 1. 一句话结论\n本次检测发现“减振橡胶硬化”可疑迹象，但证据还不够强，建议尽快复测或结合现场检查确认。\n\n## 2. 给非专业人员的解释\n系统看到了可疑迹象，但证据还不够强，更适合复测或持续观察，不建议直接下故障定论。 当前最值得关注的是“减振橡胶硬化”，它更像一个提醒信号，而不是已经确认的故障结论。\n\n## 3. 建议怎么做\n- 检查曳引机及曳引系统周边机械传动链路。\n- 把当前异常波形和本站点历史正常波形做对比。\n- 确认异常在上行和下行中是否都会重复出现。\n\n## 4. 本次判断依据\n- 筛查状态：重点关注\n- 当前最值得关注的问题：减振橡胶硬化\n- 参考匹配分数：59.0/100（分数越高，越像对应故障模式；当前可信度为“中等”）\n- 数据情况：462 个有效点 / 462 个原始点，采样频率约 39.99 Hz，数据质量较好\n- 风险判断：当前 需要关注，24 小时内 较高风险\n- 处理优先级：尽快安排检查\n- 基线说明：本次使用了已保存的健康基线做对比，结论更偏向“和这台电梯平时状态相比有没有明显变化”。\n- 故障解释：系统看到减振橡胶变硬后常见的竖向响应和耦合变化，建议检查减振橡胶老化情况。\n- 说明：本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。\n\n## 5. 给维保人员的补充参考\n- 系统故障标签：rubber_hardening\n- 原始最高分故障：减振橡胶硬化 / 59.0\n- 维保时限建议：4 小时内\n- 备件与工具参考：\n- 本次报告没有给出必须更换的固定备件，建议以现场复核结果为准。\n",
+  "report_markdown_draft": "# unknown-site / elevator-002 诊断与维保报告\n\n## 1. 一句话结论\n本次检测看到相对健康基线的异常变化，但当前证据还不足以稳定归到钢丝绳或减振橡胶问题，建议尽快复测并结合现场检查确认。\n\n## 2. 给非专业人员的解释\n系统已经看到相对健康基线的异常偏移，但钢丝绳和减振橡胶两条专项规则都还没有形成足够稳定的类型证据，当前更适合继续观察、补采数据或安排现场复核。\n\n## 3. 建议怎么做\n- 检查曳引机及曳引系统周边机械传动链路。\n- 把当前异常波形和本站点历史正常波形做对比。\n- 确认异常在上行和下行中是否都会重复出现。\n\n## 4. 本次判断依据\n- 筛查状态：重点关注\n- 当前最值得关注的问题：暂无明确故障类型\n- 参考匹配分数：76.0/100（分数越高，越像对应故障模式；当前可信度为“较低（待复测确认）”）\n- 数据情况：462 个有效点 / 462 个原始点，采样频率约 39.99 Hz，数据质量较好\n- 风险判断：当前 较高风险，24 小时内 较高风险\n- 处理优先级：尽快安排检查\n- 基线说明：本次使用了已保存的健康基线做对比，结论更偏向“和这台电梯平时状态相比有没有明显变化”。\n- 故障解释：当前没有足够证据把问题稳定归到某一类具体故障。\n- 说明：本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。\n\n## 5. 给维保人员的补充参考\n- 系统故障标签：unknown\n- 原始最高分故障：暂无明确故障类型 / 76.0\n- 维保时限建议：4 小时内\n- 备件与工具参考：\n- 本次报告没有给出必须更换的固定备件，建议以现场复核结果为准。\n",
   "latest_result": {
     "summary": {
       "n_raw": 462,
@@ -126,7 +125,7 @@
       "high_confidence_min_score": 60.0,
       "watch_min_score": 45.0,
       "candidate_count": 0,
-      "watch_count": 2
+      "watch_count": 1
     },
     "rope_primary": {
       "fault_type": "rope_tension_abnormal",
@@ -145,9 +144,9 @@
       }
     },
     "top_fault": {
-      "fault_type": "rubber_hardening",
-      "score": 59.0,
-      "level": "watch",
+      "fault_type": "unknown",
+      "score": 76.0,
+      "level": "warning",
       "triggered": false,
       "quality_factor": 1.0,
       "screening": "watch"
@@ -156,17 +155,9 @@
     "candidate_faults": [],
     "watch_faults": [
       {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
-        "triggered": false,
-        "quality_factor": 1.0,
-        "screening": "watch"
-      },
-      {
-        "fault_type": "rope_tension_abnormal",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -175,6 +166,14 @@
     "auxiliary_results": [
       {
         "fault_type": "rope_tension_abnormal",
+        "score": 59.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 1.0,
+        "screening": ""
+      },
+      {
+        "fault_type": "rubber_hardening",
         "score": 59.0,
         "level": "watch",
         "triggered": false,
@@ -196,18 +195,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -215,9 +214,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -236,18 +235,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -255,17 +254,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 55.49,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -284,18 +275,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -303,17 +294,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 51.42,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -332,18 +315,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -351,17 +334,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 58.25,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -380,18 +355,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -399,17 +374,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 59.0,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -428,18 +395,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -447,17 +414,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 48.46,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -476,18 +435,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -495,17 +454,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 54.75,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -524,18 +475,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -543,17 +494,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 56.17,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -572,18 +515,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -591,9 +534,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -612,18 +555,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -631,17 +574,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 45.13,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -660,18 +595,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -679,17 +614,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 56.84,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -708,18 +635,18 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
+        "fault_type": "unknown",
+        "score": 76.0,
+        "level": "warning",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
@@ -727,17 +654,9 @@
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "rubber_hardening",
-          "score": 59.0,
-          "level": "watch",
-          "triggered": false,
-          "quality_factor": 1.0,
-          "screening": "watch"
-        },
-        {
-          "fault_type": "rope_tension_abnormal",
-          "score": 59.0,
-          "level": "watch",
+          "fault_type": "unknown",
+          "score": 76.0,
+          "level": "warning",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"

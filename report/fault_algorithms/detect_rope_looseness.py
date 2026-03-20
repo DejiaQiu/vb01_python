@@ -66,16 +66,17 @@ ROPE_BASELINE_KEYS = (
 )
 
 ROPE_RULE_CONFIG = {
-    "watch_score": 45.0,
-    "candidate_score": 60.0,
-    "rope_core_min": 48.0,
-    "watch_specific_min": 36.0,
+    "watch_score": 52.0,
+    "candidate_score": 72.0,
+    "feature_hit_min": 45.0,
+    "feature_strong_min": 60.0,
+    "watch_hit_min": 2,
+    "candidate_hit_min": 3,
+    "candidate_strong_min": 2,
     "watch_run_min": 30.0,
     "candidate_run_min": 35.0,
-    "spiky_penalty_max": 55.0,
+    "spiky_penalty_max": 60.0,
     "watch_score_cap": 59.0,
-    "lateral_min": 30.0,
-    "coupling_min": 20.0,
 }
 
 MIN_SCORE_WATCH = ROPE_RULE_CONFIG["watch_score"]
@@ -302,6 +303,10 @@ def _mix_components(
 
 
 
+def _count_hits(values: list[float], min_score: float) -> int:
+    return sum(1 for value in values if float(value) >= float(min_score))
+
+
 def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     rule_cfg = ROPE_RULE_CONFIG
     a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
@@ -327,72 +332,64 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     robust = _branch_robust_components(features, baseline_stats) if baseline_stats else {key: 0.0 for key in fallback.keys()}
     mixed = _mix_components(baseline_weight, robust, fallback)
 
-    loose_score = (
-        mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"]
-    ) / 3.0
-    tight_score = (
-        mixed["rope_coupling"] + mixed["shared_abnormal"]
-    ) / 2.0
+    loose_score = (mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"]) / 3.0
+    tight_score = (mixed["rope_coupling"] + mixed["shared_abnormal"]) / 2.0
     dominant_branch = "loose_like" if loose_score >= tight_score else "tight_like"
     rope_specific_score = (
-        mixed["rope_lateral"]
-        + mixed["rope_domfreq"]
-        + mixed["rope_lowband"]
-        + mixed["rope_coupling"]
+        mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"] + mixed["rope_coupling"]
     ) / 4.0
-    baseline_deviation_score = (
-        0.75 * mixed["shared_abnormal"]
-        + 0.25 * mixed["confounding_score"]
-    )
-    candidate_signal = clamp(
-        rope_specific_score - 0.18 * mixed["spiky_penalty"],
-        0.0,
-        100.0,
-    )
-    watch_signal = clamp(
-        0.85 * rope_specific_score
-        + 0.15 * max(mixed["rope_lateral"], mixed["rope_coupling"])
-        - 0.10 * mixed["spiky_penalty"],
-        0.0,
-        100.0,
-    )
+    baseline_deviation_score = float(mixed["shared_abnormal"])
+    core_values = [
+        mixed["rope_lateral"],
+        mixed["rope_domfreq"],
+        mixed["rope_lowband"],
+        mixed["rope_coupling"],
+    ]
+    core_hits = _count_hits(core_values, rule_cfg["feature_hit_min"])
+    core_strong_hits = _count_hits(core_values, rule_cfg["feature_strong_min"])
+    candidate_signal = 0.0
+    watch_signal = 0.0
 
-    gate_rescue_score = max(candidate_signal, watch_signal)
+    gate_rescue_score = rope_specific_score
     effective_run_score = max(run_state_score, gate_rescue_score)
     gate_mode = "running"
     if effective_run_score < rule_cfg["watch_run_min"]:
-        candidate_signal *= 0.40
-        watch_signal *= 0.40
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
-        candidate_signal *= 0.72
-        watch_signal *= 0.72
         gate_mode = "weak_running_suppressed"
-    candidate_signal = clamp(candidate_signal, 0.0, 100.0)
-    watch_signal = clamp(watch_signal, 0.0, 100.0)
 
-    branch_pass = (
-        rope_specific_score >= rule_cfg["rope_core_min"]
-        and mixed["rope_lateral"] >= rule_cfg["lateral_min"]
-        and mixed["rope_coupling"] >= rule_cfg["coupling_min"]
-        and mixed["spiky_penalty"] <= rule_cfg["spiky_penalty_max"]
+    candidate_ready = (
+        core_hits >= rule_cfg["candidate_hit_min"]
+        and core_strong_hits >= rule_cfg["candidate_strong_min"]
         and effective_run_score >= rule_cfg["candidate_run_min"]
+        and mixed["spiky_penalty"] <= rule_cfg["spiky_penalty_max"]
     )
-    watch_pass = (
-        watch_signal >= rule_cfg["watch_score"]
-        and rope_specific_score >= rule_cfg["watch_specific_min"]
+    watch_ready = (
+        core_hits >= rule_cfg["watch_hit_min"]
         and effective_run_score >= rule_cfg["watch_run_min"]
     )
 
-    if branch_pass:
-        confirm_mode = f"{dominant_branch}_pass"
-        rule_score = max(candidate_signal, MIN_SCORE_TRIGGER)
-    elif watch_pass:
-        confirm_mode = "watch_gate_only"
-        rule_score = clamp(max(watch_signal, MIN_SCORE_WATCH), MIN_SCORE_WATCH, rule_cfg["watch_score_cap"])
+    if candidate_ready:
+        confirm_mode = "candidate_hits_pass"
+        candidate_signal = clamp(
+            rule_cfg["candidate_score"] + 4.0 * max(0, core_strong_hits - rule_cfg["candidate_strong_min"]) + 2.0 * max(0, core_hits - rule_cfg["candidate_hit_min"]),
+            0.0,
+            100.0,
+        )
+        watch_signal = candidate_signal
+        rule_score = candidate_signal
+    elif watch_ready:
+        confirm_mode = "watch_hits_pass"
+        watch_signal = clamp(
+            rule_cfg["watch_score"] + 3.0 * max(0, core_hits - rule_cfg["watch_hit_min"]) + 2.0 * max(0, core_strong_hits - 1),
+            rule_cfg["watch_score"],
+            rule_cfg["watch_score_cap"],
+        )
+        rule_score = watch_signal
     else:
         confirm_mode = "suppressed_single_window"
-        rule_score = min(max(candidate_signal, watch_signal), rule_cfg["watch_score_cap"])
+        watch_signal = 20.0 + 6.0 * core_hits + 3.0 * core_strong_hits
+        rule_score = min(watch_signal, 44.0)
 
     return {
         "baseline_count": baseline_count,
@@ -412,6 +409,8 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         "watch_signal": float(watch_signal),
         "loose_score": float(loose_score),
         "tight_score": float(tight_score),
+        "core_hits": int(core_hits),
+        "core_strong_hits": int(core_strong_hits),
         "dominant_branch": dominant_branch,
         "rule_score": float(rule_score),
         "spectral_snapshot": {
@@ -428,18 +427,20 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
 def detect(features: dict[str, Any]) -> dict[str, Any]:
     analysis = _analyze_rope_signature(features)
     score = float(analysis["rule_score"])
-    if str(analysis["confirm_mode"]) not in {"loose_like_pass", "tight_like_pass"}:
+    if str(analysis["confirm_mode"]) not in {"candidate_hits_pass", "watch_hits_pass"}:
         score = min(score, 59.0)
     score = clamp(score, 0.0, 100.0)
 
     reasons = [
-        "mode=rope_tension_abnormal_v2",
+        "mode=rope_tension_abnormal_v3_hits",
         f"baseline_mode={analysis['baseline_mode']}",
         f"baseline_features={analysis['baseline_count']}",
         f"baseline_weight={analysis['baseline_weight']:.3f}",
         f"gate={analysis['gate_mode']}",
         f"confirm={analysis['confirm_mode']}",
         f"rope_branch={analysis['dominant_branch']}",
+        f"core_hits={analysis['core_hits']}",
+        f"core_strong_hits={analysis['core_strong_hits']}",
         f"rope_rule_score={analysis['rule_score']:.2f}",
         f"baseline_deviation_score={analysis['baseline_deviation_score']:.2f}",
         f"rope_specific_score={analysis['rope_specific_score']:.2f}",
@@ -485,8 +486,10 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
     result["spiky_penalty_score"] = round(float(analysis["mixed"]["spiky_penalty"]), 2)
     result["run_state_score"] = round(float(analysis["run_state_score"]), 2)
     result["effective_run_score"] = round(float(analysis["effective_run_score"]), 2)
-    result["specialized_ready"] = str(analysis["confirm_mode"]) in {"loose_like_pass", "tight_like_pass"}
-    result["type_watch_ready"] = str(analysis["confirm_mode"]) in {"loose_like_pass", "tight_like_pass", "watch_gate_only"}
+    result["core_hits"] = int(analysis["core_hits"])
+    result["core_strong_hits"] = int(analysis["core_strong_hits"])
+    result["specialized_ready"] = str(analysis["confirm_mode"]) == "candidate_hits_pass"
+    result["type_watch_ready"] = str(analysis["confirm_mode"]) in {"candidate_hits_pass", "watch_hits_pass"}
     return result
 
 

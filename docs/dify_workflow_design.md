@@ -261,6 +261,7 @@ Important Dify mapping rule:
 - Treat `preferred_issue` and `top_candidate` as compatibility fallbacks only
 - Treat `auxiliary_results` as optional secondary clues and do not elevate them above `primary_issue`
 - When available, expose `rope_branch` and `rope_rule_score` in report rendering
+- When `status=watch_only` and `primary_issue.fault_type=unknown`, render the main conclusion as `已检测到异常，但类型待确认`
 
 ## Recommended Product Split
 

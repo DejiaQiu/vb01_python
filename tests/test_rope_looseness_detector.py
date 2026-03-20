@@ -198,10 +198,7 @@ class TestRopeLoosenessDetector(unittest.TestCase):
 
         self.assertGreaterEqual(result["score"], 60.0, msg=result)
         self.assertTrue(result["triggered"], msg=result)
-        self.assertTrue(
-            ("confirm=loose_like_pass" in result["reasons"]) or ("confirm=tight_like_pass" in result["reasons"]),
-            msg=result,
-        )
+        self.assertIn("confirm=candidate_hits_pass", result["reasons"])
 
     def test_spiky_impact_signature_does_not_trigger_rope_looseness(self):
         result = detect(

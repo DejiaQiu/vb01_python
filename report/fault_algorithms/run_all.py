@@ -34,6 +34,8 @@ SYSTEM_GATE_CONFIG = {
     "watch_quality": WATCH_QUALITY,
     "candidate_quality": HIGH_CONFIDENCE_QUALITY,
     "min_effective_samples": MIN_EFFECTIVE_SAMPLES,
+    "feature_hit_min": 45.0,
+    "feature_strong_min": 60.0,
     "run_watch_min": 30.0,
     "run_candidate_min": 35.0,
     "run_weak_min": 45.0,
@@ -140,6 +142,10 @@ def _normalize_weight(count: int, total: int) -> float:
     return 0.85 * coverage
 
 
+def _count_hits(values: list[float], min_score: float) -> int:
+    return sum(1 for value in values if float(value) >= float(min_score))
+
+
 def _to_float(value: Any, default: float = 0.0) -> float:
     parsed = parse_float(value)
     return float(parsed if parsed is not None else default)
@@ -155,40 +161,45 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
     z_peak_ratio = _to_float(features.get("z_peak_ratio"))
 
-    fallback_shared = (
-        0.42 * ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
-        + 0.33 * ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
-        + 0.25 * ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
-    )
+    fallback_a_rms = ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
+    fallback_a_p2p = ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
+    fallback_g_std = ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
     baseline_stats = _baseline_stats(baseline)
     baseline_count = len([key for key in ("a_rms_ac", "a_p2p", "g_std") if key in baseline_stats])
     baseline_weight = _normalize_weight(baseline_count, 3)
-    robust_shared = _z_to_100(
-        0.42 * _positive_z(a_rms_ac, baseline_stats.get("a_rms_ac"))
-        + 0.33 * _positive_z(a_p2p, baseline_stats.get("a_p2p"))
-        + 0.25 * _positive_z(g_std, baseline_stats.get("g_std"))
-    )
-    shared_score = baseline_weight * robust_shared + (1.0 - baseline_weight) * fallback_shared
+    robust_a_rms = _z_to_100(_positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")))
+    robust_a_p2p = _z_to_100(_positive_z(a_p2p, baseline_stats.get("a_p2p")))
+    robust_g_std = _z_to_100(_positive_z(g_std, baseline_stats.get("g_std")))
+    shared_components = [
+        baseline_weight * robust_a_rms + (1.0 - baseline_weight) * fallback_a_rms,
+        baseline_weight * robust_a_p2p + (1.0 - baseline_weight) * fallback_a_p2p,
+        baseline_weight * robust_g_std + (1.0 - baseline_weight) * fallback_g_std,
+    ]
+    shared_score = sum(shared_components) / len(shared_components)
+    shared_hits = _count_hits(shared_components, gate_cfg["feature_hit_min"])
+    shared_strong_hits = _count_hits(shared_components, gate_cfg["feature_strong_min"])
     run_state_score = (
         0.45 * ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
         + 0.35 * ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
         + 0.20 * ratio_to_100(max(lat_peak_ratio, z_peak_ratio), 0.10, 0.50)
     )
-    score = float(shared_score)
     gate_mode = "running"
+    score = 0.0
     if run_state_score < gate_cfg["run_watch_min"]:
-        score *= 0.40
         gate_mode = "non_running_suppressed"
-    elif run_state_score < gate_cfg["run_weak_min"]:
-        score *= 0.72
-        gate_mode = "weak_running_suppressed"
-    score = max(0.0, min(100.0, score))
-    if score >= gate_cfg["candidate_score"] and run_state_score >= gate_cfg["run_candidate_min"]:
+        status = "normal"
+        score = 0.0
+    elif shared_hits >= 3 and shared_strong_hits >= 2 and run_state_score >= gate_cfg["run_candidate_min"]:
         status = "candidate_faults"
-    elif score >= gate_cfg["watch_score"] and run_state_score >= gate_cfg["run_watch_min"]:
+        score = min(100.0, 72.0 + 4.0 * max(0, shared_strong_hits - 2))
+    elif shared_hits >= 2 and run_state_score >= gate_cfg["run_watch_min"]:
         status = "watch_only"
+        score = min(59.0, 52.0 + 3.0 * max(0, shared_hits - 2) + 2.0 * max(0, shared_strong_hits - 1))
     else:
         status = "normal"
+        score = max(0.0, min(44.0, 18.0 + 8.0 * shared_hits + 4.0 * shared_strong_hits))
+        if run_state_score < gate_cfg["run_weak_min"]:
+            gate_mode = "weak_running_suppressed"
     return {
         "status": status,
         "score": round(score, 2),
@@ -238,6 +249,19 @@ def _same_issue(left: dict[str, Any], right: dict[str, Any]) -> bool:
         and abs(_score(left) - _score(right)) < 1e-6
         and str(left.get("level", "")) == str(right.get("level", ""))
     )
+
+
+def _rope_only(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in items if _family_for_fault_type(item.get("fault_type", "")) == "rope"]
+
+
+def _has_type_conflict(items: list[dict[str, Any]]) -> bool:
+    families = {
+        _family_for_fault_type(item.get("fault_type", ""))
+        for item in items
+        if _family_for_fault_type(item.get("fault_type", "")) in {"rope", "rubber"}
+    }
+    return len(families) > 1
 
 
 def _unknown_watch_issue(system_abnormality: dict[str, Any]) -> dict[str, Any]:
@@ -335,14 +359,15 @@ def run_all_rows(
     elif candidate_faults:
         screening_status = "candidate_faults"
         top_fault = top_candidate
-    elif watch_faults:
+    elif watch_faults and not _has_type_conflict(watch_faults):
         screening_status = "watch_only"
         top_fault = watch_faults[0]
-    elif system_abnormality.get("status") in {"candidate_faults", "watch_only"}:
+    elif system_abnormality.get("status") in {"candidate_faults", "watch_only"} or candidate_faults or watch_faults:
         screening_status = "watch_only"
         top_fault = _copy_result(_unknown_watch_issue(system_abnormality), screening="watch")
         top_fault["decision_score"] = _safe_float(system_abnormality.get("score"), 0.0)
         watch_faults = [top_fault]
+        candidate_faults = []
     else:
         screening_status = "normal"
         top_fault = detector_results[0] if detector_results else {}

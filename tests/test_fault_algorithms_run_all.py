@@ -131,7 +131,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["top_fault"]["fault_type"], "rope_looseness")
 
-    def test_rubber_fault_can_be_selected_as_primary_candidate(self):
+    def test_rubber_candidate_can_outrank_watch_level_rope(self):
         fake_detectors = [
             lambda features: _result("rope_looseness", 46.0, triggered=False),
             lambda features: _result("rubber_hardening", 73.0, triggered=True),
@@ -157,6 +157,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["screening"]["status"], "candidate_faults")
         self.assertEqual(payload["top_candidate"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["top_fault"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["primary_issue"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
 
