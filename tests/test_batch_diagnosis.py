@@ -151,6 +151,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("risk", payload)
             self.assertIn("report_markdown_draft", payload)
             self.assertIn("一句话结论", payload["report_markdown_draft"])
+            self.assertIn("连续窗口确认", payload["report_markdown_draft"])
             self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rope_looseness")
             self.assertTrue(latest_json.exists())
             self.assertTrue(history_jsonl.exists())
@@ -161,6 +162,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertEqual(latest_payload["primary_issue"]["fault_type"], "rope_looseness")
             self.assertIn("report_markdown_draft", latest_payload)
             self.assertIn("当前最值得关注的问题", latest_payload["report_markdown_draft"])
+            self.assertIn("连续窗口确认", latest_payload["report_markdown_draft"])
 
             history_lines = history_jsonl.read_text(encoding="utf-8").strip().splitlines()
             self.assertEqual(len(history_lines), 1)

@@ -329,9 +329,9 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["preferred_issue"]["fault_type"], "unknown")
         self.assertEqual(payload["preferred_issue"]["score"], 0.0)
         self.assertEqual(payload["dify_report_inputs"]["preferred_fault_type"], "unknown")
-        self.assertIn("当前最值得关注的问题：暂无明确故障类型", payload["report_markdown_draft"])
-        self.assertIn("系统故障标签：unknown", payload["report_markdown_draft"])
-        self.assertNotIn("当前最值得关注的问题：减振橡胶硬化", payload["report_markdown_draft"])
+        self.assertIn("| 当前最值得关注的问题 | 暂无明确故障类型 |", payload["report_markdown_draft"])
+        self.assertIn("| 系统故障标签 | unknown |", payload["report_markdown_draft"])
+        self.assertNotIn("| 当前最值得关注的问题 | 减振橡胶硬化 |", payload["report_markdown_draft"])
 
     def test_diagnosis_report_uses_conservative_confidence_text_for_watch_only(self):
         diagnosis_result = {
@@ -366,7 +366,7 @@ class TestAPIService(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertIn("当前可信度为“较低（待复测确认）”", payload["report_markdown_draft"])
+        self.assertIn("当前可信度：较低（待复测确认）", payload["report_markdown_draft"])
 
     def test_dify_workflow_online_status_includes_detection_date(self):
         workflow_path = Path("docs/dify_workflows/elevator_diagnosis_report_with_waveform_v2.yml")

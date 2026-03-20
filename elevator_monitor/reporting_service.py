@@ -347,6 +347,113 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     return table
 
 
+def _maybe_float(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _rope_detail_result(diag: dict[str, Any]) -> dict[str, Any]:
+    results = diag.get("results", [])
+    if isinstance(results, list):
+        for item in results:
+            if isinstance(item, dict) and str(item.get("fault_type", "")).strip().lower() in {"rope_looseness", "rope_tension_abnormal"}:
+                return item
+    rope_primary = diag.get("rope_primary", {})
+    return dict(rope_primary) if isinstance(rope_primary, dict) else {}
+
+
+def _baseline_stat(diag: dict[str, Any], key: str) -> tuple[float | None, float | None]:
+    ref = diag.get("baseline_reference", {})
+    stats = ref.get("stats", {}) if isinstance(ref, dict) else {}
+    item = stats.get(key, {}) if isinstance(stats, dict) else {}
+    if not isinstance(item, dict):
+        return None, None
+    median = _maybe_float(item.get("median"))
+    scale = _maybe_float(item.get("scale"))
+    return median, scale
+
+
+def _comparison_text(current: float | None, median: float | None, *, expected: str) -> str:
+    if current is None or median is None:
+        return "基线不足"
+    if expected == "higher":
+        if current > median:
+            return "高于基线"
+        if current < median:
+            return "低于基线"
+    if expected == "lower":
+        if current < median:
+            return "低于基线"
+        if current > median:
+            return "高于基线"
+    return "接近基线"
+
+
+def _format_delta(current: float | None, median: float | None) -> str:
+    if current is None or median is None:
+        return "-"
+    return f"{current - median:+.4f}"
+
+
+def _build_rope_comparison_rows(diag: dict[str, Any]) -> list[list[Any]]:
+    rope_detail = _rope_detail_result(diag)
+    if str(rope_detail.get("fault_type", "")).strip().lower() not in {"rope_looseness", "rope_tension_abnormal"}:
+        return []
+    snapshot = rope_detail.get("feature_snapshot", {}) if isinstance(rope_detail.get("feature_snapshot"), dict) else {}
+    spectral = rope_detail.get("rope_spectral_snapshot", {}) if isinstance(rope_detail.get("rope_spectral_snapshot"), dict) else {}
+
+    lateral_ratio = _maybe_float(snapshot.get("lateral_ratio"))
+    lat_dom_freq_hz = _maybe_float(snapshot.get("lat_dom_freq_hz"))
+    lat_low_band_ratio = _maybe_float(spectral.get("lat_low_band_ratio"))
+    ag_corr = _maybe_float(snapshot.get("ag_corr"))
+
+    rows: list[list[Any]] = []
+    for label, key, current, expected in [
+        ("横向占比 lateral_ratio", "lateral_ratio", lateral_ratio, "higher"),
+        ("横向主频 lat_dom_freq_hz", "lat_dom_freq_hz", lat_dom_freq_hz, "lower"),
+        ("横向低频能量占比 lat_low_band_ratio", "lat_low_band_ratio", lat_low_band_ratio, "higher"),
+        ("振动-转动耦合 ag_corr", "ag_corr", ag_corr, "higher"),
+    ]:
+        median, scale = _baseline_stat(diag, key)
+        rows.append(
+            [
+                label,
+                "-" if current is None else f"{float(current):.4f}",
+                "-" if median is None else f"{float(median):.4f}",
+                _format_delta(current, median),
+                _comparison_text(current, median, expected=expected),
+                "-" if scale is None else f"{float(scale):.4f}",
+            ]
+        )
+    if not any(row[1] != "-" for row in rows):
+        return []
+    return rows
+
+
+def _build_rope_timeline_rows(diag: dict[str, Any]) -> list[list[Any]]:
+    timeline = diag.get("rope_timeline", {})
+    if not isinstance(timeline, dict):
+        return []
+    rows = timeline.get("rows", [])
+    if not isinstance(rows, list) or not rows:
+        return []
+    tail = rows[-5:]
+    return [
+        [
+            str(item.get("file", "")),
+            "是" if bool(item.get("rope_raw_triggered", False)) else "否",
+            "是" if bool(item.get("rope_confirmed", False)) else "否",
+            f"{_safe_float(item.get('rope_score'), 0.0):.1f}",
+        ]
+        for item in tail
+        if isinstance(item, dict)
+    ]
+
+
 def build_report_context(
     *,
     diagnosis_result: dict[str, Any],
@@ -574,6 +681,7 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
     risk = report_context.get("risk", {})
     package = report_context.get("maintenance_package", {})
     waveforms = report_context.get("waveform_payload", {})
+    rope_detail = _rope_detail_result(diagnosis)
     actions = package.get("recommended_actions", []) or []
     parts = package.get("suggested_parts", []) or []
     screening_status = str(screening.get("status", "normal")).strip().lower()
@@ -618,11 +726,39 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
         ["维保时限建议", f"{max(1, dispatch_hours)} 小时内"],
         ["备件与工具参考", "<br>".join(line.removeprefix("- ").strip() for line in _render_parts_lines(parts))],
     ]
+    rope_comparison_rows = _build_rope_comparison_rows(diagnosis)
+    timeline_rows = _build_rope_timeline_rows(diagnosis)
+    timeline = diagnosis.get("rope_timeline", {}) if isinstance(diagnosis.get("rope_timeline"), dict) else {}
 
     lines.extend(["", "## 4. 本次判断依据"])
     lines.extend(_markdown_table(["项目", "内容"], basis_rows))
+    if rope_comparison_rows:
+        lines.extend(["", "### 4.1 钢丝绳特征对比健康基线"])
+        lines.extend(_markdown_table(["特征", "当前值", "基线中位数", "偏移量", "相对基线判断", "基线尺度"], rope_comparison_rows))
+    if timeline_rows:
+        lines.extend(
+            [
+                "",
+                "### 4.2 连续窗口确认",
+                f"- 连续确认窗口数：{_safe_int(timeline.get('confirm_windows'), 0)}",
+                f"- 已确认触发次数：{_safe_int(timeline.get('confirmed_trigger_count'), 0)}",
+                f"- 最新窗口是否确认：{'是' if bool(timeline.get('latest_confirmed', False)) else '否'}",
+            ]
+        )
+        lines.extend(_markdown_table(["文件", "单窗触发", "连续确认", "单窗分数"], timeline_rows))
     lines.extend(["", "## 5. 给维保人员的补充参考"])
     lines.extend(_markdown_table(["项目", "内容"], maintenance_rows))
+    if rope_detail:
+        lines.extend(
+            [
+                "",
+                "### 5.1 钢丝绳规则摘要",
+                f"- 钢丝绳单窗规则分：{_safe_float(rope_detail.get('rope_rule_score'), 0.0):.1f}",
+                f"- 钢丝绳分支画像：{str(rope_detail.get('rope_branch', 'unknown')) or 'unknown'}",
+                f"- 钢丝绳特异证据分：{_safe_float(rope_detail.get('rope_specific_score'), 0.0):.1f}",
+                f"- 相对基线偏离分：{_safe_float(rope_detail.get('baseline_deviation_score'), 0.0):.1f}",
+            ]
+        )
 
     waveform_markdown = ""
     if isinstance(waveforms, dict):

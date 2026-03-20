@@ -41,6 +41,13 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _infer_elevator_id(*candidates: Any) -> str:
     for value in candidates:
         text = str(value or "").strip()
@@ -369,6 +376,8 @@ def _build_report_outputs(
     latest_status: str,
     risk: dict[str, Any],
     baseline_summary: dict[str, Any],
+    baseline_payload: dict[str, Any] | None,
+    rope_timeline: dict[str, Any],
     latest_file: Path,
     input_dir: str,
 ) -> tuple[dict[str, Any], str]:
@@ -414,8 +423,26 @@ def _build_report_outputs(
         manifest_payload={},
         manifest_path="",
     )
+    baseline_reference: dict[str, Any] = {"stats": {}}
+    if isinstance(baseline_payload, dict):
+        raw_stats = baseline_payload.get("stats", {})
+        if isinstance(raw_stats, dict):
+            for key in ("lateral_ratio", "lat_dom_freq_hz", "lat_low_band_ratio", "ag_corr"):
+                item = raw_stats.get(key)
+                if isinstance(item, dict):
+                    baseline_reference["stats"][key] = {
+                        "median": _safe_float(item.get("median"), 0.0),
+                        "scale": _safe_float(item.get("scale"), 0.0),
+                        "count": _safe_float(item.get("count"), 0.0),
+                    }
+        baseline_reference["count"] = _safe_int(baseline_payload.get("count"), 0)
+
+    report_diagnosis = dict(latest_result)
+    report_diagnosis["baseline_reference"] = baseline_reference
+    report_diagnosis["rope_timeline"] = rope_timeline
+
     report_context = build_report_context(
-        diagnosis_result=latest_result,
+        diagnosis_result=report_diagnosis,
         maintenance_package=maintenance_package,
         language="zh-CN",
         report_style="standard",
@@ -526,6 +553,8 @@ def run_batch_diagnosis(
         latest_status=latest_status,
         risk=risk,
         baseline_summary=baseline_summary,
+        baseline_payload=baseline_payload,
+        rope_timeline=rope_timeline,
         latest_file=latest_file,
         input_dir=input_dir,
     )
