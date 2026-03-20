@@ -13,6 +13,7 @@ EPS = 1e-9
 
 
 def parse_float(value: Any) -> Optional[float]:
+    """把 CSV / JSON 里的杂项输入统一转成 float，失败时返回 None。"""
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -27,6 +28,7 @@ def parse_float(value: Any) -> Optional[float]:
 
 
 def parse_int(value: Any) -> Optional[int]:
+    """在容忍字符串和浮点输入的前提下，提取一个稳定的整数值。"""
     fv = parse_float(value)
     if fv is None:
         return None
@@ -34,16 +36,19 @@ def parse_int(value: Any) -> Optional[int]:
 
 
 def clamp(value: float, lo: float, hi: float) -> float:
+    """把数值裁剪到固定区间，避免打分和比值越界。"""
     return max(lo, min(hi, value))
 
 
 def ratio_to_100(value: float, low: float, high: float) -> float:
+    """把不同量纲的特征按经验区间压成 0~100 分，便于规则层组合。"""
     if high <= low:
         return 0.0
     return 100.0 * clamp((value - low) / (high - low), 0.0, 1.0)
 
 
 def robust_fit(values: list[float]) -> tuple[float, float]:
+    """用 median + MAD 拟合健康基线中心和尺度，减少离群窗口的影响。"""
     clean = [float(v) for v in values if math.isfinite(float(v))]
     if not clean:
         return 0.0, 1.0
@@ -64,6 +69,7 @@ def build_feature_baseline(
     *,
     min_samples: int = 8,
 ) -> dict[str, Any]:
+    """按选定特征构建基线统计，用于后续“相对健康状态”的判断。"""
     eligible_rows = [row for row in feature_rows if parse_int(row.get("n")) is not None and int(parse_int(row.get("n")) or 0) >= min_samples]
     rows_to_use = eligible_rows if len(eligible_rows) >= 3 else feature_rows
     stats: dict[str, dict[str, float]] = {}
@@ -100,6 +106,7 @@ def build_clean_feature_baseline(
     z_threshold: float = 3.5,
     max_drop_ratio: float = 0.20,
 ) -> dict[str, Any]:
+    """在构建基线前先剔除明显异常的“伪健康”窗口，避免污染 baseline。"""
     baseline = build_feature_baseline(feature_rows, keys, min_samples=min_samples)
     stats = baseline.get("stats", {}) if isinstance(baseline.get("stats"), dict) else {}
     eligible_rows = [row for row in feature_rows if parse_int(row.get("n")) is not None and int(parse_int(row.get("n")) or 0) >= min_samples]
@@ -153,24 +160,28 @@ def build_clean_feature_baseline(
 
 
 def safe_mean(xs: list[float]) -> float:
+    """空输入安全均值。"""
     if not xs:
         return 0.0
     return float(sum(xs) / len(xs))
 
 
 def safe_std(xs: list[float]) -> float:
+    """空输入安全标准差。"""
     if len(xs) < 2:
         return 0.0
     return float(statistics.pstdev(xs))
 
 
 def safe_p2p(xs: list[float]) -> float:
+    """空输入安全峰峰值。"""
     if not xs:
         return 0.0
     return float(max(xs) - min(xs))
 
 
 def safe_percentile(xs: list[float], q: float) -> float:
+    """轻量百分位实现，避免引入额外依赖。"""
     if not xs:
         return 0.0
     clean = sorted(float(x) for x in xs)
@@ -187,18 +198,21 @@ def safe_percentile(xs: list[float], q: float) -> float:
 
 
 def qspread(xs: list[float], low_q: float = 5.0, high_q: float = 95.0) -> float:
+    """分位带宽，用于描述波动离散度，较标准差更抗尖峰。"""
     if not xs:
         return 0.0
     return float(safe_percentile(xs, high_q) - safe_percentile(xs, low_q))
 
 
 def _hann_window(size: int) -> list[float]:
+    """频域扫描前的 Hann 窗，减少谱泄漏。"""
     if size <= 1:
         return [1.0] * max(1, size)
     return [0.5 - 0.5 * math.cos((2.0 * math.pi * idx) / (size - 1)) for idx in range(size)]
 
 
 def _goertzel_power(xs: list[float], fs_hz: float, target_hz: float) -> float:
+    """在单个目标频点上估算能量，适合纯 Python 做稀疏频率扫描。"""
     if len(xs) < 4 or fs_hz <= EPS or target_hz <= 0.0 or target_hz >= fs_hz / 2.0:
         return 0.0
     omega = 2.0 * math.pi * target_hz / fs_hz
@@ -221,6 +235,7 @@ def _scan_spectrum(
     freq_max_hz: float = 8.0,
     step_hz: float = 0.1,
 ) -> list[tuple[float, float]]:
+    """把时域信号扫描成稀疏频谱，供主频/低频占比等频域特征使用。"""
     if len(xs) < 8 or fs_hz <= EPS or step_hz <= EPS:
         return []
     centered = [float(value) - safe_mean(xs) for value in xs]
@@ -249,6 +264,7 @@ def spectral_features(
     freq_max_hz: float = 8.0,
     step_hz: float = 0.1,
 ) -> dict[str, float]:
+    """提取主频、谱峰集中度和低频占比，用于 rope / rubber 的频域画像。"""
     bins = _scan_spectrum(xs, fs_hz, freq_min_hz=freq_min_hz, freq_max_hz=freq_max_hz, step_hz=step_hz)
     if not bins:
         return {"dom_freq_hz": 0.0, "peak_ratio": 0.0, "low_band_ratio": 0.0}
@@ -266,6 +282,7 @@ def spectral_features(
 
 
 def rms_ac(xs: list[float]) -> float:
+    """去均值后的 RMS，强调动态波动而不是静态偏置。"""
     if not xs:
         return 0.0
     mu = safe_mean(xs)
@@ -273,6 +290,7 @@ def rms_ac(xs: list[float]) -> float:
 
 
 def crest_factor(xs: list[float]) -> float:
+    """峰值相对 RMS 的尖锐程度，用来识别冲击/拍击型信号。"""
     if not xs:
         return 0.0
     peak = max(abs(x) for x in xs)
@@ -283,6 +301,7 @@ def crest_factor(xs: list[float]) -> float:
 
 
 def kurtosis_excess(xs: list[float]) -> float:
+    """超额峰度，补充判断信号是否比正常运行更尖峰、更重尾。"""
     n = len(xs)
     if n < 4:
         return 0.0
@@ -295,6 +314,7 @@ def kurtosis_excess(xs: list[float]) -> float:
 
 
 def zero_cross_rate(xs: list[float], duration_s: float) -> float:
+    """过零率是低成本的快慢代理量，可粗略反映摆动节奏。"""
     if len(xs) < 2 or duration_s <= EPS:
         return 0.0
     cnt = 0
@@ -307,6 +327,7 @@ def zero_cross_rate(xs: list[float], duration_s: float) -> float:
 
 
 def correlation(xs: list[float], ys: list[float]) -> float:
+    """线性相关系数，用于衡量轴间或加速度/角速度是否联动增强。"""
     if len(xs) != len(ys) or len(xs) < 3:
         return 0.0
     mx = safe_mean(xs)
@@ -320,6 +341,7 @@ def correlation(xs: list[float], ys: list[float]) -> float:
 
 
 def diff_rms(xs: list[float], fs_hz: float) -> float:
+    """一阶差分 RMS，可近似描述 jerk/急变强度。"""
     if len(xs) < 2 or fs_hz <= EPS:
         return 0.0
     diffs = [(xs[i] - xs[i - 1]) * fs_hz for i in range(1, len(xs))]
@@ -327,6 +349,7 @@ def diff_rms(xs: list[float], fs_hz: float) -> float:
 
 
 def count_peaks(xs: list[float], threshold: float) -> int:
+    """统计超过阈值的局部峰数量，用来刻画尖峰事件密度。"""
     if len(xs) < 3:
         return 0
     cnt = 0
@@ -337,6 +360,7 @@ def count_peaks(xs: list[float], threshold: float) -> int:
 
 
 def score_to_level(score: float) -> str:
+    """把连续分数映射成统一告警等级，便于各算法输出口径一致。"""
     if score >= 80:
         return "alarm"
     if score >= 60:
@@ -347,11 +371,13 @@ def score_to_level(score: float) -> str:
 
 
 def load_rows(path: Path) -> list[dict[str, str]]:
+    """读取原始 CSV 为逐行字典，作为特征提取的统一输入。"""
     with path.open("r", encoding="utf-8", newline="") as fp:
         return list(csv.DictReader(fp))
 
 
 def _extract_series(rows: list[dict[str, str]], names: tuple[str, ...]) -> list[float]:
+    """按候选列名提取一条数值序列，兼容历史字段别名。"""
     out: list[float] = []
     for row in rows:
         value = None
@@ -364,6 +390,7 @@ def _extract_series(rows: list[dict[str, str]], names: tuple[str, ...]) -> list[
 
 
 def _extract_ts_ms(rows: list[dict[str, str]]) -> list[int]:
+    """提取时间戳；缺失时退化为行号，至少保证时序特征可计算。"""
     ts: list[int] = []
     for idx, row in enumerate(rows):
         value = parse_int(row.get("ts_ms"))
@@ -376,6 +403,7 @@ def _extract_ts_ms(rows: list[dict[str, str]]) -> list[int]:
 
 
 def _pick_effective_rows(rows: list[dict[str, str]], min_real_rows: int = 8) -> tuple[list[dict[str, str]], bool, float]:
+    """优先保留真实采样帧，尽量把补点/重复帧对特征的污染降到最低。"""
     if not rows:
         return rows, False, 0.0
     raw_n = len(rows)
@@ -396,6 +424,7 @@ def _pick_effective_rows(rows: list[dict[str, str]], min_real_rows: int = 8) -> 
 
 
 def _duration_seconds(ts_ms: list[int]) -> float:
+    """由时间戳估算窗口时长，供采样率和频域特征复用。"""
     if len(ts_ms) < 2:
         return 0.0
     d = ts_ms[-1] - ts_ms[0]
@@ -408,6 +437,8 @@ def _channel_feature_pack(xs: list[float], fs_hz: float) -> dict[str, float]:
     mean = safe_mean(xs)
     std = safe_std(xs)
     cv = float(std / max(abs(mean), EPS)) if abs(mean) > EPS else 0.0
+    # 单通道统计量用于描述该方向的波动强度、摆幅、尖峰和急变程度。
+    # 它们本身不直接对应具体故障，但会被上层算法组合成竖向/横向/阻尼变化等画像。
     return {
         "mean": float(mean),
         "std": float(std),
@@ -441,6 +472,8 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     fy = _extract_series(effective_rows, ("fy", "HZY"))
     fz = _extract_series(effective_rows, ("fz", "HZZ"))
 
+    # 合成幅值先把三轴原始波形压成“整体振动/整体转动”两个基底，
+    # 后续共同异常强度特征大多从这里展开。
     a_mag = []
     g_mag = []
     for i in range(n):
@@ -453,6 +486,7 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     duration_s = _duration_seconds(ts_ms)
     fs_hz = float((n - 1) / duration_s) if n > 1 and duration_s > EPS else 0.0
 
+    # 总体幅值特征：先回答“相对健康基线，整体振动是不是变强了”。
     a_std = safe_std(a_mag)
     a_mean = safe_mean(a_mag)
     a_rms_ac = rms_ac(a_mag)
@@ -464,6 +498,7 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     g_mean = safe_mean(g_mag)
     g_p2p = safe_p2p(g_mag)
 
+    # 事件/粗糙度特征：看信号是慢摆、快抖还是尖峰冲击。
     threshold = a_mean + 3.0 * max(a_std, EPS)
     peak_count = count_peaks(a_mag, threshold=threshold)
     peak_rate_hz = float(peak_count / duration_s) if duration_s > EPS else 0.0
@@ -471,6 +506,8 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     zc_rate = zero_cross_rate([v - safe_mean(az) for v in az], duration_s=duration_s)
     jerk_rms = diff_rms(a_mag, fs_hz=fs_hz)
 
+    # 单轴特征包用于保留“具体是哪个方向在变化”，
+    # 上层 rope / rubber 规则会重点使用 az_*、ax/ay_* 等前缀特征。
     ax_pack = _channel_feature_pack(ax, fs_hz=fs_hz)
     ay_pack = _channel_feature_pack(ay, fs_hz=fs_hz)
     az_pack = _channel_feature_pack(az, fs_hz=fs_hz)
@@ -482,6 +519,8 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     side_std = 0.5 * (ax_std + ay_std)
     lateral_ratio = float(side_std / max(az_std, EPS))
 
+    # 方向比例和耦合特征：用于区分“更偏横向摆动”还是“更偏竖向传递”，
+    # 同时观察加速度与角速度、轴与轴之间是否出现联动增强。
     ag_corr = abs(correlation(a_mag, g_mag))
     gx_ax_corr = abs(correlation(gx, ax))
     gy_ay_corr = abs(correlation(gy, ay))
@@ -489,6 +528,7 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     corr_xz = correlation(ax, az)
     corr_yz = correlation(ay, az)
 
+    # 能量重分配特征：对 rubber 更重要，也可辅助判断 rope 是否只是共同异常。
     energy_x_over_y = float(ax_pack["rms_ac"] / max(ay_pack["rms_ac"], EPS))
     energy_z_over_xy = float(az_pack["rms_ac"] / max(0.5 * (ax_pack["rms_ac"] + ay_pack["rms_ac"]), EPS))
     ax_mean = safe_mean(ax)
@@ -499,6 +539,10 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
         for idx in range(n)
     ]
     vertical_signal = [az[idx] - az_mean for idx in range(n)]
+    # 频域特征把时域波形转成“主频、谱峰集中度、低频占比”。
+    # 当前实现里：
+    # - lateral 频域更偏向钢丝绳相关的横向摆动/低频画像
+    # - vertical 频域更偏向橡胶圈或支撑刚度变化的竖向画像
     lateral_spectrum = spectral_features(lateral_signal, fs_hz=fs_hz)
     vertical_spectrum = spectral_features(vertical_signal, fs_hz=fs_hz)
 

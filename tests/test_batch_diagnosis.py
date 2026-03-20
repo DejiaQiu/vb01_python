@@ -70,7 +70,6 @@ def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, 
             "level": top_fault.get("level", "normal"),
             "triggered": bool(top_fault.get("triggered", False)),
             "rope_rule_score": top_fault.get("score", 0.0),
-            "rope_model_probability": 0.0,
             "rope_branch": "",
             "rope_spectral_snapshot": {},
         },
@@ -175,6 +174,29 @@ class TestBatchDiagnosis(unittest.TestCase):
 
         self.assertEqual(loaded["status"], "watch_only")
         self.assertEqual(loaded["preferred_issue"]["fault_type"], "rubber_hardening")
+
+    def test_primary_issue_is_preferred_over_legacy_watch_fields(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            csv_path = root / "vibration_30s_20260303_101500.csv"
+            _write_csv(csv_path)
+
+            fake_result = _result(
+                "watch_only",
+                top_fault=_compact_fault("rope_tension_abnormal", 53.0),
+                watch_faults=[_compact_fault("rope_tension_abnormal", 53.0, screening="watch")],
+            )
+            fake_result["primary_issue"] = _compact_fault("rubber_hardening", 57.0, screening="watch")
+
+            with patch("elevator_monitor.batch_diagnosis.run_all_rows", return_value=fake_result):
+                payload = run_batch_diagnosis(
+                    input_dir=str(root),
+                    max_files=1,
+                    write_outputs=False,
+                )
+
+        self.assertEqual(payload["status"], "watch_only")
+        self.assertEqual(payload["preferred_issue"]["fault_type"], "rubber_hardening")
 
 
 if __name__ == "__main__":

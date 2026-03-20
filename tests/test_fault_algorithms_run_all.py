@@ -63,10 +63,11 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["screening"]["status"], "normal")
         self.assertEqual(payload["candidate_faults"], [])
         self.assertEqual(payload["watch_faults"], [])
-        self.assertEqual(payload["top_fault"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["top_fault"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
-        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rope_looseness")
 
     def test_rope_fault_can_be_promoted_to_candidate(self):
         fake_detectors = [
@@ -74,15 +75,29 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             lambda features: _result("rubber_hardening", 48.0, triggered=False),
         ]
 
-        with patch.object(run_all_module, "DETECTORS", fake_detectors):
-            payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
+        with patch.object(
+            run_all_module,
+            "_system_abnormality",
+            return_value={
+                "status": "candidate_faults",
+                "score": 70.0,
+                "shared_abnormal_score": 71.0,
+                "baseline_mode": "robust_baseline",
+                "baseline_weight": 0.85,
+                "baseline_features": 3,
+                "run_state_score": 62.0,
+                "gate_mode": "running",
+            },
+        ):
+            with patch.object(run_all_module, "DETECTORS", fake_detectors):
+                payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
         self.assertEqual(payload["screening"]["status"], "candidate_faults")
         self.assertEqual(payload["top_candidate"]["fault_type"], "rope_looseness")
         self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
         self.assertEqual(len(payload["candidate_faults"]), 1)
         self.assertEqual(payload["candidate_faults"][0]["screening"], "high_confidence")
-        self.assertEqual(payload["watch_faults"], [])
+        self.assertEqual(payload["watch_faults"][0]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rubber_hardening")
 
     def test_auxiliary_rubber_fault_does_not_replace_primary_rope_status(self):
@@ -95,12 +110,13 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
         self.assertEqual(payload["screening"]["status"], "normal")
-        self.assertEqual(payload["top_fault"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["top_fault"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["candidate_faults"], [])
-        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["auxiliary_results"][0]["score"], 69.0)
+        self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["top_fault"]["score"], 69.0)
 
     def test_low_quality_window_suppresses_candidates(self):
         fake_detectors = [
@@ -114,6 +130,63 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["candidate_faults"], [])
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["top_fault"]["fault_type"], "rope_looseness")
+
+    def test_rubber_fault_can_be_selected_as_primary_candidate(self):
+        fake_detectors = [
+            lambda features: _result("rope_looseness", 46.0, triggered=False),
+            lambda features: _result("rubber_hardening", 73.0, triggered=True),
+        ]
+
+        with patch.object(
+            run_all_module,
+            "_system_abnormality",
+            return_value={
+                "status": "candidate_faults",
+                "score": 72.0,
+                "shared_abnormal_score": 74.0,
+                "baseline_mode": "robust_baseline",
+                "baseline_weight": 0.85,
+                "baseline_features": 3,
+                "run_state_score": 66.0,
+                "gate_mode": "running",
+            },
+        ):
+            with patch.object(run_all_module, "DETECTORS", fake_detectors):
+                payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
+
+        self.assertEqual(payload["screening"]["status"], "candidate_faults")
+        self.assertEqual(payload["top_candidate"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["top_fault"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
+
+    def test_system_watch_without_type_specific_signal_returns_unknown_watch(self):
+        fake_detectors = [
+            lambda features: _result("rope_looseness", 43.0, triggered=False),
+            lambda features: _result("rubber_hardening", 44.0, triggered=False),
+        ]
+
+        with patch.object(
+            run_all_module,
+            "_system_abnormality",
+            return_value={
+                "status": "watch_only",
+                "score": 52.0,
+                "shared_abnormal_score": 58.0,
+                "baseline_mode": "robust_baseline",
+                "baseline_weight": 0.85,
+                "baseline_features": 3,
+                "run_state_score": 61.0,
+                "gate_mode": "running",
+            },
+        ):
+            with patch.object(run_all_module, "DETECTORS", fake_detectors):
+                payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
+
+        self.assertEqual(payload["screening"]["status"], "watch_only")
+        self.assertEqual(payload["primary_issue"]["fault_type"], "unknown")
+        self.assertEqual(payload["top_fault"]["fault_type"], "unknown")
+        self.assertEqual(payload["watch_faults"][0]["fault_type"], "unknown")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,14 @@
 """橡胶圈硬化单窗诊断。
 
-适用前提是传感器安装在曳引机本体附近。这里不直接把“总振动变大”当作硬化，
-而是优先看支撑边界条件变化带来的几个代理现象：
+当前版本收敛成少量核心特征：
 
-1. 竖向响应增强：Z 向波动、峰峰值、交流 RMS 更偏离健康状态。
-2. 阻尼退化代理量增强：Z 向离散点的 jerk / qspread / cv 变大。
-3. 轴间耦合结构变化：corr_xy / corr_xz / corr_yz 相对健康基线发生明显偏移。
-4. 方向性能量再分配：energy_z_over_xy 上升，说明竖向传递更直接。
-5. 明显冲击尖峰要被排除，避免把碰撞、急停、敲击误判成硬化。
+1. 竖向传递增强：`energy_z_over_xy`、`az_p2p`
+2. 阻尼退化代理量：`az_cv`、`az_jerk_rms`
+3. 轴间耦合变化：`corr_xy / corr_xz / corr_yz`
+4. 通用异常强度：`a_rms_ac`、`a_p2p`、`g_std`
+5. 冲击抑制：`a_crest`、`a_kurt`、`peak_rate_hz`
+
+目标是用更少、更稳定的规则，把 rubber 约束在“竖向 + 阻尼 + 耦合”画像里。
 """
 
 from __future__ import annotations
@@ -23,37 +24,34 @@ except ImportError:  # pragma: no cover
 FAULT_TYPE = "rubber_hardening"
 
 RUBBER_BASELINE_KEYS = (
-    "az_std",
-    "az_rms_ac",
+    "a_rms_ac",
+    "a_p2p",
+    "g_std",
+    "energy_z_over_xy",
     "az_p2p",
     "az_cv",
     "az_jerk_rms",
-    "az_qspread",
+    "az_std",
     "corr_xy",
     "corr_xz",
     "corr_yz",
-    "energy_z_over_xy",
-    "mag_cv",
-    "mag_std",
     "a_crest",
     "a_kurt",
     "peak_rate_hz",
 )
 
-CONSERVATIVE_ALARM_ENABLED = True
-CONSERVATIVE_SCORE_CAP = 59.0
-BASELINE_CONFIRM_MIN_SCORE = 64.0
-BASELINE_CONFIRM_MIN_VERTICAL = 46.0
-BASELINE_CONFIRM_MIN_DIRECTIONAL = 40.0
-BASELINE_CONFIRM_MIN_COUPLING = 44.0
-BASELINE_CONFIRM_MIN_DAMPING = 36.0
-BASELINE_CONFIRM_MAX_SPIKY = 44.0
-FALLBACK_CONFIRM_MIN_SCORE = 72.0
-FALLBACK_CONFIRM_MIN_VERTICAL = 56.0
-FALLBACK_CONFIRM_MIN_COUPLING = 48.0
-FALLBACK_CONFIRM_MIN_DAMPING = 42.0
-FALLBACK_CONFIRM_MAX_SPIKY = 34.0
-RUN_GATE_RESCUE_MIN = 35.0
+RUBBER_RULE_CONFIG = {
+    "watch_score": 45.0,
+    "candidate_score": 60.0,
+    "rubber_core_min": 50.0,
+    "watch_specific_min": 36.0,
+    "watch_run_min": 30.0,
+    "candidate_run_min": 35.0,
+    "watch_score_cap": 59.0,
+    "vertical_min": 35.0,
+    "damping_min": 35.0,
+    "spiky_penalty_max": 55.0,
+}
 
 EPS = 1e-9
 
@@ -117,98 +115,67 @@ def _normalize_weight(count: int, total: int) -> float:
 
 
 def detect(features: dict) -> dict:
+    rule_cfg = RUBBER_RULE_CONFIG
     a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
     g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
     a_rms_ac = _to_float(features.get("a_rms_ac"))
+    a_p2p = _to_float(features.get("a_p2p"))
     a_crest = _to_float(features.get("a_crest"))
     a_kurt = _to_float(features.get("a_kurt"))
     g_std = _to_float(features.get("g_std"))
     peak_rate_hz = _to_float(features.get("peak_rate_hz"))
 
-    ax_p2p = _to_float(features.get("ax_p2p"))
-    ay_p2p = _to_float(features.get("ay_p2p"))
     az_p2p = _to_float(features.get("az_p2p"))
-    ax_rms_ac = _to_float(features.get("ax_rms_ac"))
-    ay_rms_ac = _to_float(features.get("ay_rms_ac"))
-    az_rms_ac = _to_float(features.get("az_rms_ac"))
     az_std = _to_float(features.get("az_std"))
     az_cv = _to_float(features.get("az_cv"))
     az_jerk_rms = _to_float(features.get("az_jerk_rms"))
-    az_qspread = _to_float(features.get("az_qspread"))
-    mag_std = _to_float(features.get("mag_std"))
-    mag_cv = _to_float(features.get("mag_cv"))
     corr_xy = _to_float(features.get("corr_xy"))
     corr_xz = _to_float(features.get("corr_xz"))
     corr_yz = _to_float(features.get("corr_yz"))
     energy_z_over_xy = _to_float(features.get("energy_z_over_xy"), 1.0)
-    energy_x_over_y = _to_float(features.get("energy_x_over_y"), 1.0)
-
-    vertical_rms_ratio = az_rms_ac / max(0.5 * (ax_rms_ac + ay_rms_ac), EPS)
-    vertical_p2p_ratio = az_p2p / max(0.5 * (ax_p2p + ay_p2p), EPS)
-    damping_ratio = az_jerk_rms / max(az_rms_ac, EPS)
     corr_major = max(abs(corr_xy), abs(corr_xz), abs(corr_yz))
 
     run_a_ratio = a_rms_ac / max(a_mean, EPS)
     run_g_ratio = g_std / max(g_mean, EPS)
     run_state_score = (
-        0.55 * ratio_to_100(run_a_ratio, 0.0010, 0.012)
+        0.55 * ratio_to_100(run_a_ratio, 0.0010, 0.014)
         + 0.45 * ratio_to_100(run_g_ratio, 0.010, 0.220)
     )
 
-    fallback_vertical = max(
-        ratio_to_100(az_std, 0.009, 0.018),
-        ratio_to_100(az_p2p, 0.038, 0.062),
-        ratio_to_100(vertical_rms_ratio, 0.85, 2.10),
-        ratio_to_100(energy_z_over_xy, 0.85, 1.85),
-    )
-    fallback_directional = (
-        0.60 * ratio_to_100(energy_z_over_xy, 0.85, 1.85)
-        + 0.40 * (100.0 - ratio_to_100(mag_cv, 0.012, 0.032))
-    )
-    fallback_coupling = (
-        0.70 * ratio_to_100(corr_major, 0.20, 0.90)
-        + 0.30 * ratio_to_100(abs(energy_x_over_y - 1.0), 0.08, 0.90)
-    )
-    fallback_damping = max(
-        0.55 * ratio_to_100(az_cv, 0.80, 1.60) + 0.45 * ratio_to_100(az_jerk_rms, 0.014, 0.032),
-        ratio_to_100(damping_ratio, 0.85, 2.50),
-        ratio_to_100(az_qspread, 0.024, 0.052),
-    )
+    fallback_vertical = (
+        ratio_to_100(energy_z_over_xy, 0.85, 1.85)
+        + ratio_to_100(max(az_p2p, az_std), 0.038, 0.062)
+    ) / 2.0
+    fallback_directional = fallback_vertical
+    fallback_coupling = ratio_to_100(corr_major, 0.20, 0.90)
+    fallback_damping = (
+        ratio_to_100(az_cv, 0.80, 1.60)
+        + ratio_to_100(az_jerk_rms, 0.014, 0.032)
+    ) / 2.0
     fallback_spiky = (
-        0.45 * ratio_to_100(a_crest, 1.8, 4.2)
+        0.40 * ratio_to_100(a_crest, 1.8, 4.2)
         + 0.35 * ratio_to_100(a_kurt, 1.0, 6.0)
-        + 0.20 * ratio_to_100(peak_rate_hz, 0.40, 3.50)
+        + 0.25 * ratio_to_100(peak_rate_hz, 0.40, 3.50)
     )
-    fallback_score = (
-        0.34 * fallback_vertical
-        + 0.22 * fallback_directional
-        + 0.24 * fallback_coupling
-        + 0.20 * fallback_damping
-        - 0.32 * fallback_spiky
-    )
-    fallback_score = clamp(fallback_score, 0.0, 100.0)
+    fallback_shared_abnormal = (
+        ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0010, 0.012)
+        + ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
+        + ratio_to_100(g_std / max(g_mean, EPS), 0.010, 0.220)
+    ) / 3.0
 
     baseline_stats = _baseline_stats(features)
     baseline_count = len([key for key in RUBBER_BASELINE_KEYS if key in baseline_stats])
     baseline_weight = _normalize_weight(baseline_count, len(RUBBER_BASELINE_KEYS))
     baseline_mode = "robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback"
 
-    robust_vertical = _z_to_100(
-        max(
-            _positive_z(az_std, baseline_stats.get("az_std")),
-            _positive_z(az_rms_ac, baseline_stats.get("az_rms_ac")),
+    robust_vertical = _z_to_100((
+        _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy"))
+        + max(
             _positive_z(az_p2p, baseline_stats.get("az_p2p")),
-            0.70 * _positive_z(az_cv, baseline_stats.get("az_cv")),
-            0.55 * _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy")),
+            _positive_z(az_std, baseline_stats.get("az_std")),
         )
-    )
-    robust_directional = _z_to_100(
-        max(
-            _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy")),
-            0.70 * _negative_z(mag_cv, baseline_stats.get("mag_cv")),
-            0.45 * _positive_z(mag_std, baseline_stats.get("mag_std")),
-        )
-    )
+    ) / 2.0)
+    robust_directional = robust_vertical
     robust_coupling = _z_to_100(
         max(
             _abs_shift_z(corr_xy, baseline_stats.get("corr_xy")),
@@ -216,93 +183,100 @@ def detect(features: dict) -> dict:
             _abs_shift_z(corr_yz, baseline_stats.get("corr_yz")),
         )
     )
-    robust_damping = _z_to_100(
-        max(
-            _positive_z(az_cv, baseline_stats.get("az_cv")),
-            _positive_z(az_jerk_rms, baseline_stats.get("az_jerk_rms")),
-            _positive_z(az_qspread, baseline_stats.get("az_qspread")),
-            0.45 * _negative_z(mag_cv, baseline_stats.get("mag_cv")),
-        )
-    )
+    robust_damping = _z_to_100((
+        _positive_z(az_cv, baseline_stats.get("az_cv"))
+        + _positive_z(az_jerk_rms, baseline_stats.get("az_jerk_rms"))
+    ) / 2.0)
     robust_spiky = _z_to_100(
-        0.45 * _positive_z(a_crest, baseline_stats.get("a_crest"))
+        0.40 * _positive_z(a_crest, baseline_stats.get("a_crest"))
         + 0.35 * _positive_z(a_kurt, baseline_stats.get("a_kurt"))
-        + 0.20 * _positive_z(peak_rate_hz, baseline_stats.get("peak_rate_hz"))
+        + 0.25 * _positive_z(peak_rate_hz, baseline_stats.get("peak_rate_hz"))
     )
-    robust_score = (
-        0.32 * robust_vertical
-        + 0.22 * robust_directional
-        + 0.26 * robust_coupling
-        + 0.20 * robust_damping
-        - 0.30 * robust_spiky
-    )
-    robust_score = clamp(robust_score, 0.0, 100.0)
+    robust_shared_abnormal = _z_to_100((
+        _positive_z(a_rms_ac, baseline_stats.get("a_rms_ac"))
+        + _positive_z(a_p2p, baseline_stats.get("a_p2p"))
+        + _positive_z(g_std, baseline_stats.get("g_std"))
+    ) / 3.0)
 
-    score = baseline_weight * robust_score + (1.0 - baseline_weight) * fallback_score
-    score = clamp(score, 0.0, 100.0)
-    mode = "support_stiffness_shift"
-
+    shared_abnormal_score = baseline_weight * robust_shared_abnormal + (1.0 - baseline_weight) * fallback_shared_abnormal
     vertical_component = baseline_weight * robust_vertical + (1.0 - baseline_weight) * fallback_vertical
     directional_component = baseline_weight * robust_directional + (1.0 - baseline_weight) * fallback_directional
     coupling_component = baseline_weight * robust_coupling + (1.0 - baseline_weight) * fallback_coupling
     damping_component = baseline_weight * robust_damping + (1.0 - baseline_weight) * fallback_damping
     spiky_penalty = baseline_weight * robust_spiky + (1.0 - baseline_weight) * fallback_spiky
-
-    gate_rescue_score = 0.45 * vertical_component + 0.30 * coupling_component + 0.25 * damping_component - 0.30 * spiky_penalty
-    effective_run_score = max(run_state_score, gate_rescue_score)
-    absolute_signature_votes = sum(
-        1
-        for passed in (
-            az_p2p >= 0.050,
-            az_std >= 0.011,
-            az_cv >= 1.15,
-            energy_z_over_xy >= 1.20,
-            az_qspread >= 0.030,
-        )
-        if passed
+    rubber_specific_score = clamp(
+        (vertical_component + damping_component + coupling_component) / 3.0,
+        0.0,
+        100.0,
     )
+    baseline_deviation_score = clamp(
+        0.75 * shared_abnormal_score + 0.25 * directional_component,
+        0.0,
+        100.0,
+    )
+    candidate_signal = clamp(
+        rubber_specific_score - 0.18 * spiky_penalty,
+        0.0,
+        100.0,
+    )
+    watch_signal = clamp(
+        0.85 * rubber_specific_score + 0.15 * max(vertical_component, damping_component) - 0.10 * spiky_penalty,
+        0.0,
+        100.0,
+    )
+    mode = "support_stiffness_shift"
+
+    gate_rescue_score = max(candidate_signal, watch_signal)
+    effective_run_score = max(run_state_score, gate_rescue_score)
 
     gate_mode = "running"
-    if effective_run_score < 25.0:
-        score *= 0.30
+    if effective_run_score < rule_cfg["watch_run_min"]:
+        candidate_signal *= 0.30
+        watch_signal *= 0.30
         gate_mode = "non_running_suppressed"
-    elif effective_run_score < 40.0:
-        score *= 0.65
+    elif effective_run_score < 45.0:
+        candidate_signal *= 0.65
+        watch_signal *= 0.65
         gate_mode = "weak_running_suppressed"
-    elif run_state_score < 25.0 and gate_rescue_score >= RUN_GATE_RESCUE_MIN:
-        gate_mode = "structural_rescue"
-    score = clamp(score, 0.0, 100.0)
+    candidate_signal = clamp(candidate_signal, 0.0, 100.0)
+    watch_signal = clamp(watch_signal, 0.0, 100.0)
 
-    confirm_mode = "conservative_disabled"
-    if CONSERVATIVE_ALARM_ENABLED:
-        baseline_relative_pass = (
-            baseline_weight >= 0.30
-            and score >= BASELINE_CONFIRM_MIN_SCORE
-            and vertical_component >= BASELINE_CONFIRM_MIN_VERTICAL
-            and directional_component >= BASELINE_CONFIRM_MIN_DIRECTIONAL
-            and coupling_component >= BASELINE_CONFIRM_MIN_COUPLING
-            and damping_component >= BASELINE_CONFIRM_MIN_DAMPING
-            and spiky_penalty <= BASELINE_CONFIRM_MAX_SPIKY
-            and effective_run_score >= RUN_GATE_RESCUE_MIN
-            and absolute_signature_votes >= 2
-        )
-        fallback_extreme_pass = (
-            score >= FALLBACK_CONFIRM_MIN_SCORE
-            and vertical_component >= FALLBACK_CONFIRM_MIN_VERTICAL
-            and coupling_component >= FALLBACK_CONFIRM_MIN_COUPLING
-            and damping_component >= FALLBACK_CONFIRM_MIN_DAMPING
-            and spiky_penalty <= FALLBACK_CONFIRM_MAX_SPIKY
-            and effective_run_score >= RUN_GATE_RESCUE_MIN
-            and absolute_signature_votes >= 3
-        )
-        if baseline_relative_pass:
-            confirm_mode = "baseline_relative_pass"
-        elif fallback_extreme_pass:
-            confirm_mode = "fallback_extreme_pass"
-        else:
-            score = min(score, CONSERVATIVE_SCORE_CAP)
-            confirm_mode = "suppressed_single_window"
-        score = clamp(score, 0.0, 100.0)
+    baseline_relative_pass = (
+        baseline_weight >= 0.30
+        and rubber_specific_score >= rule_cfg["rubber_core_min"]
+        and vertical_component >= rule_cfg["vertical_min"]
+        and damping_component >= rule_cfg["damping_min"]
+        and spiky_penalty <= rule_cfg["spiky_penalty_max"]
+        and effective_run_score >= rule_cfg["candidate_run_min"]
+    )
+    fallback_extreme_pass = (
+        baseline_weight < 0.30
+        and rubber_specific_score >= rule_cfg["rubber_core_min"]
+        and vertical_component >= rule_cfg["vertical_min"] + 5.0
+        and damping_component >= rule_cfg["damping_min"] + 5.0
+        and coupling_component >= 30.0
+        and spiky_penalty <= rule_cfg["spiky_penalty_max"]
+        and effective_run_score >= rule_cfg["candidate_run_min"]
+    )
+    watch_pass = (
+        watch_signal >= rule_cfg["watch_score"]
+        and rubber_specific_score >= rule_cfg["watch_specific_min"]
+        and effective_run_score >= rule_cfg["watch_run_min"]
+    )
+
+    if baseline_relative_pass:
+        confirm_mode = "baseline_relative_pass"
+        score = max(candidate_signal, rule_cfg["candidate_score"])
+    elif fallback_extreme_pass:
+        confirm_mode = "fallback_extreme_pass"
+        score = max(candidate_signal, rule_cfg["candidate_score"])
+    elif watch_pass:
+        confirm_mode = "watch_gate_only"
+        score = clamp(max(watch_signal, rule_cfg["watch_score"]), rule_cfg["watch_score"], rule_cfg["watch_score_cap"])
+    else:
+        confirm_mode = "suppressed_single_window"
+        score = min(max(candidate_signal, watch_signal), rule_cfg["watch_score_cap"])
+    score = clamp(score, 0.0, 100.0)
 
     reasons = [
         f"mode={mode}",
@@ -314,27 +288,22 @@ def detect(features: dict) -> dict:
         f"run_state_score={run_state_score:.2f}",
         f"effective_run_score={effective_run_score:.2f}",
         f"gate_rescue_score={gate_rescue_score:.2f}",
-        f"absolute_signature_votes={absolute_signature_votes}",
-        f"score_fallback={fallback_score:.2f}",
-        f"score_robust={robust_score:.2f}",
+        f"candidate_signal={candidate_signal:.2f}",
+        f"watch_signal={watch_signal:.2f}",
         f"component_vertical={vertical_component:.2f}",
         f"component_directional={directional_component:.2f}",
         f"component_coupling={coupling_component:.2f}",
         f"component_damping={damping_component:.2f}",
         f"spiky_penalty={spiky_penalty:.2f}",
         f"energy_z_over_xy={energy_z_over_xy:.4f}",
-        f"vertical_rms_ratio={vertical_rms_ratio:.4f}",
-        f"vertical_p2p_ratio={vertical_p2p_ratio:.4f}",
-        f"damping_ratio={damping_ratio:.4f}",
         f"corr_major={corr_major:.4f}",
         f"az_std={az_std:.6f}",
         f"az_p2p={az_p2p:.6f}",
         f"az_cv={az_cv:.4f}",
         f"az_jerk_rms={az_jerk_rms:.6f}",
-        f"mag_cv={mag_cv:.6f}",
     ]
 
-    return build_result(
+    result = build_result(
         fault_type=FAULT_TYPE,
         score=score,
         reasons=reasons,
@@ -342,6 +311,21 @@ def detect(features: dict) -> dict:
         min_samples=8,
         penalize_low_fs=False,
     )
+    result["detector_family"] = "rubber"
+    result["baseline_mode"] = baseline_mode
+    result["baseline_deviation_score"] = round(float(baseline_deviation_score), 2)
+    result["rubber_specific_score"] = round(float(rubber_specific_score), 2)
+    result["shared_abnormal_score"] = round(float(shared_abnormal_score), 2)
+    result["vertical_component_score"] = round(float(vertical_component), 2)
+    result["directional_component_score"] = round(float(directional_component), 2)
+    result["coupling_component_score"] = round(float(coupling_component), 2)
+    result["damping_component_score"] = round(float(damping_component), 2)
+    result["spiky_penalty_score"] = round(float(spiky_penalty), 2)
+    result["run_state_score"] = round(float(run_state_score), 2)
+    result["effective_run_score"] = round(float(effective_run_score), 2)
+    result["specialized_ready"] = confirm_mode in {"baseline_relative_pass", "fallback_extreme_pass"}
+    result["type_watch_ready"] = confirm_mode in {"baseline_relative_pass", "fallback_extreme_pass", "watch_gate_only"}
+    return result
 
 
 if __name__ == "__main__":

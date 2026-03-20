@@ -125,6 +125,9 @@ def _compact_fault(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _preferred_issue(result: dict[str, Any]) -> dict[str, Any]:
+    primary_issue = result.get("primary_issue", {})
+    if isinstance(primary_issue, dict) and primary_issue:
+        return primary_issue
     screening = result.get("screening", {}) if isinstance(result.get("screening"), dict) else {}
     status = str(screening.get("status", "normal"))
     if status == "candidate_faults":

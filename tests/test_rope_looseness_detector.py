@@ -225,6 +225,39 @@ class TestRopeLoosenessDetector(unittest.TestCase):
         self.assertLess(result["score"], 60.0)
         self.assertFalse(result["triggered"])
 
+    def test_vertical_rubber_like_signature_stays_below_candidate(self):
+        result = detect(
+            _feature_overrides(
+                baseline=_baseline(1.0),
+                a_mean=1.0,
+                g_mean=0.90,
+                a_rms_ac=0.013,
+                a_p2p=0.085,
+                g_std=0.060,
+                zc_rate_hz=5.8,
+                peak_rate_hz=0.35,
+                lateral_ratio=0.82,
+                ag_corr=0.12,
+                gx_ax_corr=0.11,
+                gy_ay_corr=0.10,
+                energy_z_over_xy=1.95,
+                az_p2p=0.26,
+                az_cv=1.10,
+                az_jerk_rms=0.95,
+                lat_dom_freq_hz=4.20,
+                lat_peak_ratio=0.18,
+                lat_low_band_ratio=0.16,
+                z_dom_freq_hz=2.10,
+                z_peak_ratio=0.58,
+                z_low_band_ratio=0.66,
+                a_crest=1.95,
+                a_kurt=1.40,
+            )
+        )
+
+        self.assertLess(result["score"], 60.0, msg=result)
+        self.assertFalse(result["triggered"], msg=result)
+
     def test_timeline_requires_consecutive_windows(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             times = ["101700", "101730", "101800", "101830", "101900"]

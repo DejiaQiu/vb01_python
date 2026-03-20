@@ -1,19 +1,33 @@
-# Project Agents
+# 项目代理说明
 
-## Requirement-Driven Delivery
+## 按需求交付
 
-When the user asks to implement a new feature, bugfix, workflow, or API from a written requirement, follow this order:
+当用户基于一份书面需求要求实现新功能、修复缺陷、工作流或 API 时，按以下顺序处理：
 
-1. Read the requirement file the user points to. If the user does not provide a path, default to `requirements/feature_request.md`.
-2. Validate the requirement with `python -m elevator_monitor.feature_requirements <path>` before editing code.
-3. If required fields are missing or still contain placeholders, stop and ask only for the blocking items.
-4. Limit edits to the modules declared in the requirement unless the implementation clearly needs a small supporting change elsewhere.
-5. Treat `验收标准` and `测试用例` as implementation requirements, not optional notes. Add or update automated tests accordingly.
-6. Preserve the existing elevator monitor, training, and reporting flows unless the requirement explicitly changes them.
+1. 先读取用户指定的需求文件。如果用户没有提供路径，默认使用 `requirements/feature_request.md`。
+2. 在改代码前，用 `python -m elevator_monitor.feature_requirements <path>` 校验需求。
+3. 如果必填项缺失，或者仍然保留占位内容，只询问真正阻塞实现的部分。
+4. 修改范围尽量限制在需求里声明的模块内，除非实现确实需要少量补充改动。
+5. 把 `验收标准` 和 `测试用例` 当成实现要求，而不是可选备注；需要同步新增或更新自动化测试。
+6. 除非需求明确要求变更，否则要保留现有的电梯监控、训练和报告流程。
 
-## Project Conventions
+## 项目约定
 
-- New API endpoints belong under `elevator_monitor/api/routers/`.
-- Shared parsing, validation, or workflow helpers belong under `elevator_monitor/`.
-- Do not add new dependencies unless the requirement explicitly justifies them.
-- Prefer small incremental changes over broad refactors.
+- 新 API 路由放在 `elevator_monitor/api/routers/` 下。
+- 共享的解析、校验或工作流辅助逻辑放在 `elevator_monitor/` 下。
+- 除非需求明确说明必要性，否则不要新增依赖。
+- 优先做小步、渐进式修改，避免大范围重构。
+
+## 当前诊断方案
+
+- 当前报告层诊断只保留规则算法主链路，不要在钢丝绳专项里恢复 centroid 模型训练、加载或分数融合。
+- 每台电梯都应先建立健康基线，不能把“按梯故障微调”当成默认方案。
+- 主流程应先经过通用异常门，再分别运行钢丝绳相关规则和橡胶圈相关规则。
+- 通用异常门只回答“当前窗口是否相对健康基线发生明显偏移”，不直接给出故障类型。
+- 钢丝绳规则应主要依赖钢丝绳核心特征，例如横向比例、横向低频成分、加速度与角速度耦合。
+- 橡胶圈规则应主要依赖竖向响应、阻尼代理量、方向性能量再分配和轴间耦合变化。
+- 共享异常特征可以支撑 `watch_only`，但不能单独把样本推成某一类高置信候选。
+- 对用户可见的结论保持保守，只输出 `normal`、`watch_only` 或 `candidate_faults`，不要给出超出证据强度的结论。
+- `rope_primary` 和 `rubber_primary` 只是 detector 输出，最终用户结论应来自 `report/fault_algorithms/run_all.py` 里的统一决策层。
+- 在没有需求明确变更输出契约时，保持 `primary_issue`、`top_candidate`、`candidate_faults` 和 `watch_faults` 的兼容性。
+- 默认调参应集中在少量分组配置对象中，不要继续堆散落的字面数字。

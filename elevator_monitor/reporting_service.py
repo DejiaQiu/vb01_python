@@ -39,7 +39,7 @@ _FAULT_EXPLANATIONS = {
     "mechanical_looseness": "系统看到连接件松动类振动特征，建议检查紧固件、底座和连接部位。",
     "rail_wear": "系统看到与导轨或导靴磨损相似的振动模式，建议结合现场磨痕一起判断。",
     "rope_looseness": "系统看到与钢丝绳张力不均或松动相似的振动模式，建议优先检查钢丝绳受力是否均衡。",
-    "rope_tension_abnormal": "系统看到与钢丝绳张力状态异常相似的振动模式，建议优先检查钢丝绳张力、张力均衡和曳引轮接触状态。",
+    "rope_tension_abnormal": "系统看到相对健康基线的钢丝绳相关异常变化，建议优先检查钢丝绳张力、张力均衡和曳引轮接触状态。",
     "rubber_hardening": "系统看到减振橡胶变硬后常见的竖向响应和耦合变化，建议检查减振橡胶老化情况。",
     "unknown": "当前没有足够证据把问题稳定归到某一类具体故障。",
 }
@@ -214,6 +214,9 @@ def _quality_text(quality: float) -> str:
 
 
 def _preferred_issue(diag: dict[str, Any]) -> dict[str, Any]:
+    primary_issue = diag.get("primary_issue", {})
+    if isinstance(primary_issue, dict) and primary_issue:
+        return primary_issue
     screening = diag.get("screening", {})
     status = str(screening.get("status", "")).strip().lower()
     if status == "candidate_faults":
@@ -231,10 +234,17 @@ def _preferred_issue(diag: dict[str, Any]) -> dict[str, Any]:
 
 def _headline_text(status: str, issue: dict[str, Any], dispatch_hours: int) -> str:
     issue_label = _fault_label(str(issue.get("fault_type", "")))
+    issue_fault_type = str(issue.get("fault_type", "")).strip().lower()
     score = _safe_float(issue.get("score"), 0.0)
     if status == "candidate_faults":
+        if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
+            return f"本次检测发现“{issue_label}”高置信，说明钢丝绳相关异常变化证据已经比较充分，建议在 {max(1, dispatch_hours)} 小时内安排现场检查。"
         return f"本次检测发现“{issue_label}”高置信候选，建议在 {max(1, dispatch_hours)} 小时内安排现场检查。"
     if status == "watch_only":
+        if issue_fault_type == "unknown":
+            return "本次检测看到相对健康基线的异常变化，但当前证据还不足以稳定归到钢丝绳或减振橡胶问题，建议尽快复测并结合现场检查确认。"
+        if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
+            return f"本次检测发现“{issue_label}”变化线索，说明相对健康基线已经有偏移，但钢丝绳专属性还不够强，建议尽快复测或结合现场检查确认。"
         return f"本次检测发现“{issue_label}”可疑迹象，但证据还不够强，建议尽快复测或结合现场检查确认。"
     if status == "low_quality":
         return "本次数据质量不足，暂时不能给出可靠结论，建议重新采集数据后再判断。"
@@ -245,9 +255,16 @@ def _headline_text(status: str, issue: dict[str, Any], dispatch_hours: int) -> s
 
 def _explanation_text(status: str, issue: dict[str, Any]) -> str:
     issue_label = _fault_label(str(issue.get("fault_type", "")))
+    issue_fault_type = str(issue.get("fault_type", "")).strip().lower()
     if status == "candidate_faults":
+        if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
+            return f"{_screening_explanation(status)} 当前最像的问题是“{issue_label}”。这表示系统看到的相对健康基线偏移和钢丝绳相关特征同时成立，但仍建议以现场复核结果为准。"
         return f"{_screening_explanation(status)} 当前最像的问题是“{issue_label}”。这表示系统看到的振动模式与该类故障较为接近，但仍建议以现场复核结果为准。"
     if status == "watch_only":
+        if issue_fault_type == "unknown":
+            return "系统已经看到相对健康基线的异常偏移，但钢丝绳和减振橡胶两条专项规则都还没有形成足够稳定的类型证据，当前更适合继续观察、补采数据或安排现场复核。"
+        if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
+            return f"{_screening_explanation(status)} 当前最值得关注的是“{issue_label}”，它更像一个相对健康基线的钢丝绳异常提醒信号，而不是已经确认的故障结论。"
         return f"{_screening_explanation(status)} 当前最值得关注的是“{issue_label}”，它更像一个提醒信号，而不是已经确认的故障结论。"
     if status == "low_quality":
         return _screening_explanation(status)
@@ -316,6 +333,8 @@ def build_report_context(
     waveforms = waveform_payload if isinstance(waveform_payload, dict) else {}
     top_fault = dict(diag.get("top_fault", {})) if isinstance(diag.get("top_fault"), dict) else {}
     rope_primary = dict(diag.get("rope_primary", {})) if isinstance(diag.get("rope_primary"), dict) else {}
+    rubber_primary = dict(diag.get("rubber_primary", {})) if isinstance(diag.get("rubber_primary"), dict) else {}
+    system_abnormality = dict(diag.get("system_abnormality", {})) if isinstance(diag.get("system_abnormality"), dict) else {}
     summary = dict(diag.get("summary", {})) if isinstance(diag.get("summary"), dict) else {}
     screening = dict(diag.get("screening", {})) if isinstance(diag.get("screening"), dict) else {}
     risk = dict(package.get("risk", {})) if isinstance(package.get("risk"), dict) else {}
@@ -355,7 +374,8 @@ def build_report_context(
         "preferred_fault_score": preferred_fault_score,
         "rope_branch": str(rope_primary.get("rope_branch", "")),
         "rope_rule_score": _safe_float(rope_primary.get("rope_rule_score"), 0.0),
-        "rope_model_probability": _safe_float(rope_primary.get("rope_model_probability"), 0.0),
+        "system_abnormality_status": str(system_abnormality.get("status", "normal")),
+        "system_abnormality_score": _safe_float(system_abnormality.get("score"), 0.0),
         "risk_score_now": risk_now,
         "risk_24h": risk_24h,
         "risk_level_now": str(risk.get("risk_level_now", "normal")),
@@ -393,6 +413,8 @@ def build_report_context(
             "reasons": list(top_fault.get("reasons", [])) if isinstance(top_fault.get("reasons"), list) else [],
         },
         "rope_primary": rope_primary,
+        "rubber_primary": rubber_primary,
+        "system_abnormality": system_abnormality,
         "preferred_issue": {
             "fault_type": preferred_fault_type,
             "fault_label": _fault_label(preferred_fault_type),

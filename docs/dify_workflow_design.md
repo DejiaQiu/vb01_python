@@ -67,6 +67,7 @@ Suggested environment variables:
 Expected status payload:
 
 - `status`
+- `primary_issue`
 - `rope_primary`
 - `auxiliary_results`
 - `preferred_issue` as a compatibility field
@@ -227,6 +228,7 @@ Output:
 
 - `summary`
 - `screening`
+- `primary_issue`
 - `rope_primary`
 - `top_fault`
 - `top_candidate`
@@ -247,10 +249,10 @@ Output:
 
 Important Dify mapping rule:
 
-- Prefer `rope_primary` as the main diagnosis source
+- Prefer `primary_issue` as the main diagnosis source
 - Treat `preferred_issue` and `top_candidate` as compatibility fallbacks only
-- Treat `auxiliary_results` as optional secondary clues and do not elevate them above `rope_primary`
-- When available, expose `rope_branch`, `rope_rule_score`, and `rope_model_probability` in report rendering
+- Treat `auxiliary_results` as optional secondary clues and do not elevate them above `primary_issue`
+- When available, expose `rope_branch` and `rope_rule_score` in report rendering
 
 ## Recommended Product Split
 
