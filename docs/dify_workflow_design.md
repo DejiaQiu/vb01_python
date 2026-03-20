@@ -143,6 +143,14 @@ What it does:
 - keep `rope_tension_abnormal` as the main screening result and `rubber_hardening` as an auxiliary explanation result
 - compute a trend-aware risk score from repeated appearances, score trend, and data quality
 - write a stable `latest_status.json` for Dify to query
+- include backend-generated `report_markdown_draft`, so the online-status branch can directly display a report-style summary without re-running the report workflow
+
+For multi-elevator deployments:
+
+- store each elevator under `data/diagnosis/elevator_<id>/latest_status.json`
+- let the online-status branch pass `elevator_id`
+- if the user query contains text like `002号梯` or `elevator_002`, Dify should extract that id and call `GET /api/v1/diagnostics/latest-status?elevator_id=002`
+- if no elevator id is mentioned, the workflow may fall back to the default `latest_json`
 
 Recommended scheduling:
 

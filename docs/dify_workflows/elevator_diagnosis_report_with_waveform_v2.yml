@@ -40,6 +40,14 @@ workflow:
     - latest_json
     value: data/diagnosis/latest_status.json
     value_type: string
+  - description: 多电梯最新状态根目录
+    id: c1e2bb03-2a18-4a7c-b6d8-7b60788fb101
+    name: latest_root
+    selector:
+    - env
+    - latest_root
+    value: data/diagnosis
+    value_type: string
   features:
     file_upload:
       allowed_file_extensions:
@@ -69,7 +77,7 @@ workflow:
         - local_file
         - remote_url
       number_limits: 3
-    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；上传电梯振动 CSV 后，会自动执行规则诊断、绘制波形图并输出综合报告。
+    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；可在问题里写“查看 002 号梯状态”。上传电梯振动 CSV 后，会自动执行规则诊断、绘制波形图并输出综合报告。
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:
@@ -78,6 +86,7 @@ workflow:
       enabled: false
     suggested_questions:
     - 近期电梯情况
+    - 查看 002 号梯状态
     suggested_questions_after_answer:
       enabled: true
     text_to_speech:
@@ -102,10 +111,22 @@ workflow:
         isInIteration: false
         isInLoop: false
         sourceType: if-else
-        targetType: http-request
-      id: file-branch-true-status-http-target
+        targetType: code
+      id: file-branch-true-status-target-target
       source: file_branch
       sourceHandle: 'true'
+      target: status_target
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: status-target-source-status-http-target
+      source: status_target
+      sourceHandle: source
       target: status_http
       targetHandle: target
       type: custom
@@ -348,6 +369,39 @@ workflow:
       type: custom
       width: 242
     - data:
+        code: "import re\n\n\ndef _pick_elevator_id(text):\n    query = str(text or \"\").strip()\n    if not query:\n        return \"\"\n    patterns = [\n        r\"elevator[_-]?(\\d{1,4})\",\n        r\"(\\d{1,4})\\s*号梯\",\n        r\"电梯\\s*(\\d{1,4})\",\n        r\"梯\\s*(\\d{1,4})\",\n    ]\n    for pattern in patterns:\n        match = re.search(pattern, query, flags=re.IGNORECASE)\n        if match:\n            return match.group(1).zfill(3)\n    return \"\"\n\n\ndef main(query):\n    elevator_id = _pick_elevator_id(query)\n    target_text = f\"elevator_{elevator_id}\" if elevator_id else \"default\"\n    return {\n        \"elevator_id\": elevator_id,\n        \"target_text\": target_text,\n    }\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          elevator_id:
+            children: null
+            type: string
+          target_text:
+            children: null
+            type: string
+        selected: false
+        title: 解析目标电梯
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          value_type: string
+          variable: query
+      height: 52
+      id: status_target
+      position:
+        x: 508
+        y: 24
+      positionAbsolute:
+        x: 508
+        y: 24
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
         authorization:
           config: null
           type: no-auth
@@ -372,7 +426,7 @@ workflow:
           max_write_timeout: 0
         title: 读取最新状态
         type: http-request
-        url: '{{#env.ip#}}/api/v1/diagnostics/latest-status?latest_json={{#env.latest_json#}}&include_waveforms=true'
+        url: '{{#env.ip#}}/api/v1/diagnostics/latest-status?latest_json={{#env.latest_json#}}&latest_root={{#env.latest_root#}}&elevator_id={{#status_target.elevator_id#}}&include_waveforms=true'
         variables: []
       height: 161
       id: status_http
@@ -411,7 +465,7 @@ workflow:
           preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
           ))\n    auxiliary_results = payload.get(\"auxiliary_results\", []) if isinstance(payload.get(\"\
           auxiliary_results\"), list) else []\n    first_aux = auxiliary_results[0] if auxiliary_results and isinstance(auxiliary_results[0], dict) else {}\n\
-          \    waveforms = _as_dict(payload.get(\"waveform_payload\"))\n    latest_file = str(payload.get(\"\
+          \    waveforms = _as_dict(payload.get(\"waveform_payload\"))\n    report_markdown_draft = str(payload.get(\"report_markdown_draft\", \"\")).strip()\n    requested_elevator_id = str(payload.get(\"requested_elevator_id\", \"\")).strip()\n    latest_file = str(payload.get(\"\
           latest_file_name\") or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
           generated_at_ms\"))\n    fault_type = _fault_text(primary_issue, preferred, top_candidate)\n\
           \    fault_score = primary_issue.get(\"score\", preferred.get(\"score\", top_candidate.get(\"\
@@ -421,9 +475,11 @@ workflow:
           , \"none\") or \"none\")\n    aux_score = first_aux.get(\"score\", 0)\n    summary\
           \ = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={fault_type};\
           \ 分数={fault_score}; \"\n        f\"分支={rope_branch or 'unknown'}; 当前风险={risk_now};\
-          \ 24h风险={risk_24h}; 辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file}\"\
+          \ 24h风险={risk_24h}; 目标电梯={requested_elevator_id or 'default'}; 辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file};\
+          \ 后端报告={'已生成' if report_markdown_draft else '未生成'}\"\
           \n    )\n    return {\n        \"status_json\": json.dumps(payload, ensure_ascii=False),\n\
           \        \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
+          \        \"report_markdown_draft\": report_markdown_draft,\n\
           \        \"acc_chart\": _option_json(waveforms, \"acceleration\"),\n   \
           \     \"gyro_chart\": _option_json(waveforms, \"gyroscope\"),\n        \"\
           mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"),\n    }\n"
@@ -437,6 +493,9 @@ workflow:
             children: null
             type: string
           status_summary:
+            children: null
+            type: string
+          report_markdown_draft:
             children: null
             type: string
           acc_chart:
@@ -488,11 +547,11 @@ workflow:
           role: system
           text: "你是电梯在线状态回复助手。你只能依据下面这份“最近一次定时批诊断结果”回答，不能编造不存在的故障、风险或历史。\n\n站点名：{{#env.site_name#}}\n\
             用户问题：{{#sys.query#}}\n最新状态摘要：{{#status_parse.status_summary#}}\n最新状态 JSON：\n\
-            {{#status_parse.status_json#}}\n\n输出要求：\n1. 先直接回答用户问题。\n2. 然后固定输出五行：\n\
-            \   检测日期：\n   当前状态：\n   钢丝绳主判断：\n   当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的\
+            {{#status_parse.status_json#}}\n\n后端报告草稿（如有）：\n{{#status_parse.report_markdown_draft#}}\n\n输出要求：\n1. 先直接回答用户问题。\n2. 然后固定输出五行：\n\
+            \   检测日期：\n   当前状态：\n   主结论：\n   当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的\
             \ generated_at_ms，对用户明确展示具体日期时间。\n4. 如果附带波形图，可在正文里简要引用波形观察，但不要编造图上没有的信息。\n\
-            5. 如果状态是 normal，明确写“当前未见明确异常证据”。\n6. 如果状态是 watch_only，明确写“钢丝绳存在可疑特征，建议继续观察或尽快复测”。\n\
-            7. 如果状态是 candidate_faults，明确写“钢丝绳状态异常高置信，建议安排现场复核”。\n8. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n9. 用自然中文，不要输出 JSON，不要夸大结论。\n"
+            5. 如果后端报告草稿存在，优先沿用其中的一句话结论、解释和建议，不要重新发明一套相互矛盾的说法。\n6. 如果状态是 normal，明确写“当前未见明确异常证据”。\n7. 如果状态是 watch_only，明确写“检测到异常变化，但建议继续观察或尽快复测”。\n\
+            8. 如果状态是 candidate_faults，明确写“存在高置信异常，建议安排现场复核”。\n9. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n10. 用自然中文，不要输出 JSON，不要夸大结论。\n"
         selected: false
         title: 在线状态回答
         type: llm
@@ -517,6 +576,10 @@ workflow:
           # {{#env.site_name#}} 在线状态
 
           {{#status_llm.text#}}
+
+          ## 后端报告草稿
+
+          {{#status_parse.report_markdown_draft#}}
 
           ## 波形图
 

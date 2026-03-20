@@ -146,8 +146,11 @@ class TestBatchDiagnosis(unittest.TestCase):
                 )
 
             self.assertEqual(payload["status"], "candidate_faults")
+            self.assertEqual(payload["primary_issue"]["fault_type"], "rope_looseness")
             self.assertEqual(payload["preferred_issue"]["fault_type"], "rope_looseness")
             self.assertIn("risk", payload)
+            self.assertIn("report_markdown_draft", payload)
+            self.assertIn("一句话结论", payload["report_markdown_draft"])
             self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rope_looseness")
             self.assertTrue(latest_json.exists())
             self.assertTrue(history_jsonl.exists())
@@ -155,6 +158,9 @@ class TestBatchDiagnosis(unittest.TestCase):
             latest_payload = json.loads(latest_json.read_text(encoding="utf-8"))
             self.assertEqual(latest_payload["latest_file_name"], "vibration_30s_20260303_104600.csv")
             self.assertEqual(len(latest_payload["history"]), 3)
+            self.assertEqual(latest_payload["primary_issue"]["fault_type"], "rope_looseness")
+            self.assertIn("report_markdown_draft", latest_payload)
+            self.assertIn("当前最值得关注的问题", latest_payload["report_markdown_draft"])
 
             history_lines = history_jsonl.read_text(encoding="utf-8").strip().splitlines()
             self.assertEqual(len(history_lines), 1)

@@ -133,6 +133,7 @@ class TestAPIService(unittest.TestCase):
                         "status": "watch_only",
                         "preferred_issue": {"fault_type": "rope_looseness", "score": 58.0},
                         "risk": {"risk_level_now": "watch"},
+                        "report_markdown_draft": "# 测试报告\n\n## 1. 一句话结论\n存在可疑异常。\n",
                     },
                     ensure_ascii=False,
                 ),
@@ -149,7 +150,39 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["status"], "watch_only")
         self.assertEqual(payload["preferred_issue"]["fault_type"], "rope_looseness")
         self.assertEqual(payload["risk"]["risk_level_now"], "watch")
-        self.assertEqual(payload["latest_json"], str(status_path))
+        self.assertIn("report_markdown_draft", payload)
+        self.assertIn("一句话结论", payload["report_markdown_draft"])
+        self.assertEqual(payload["latest_json"], str(status_path.resolve()))
+
+    def test_latest_status_can_resolve_elevator_id_from_root(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            status_path = root / "elevator_002" / "latest_status.json"
+            status_path.parent.mkdir(parents=True, exist_ok=True)
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "status": "watch_only",
+                        "primary_issue": {"fault_type": "rope_tension_abnormal", "score": 58.0},
+                        "preferred_issue": {"fault_type": "rope_tension_abnormal", "score": 58.0},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/diagnostics/latest-status",
+                params={"elevator_id": "002", "latest_root": str(root)},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "watch_only")
+        self.assertEqual(payload["primary_issue"]["fault_type"], "rope_tension_abnormal")
+        self.assertEqual(payload["latest_json"], str(status_path.resolve()))
+        self.assertEqual(payload["requested_elevator_id"], "002")
 
     def test_latest_status_can_include_waveforms_from_latest_csv(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

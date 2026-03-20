@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .maintenance_workflow import build_maintenance_package
+from .reporting_service import build_report_context, render_report_markdown
 from report.fault_algorithms._base import build_clean_feature_baseline, build_feature_pack, load_rows
 from report.fault_algorithms.detect_rope_looseness import ROPE_BASELINE_KEYS
 from report.fault_algorithms.detect_rubber_hardening import RUBBER_BASELINE_KEYS
@@ -14,6 +16,7 @@ from report.fault_algorithms.run_all import MIN_EFFECTIVE_SAMPLES, run_all_rows
 
 
 _FILE_TS_PATTERN = re.compile(r"(\d{8})_(\d{6})")
+_ELEVATOR_ID_PATTERN = re.compile(r"elevator[_-]?([A-Za-z0-9]+)", re.IGNORECASE)
 _RISK_LEVELS = (
     (0.85, "critical"),
     (0.65, "high"),
@@ -36,6 +39,27 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _infer_elevator_id(*candidates: Any) -> str:
+    for value in candidates:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        match = _ELEVATOR_ID_PATTERN.search(text)
+        if match:
+            return f"elevator-{match.group(1)}"
+
+    for value in candidates:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        parts = [part for part in Path(text).parts if part]
+        for part in reversed(parts):
+            if re.fullmatch(r"\d{2,4}", part):
+                return f"elevator-{part}"
+
+    return "elevator-unknown"
 
 
 def _timestamp_key(path: Path) -> tuple[str, str, str]:
@@ -250,6 +274,84 @@ def _status_recommendation(status: str, fault_type: str) -> str:
     return "当前更适合继续观察并维持常规维保计划。"
 
 
+def _alert_level_from_status(status: str) -> str:
+    if status == "candidate_faults":
+        return "anomaly"
+    if status == "watch_only":
+        return "warning"
+    return "normal"
+
+
+def _build_report_outputs(
+    *,
+    latest_result: dict[str, Any],
+    latest_issue: dict[str, Any],
+    latest_status: str,
+    risk: dict[str, Any],
+    baseline_summary: dict[str, Any],
+    latest_file: Path,
+    input_dir: str,
+) -> tuple[dict[str, Any], str]:
+    elevator_id = _infer_elevator_id(
+        latest_result.get("input"),
+        latest_file,
+        baseline_summary.get("path", ""),
+        input_dir,
+    )
+    issue_fault_type = str(latest_issue.get("fault_type", "unknown")).strip() or "unknown"
+    issue_score = round(_safe_float(latest_issue.get("score"), 0.0), 2)
+    alert_row = {
+        "elevator_id": elevator_id,
+        "ts_ms": str(int(time.time() * 1000)),
+        "level": _alert_level_from_status(latest_status),
+        "predictive_only": "0",
+        "fault_type": issue_fault_type,
+        "fault_confidence": f"{max(0.0, min(1.0, issue_score / 100.0)):.4f}",
+        "risk_score": f"{_safe_float(risk.get('risk_score'), 0.0):.4f}",
+        "risk_level_now": str(risk.get("risk_level_now", "normal")),
+        "risk_24h": f"{_safe_float(risk.get('risk_24h'), 0.0):.4f}",
+        "risk_level_24h": str(risk.get("risk_level_24h", "normal")),
+        "alert_context_csv": str(latest_file),
+    }
+    health_payload = {
+        "status": "scheduled_batch_diagnosis",
+        "connected": True,
+        "baseline_ready": str(baseline_summary.get("mode", "disabled")) != "disabled",
+        "elevator_id": elevator_id,
+        "last_fault_type": issue_fault_type,
+        "last_fault_confidence": round(max(0.0, min(1.0, issue_score / 100.0)), 4),
+        "last_risk_score": round(_safe_float(risk.get("risk_score"), 0.0), 4),
+        "last_risk_level_now": str(risk.get("risk_level_now", "normal")),
+        "last_risk_24h": round(_safe_float(risk.get("risk_24h"), 0.0), 4),
+        "last_risk_level_24h": str(risk.get("risk_level_24h", "normal")),
+    }
+    maintenance_package = build_maintenance_package(
+        alert_rows=[alert_row],
+        health_payload=health_payload,
+        site_name="",
+        alert_csv_path="",
+        health_json_path="",
+        manifest_payload={},
+        manifest_path="",
+    )
+    report_context = build_report_context(
+        diagnosis_result=latest_result,
+        maintenance_package=maintenance_package,
+        language="zh-CN",
+        report_style="standard",
+        waveform_payload={},
+    )
+    report_markdown_draft = render_report_markdown(report_context)
+    report_summary = {
+        "report_title": str(report_context.get("report_title", "")),
+        "screening": dict(report_context.get("screening", {})) if isinstance(report_context.get("screening"), dict) else {},
+        "preferred_issue": dict(report_context.get("preferred_issue", {})) if isinstance(report_context.get("preferred_issue"), dict) else {},
+        "priority": str(report_context.get("priority", "")),
+        "language": str(report_context.get("language", "zh-CN")),
+    }
+    return report_summary, report_markdown_draft
+
+
 def _write_latest_json(path: str, payload: dict[str, Any]) -> str:
     latest_path = Path(path).expanduser().resolve()
     latest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -325,6 +427,15 @@ def run_batch_diagnosis(
     latest_issue = _preferred_issue(latest_result)
     latest_status = str((latest_result.get("screening") or {}).get("status", "normal"))
     risk = _build_risk(history)
+    report_summary, report_markdown_draft = _build_report_outputs(
+        latest_result=latest_result,
+        latest_issue=latest_issue,
+        latest_status=latest_status,
+        risk=risk,
+        baseline_summary=baseline_summary,
+        latest_file=latest_file,
+        input_dir=input_dir,
+    )
 
     payload = {
         "workflow_type": "scheduled_batch_diagnosis_v1",
@@ -335,11 +446,18 @@ def run_batch_diagnosis(
         "latest_file_name": latest_file.name,
         "status": latest_status,
         "baseline": baseline_summary,
+        "primary_issue": _compact_fault(latest_result.get("primary_issue", {}) or latest_issue),
         "preferred_issue": _compact_fault(latest_issue),
+        "rope_primary": _compact_fault(latest_result.get("rope_primary", {})),
+        "rubber_primary": _compact_fault(latest_result.get("rubber_primary", {})),
+        "system_abnormality": _compact_fault(latest_result.get("system_abnormality", {})),
         "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
         "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
+        "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
         "risk": risk,
         "recommendation": _status_recommendation(latest_status, str(latest_issue.get("fault_type", "unknown"))),
+        "report_summary": report_summary,
+        "report_markdown_draft": report_markdown_draft,
         "latest_result": {
             "summary": dict(latest_result.get("summary", {})) if isinstance(latest_result.get("summary"), dict) else {},
             "screening": dict(latest_result.get("screening", {})) if isinstance(latest_result.get("screening"), dict) else {},

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from typing import Any
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
@@ -12,6 +14,45 @@ from ..schemas import BatchDiagnosisRequest, RuleDiagnosisRequest, WaveformPlotR
 
 
 router = APIRouter(prefix="/api/v1/diagnostics", tags=["diagnostics"])
+_DIGITS_ONLY = re.compile(r"^\d+$")
+
+
+def _elevator_path_tokens(elevator_id: str) -> list[str]:
+    raw = str(elevator_id or "").strip()
+    if not raw:
+        return []
+    lowered = raw.lower()
+    suffix = re.sub(r"^elevator[_-]?", "", lowered)
+    tokens: list[str] = []
+
+    def _push(value: str) -> None:
+        value = str(value).strip()
+        if value and value not in tokens:
+            tokens.append(value)
+
+    _push(lowered)
+    _push(f"elevator_{suffix}")
+    _push(f"elevator-{suffix}")
+    if _DIGITS_ONLY.fullmatch(suffix):
+        padded = f"{int(suffix):03d}"
+        _push(padded)
+        _push(f"elevator_{padded}")
+        _push(f"elevator-{padded}")
+    return tokens
+
+
+def _resolve_latest_status_path(latest_json: str, elevator_id: str, latest_root: str) -> Path:
+    if str(elevator_id or "").strip():
+        root = Path(latest_root).expanduser().resolve()
+        candidates: list[Path] = []
+        for token in _elevator_path_tokens(elevator_id):
+            candidates.append(root / token / "latest_status.json")
+        for path in candidates:
+            if path.exists():
+                return path
+        if candidates:
+            return candidates[0]
+    return Path(latest_json).expanduser().resolve()
 
 
 def _attach_latest_waveforms(
@@ -113,19 +154,23 @@ def batch_run(request: BatchDiagnosisRequest) -> dict[str, Any]:
 @router.get("/latest-status")
 def latest_status(
     latest_json: str = "data/diagnosis/latest_status.json",
+    elevator_id: str = "",
+    latest_root: str = "data/diagnosis",
     include_waveforms: bool = False,
     waveform_width: int = 920,
     waveform_height: int = 320,
     waveform_max_points: int = 240,
 ) -> dict[str, Any]:
+    resolved_latest = _resolve_latest_status_path(latest_json, elevator_id, latest_root)
     try:
-        payload = load_latest_status(latest_json)
+        payload = load_latest_status(str(resolved_latest))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload = dict(payload)
-    payload["latest_json"] = latest_json
+    payload["latest_json"] = str(resolved_latest)
+    payload["requested_elevator_id"] = str(elevator_id or "").strip()
     if include_waveforms:
         payload = _attach_latest_waveforms(
             payload,
