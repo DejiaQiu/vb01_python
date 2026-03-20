@@ -1,17 +1,13 @@
 """钢丝绳状态异常单窗诊断。
 
-当前版本收敛成“少量核心特征 + 少量通用异常特征”的规则链：
+当前版本收敛成“频域 + 少量横向特征”的规则链：
 
-1. 核心特征只保留 4 类：
+1. 核心特征只保留 3 类：
    - 横向比例 `lateral_ratio`
    - 横向主频偏移 `lat_dom_freq_hz`
    - 横向低频占比 `lat_low_band_ratio`
-   - 加速度/角速度耦合聚合量 `corr_major`
-2. 通用异常只保留 3 类：
-   - `a_rms_ac`
-   - `a_p2p`
-   - `g_std`
-3. Z 向和竖向谱特征只用于 watch 级别提示和解释，不允许单独把样本推成高置信 rope 候选。
+2. 加速度/角速度耦合与通用异常只做辅助解释，不参与主判。
+3. Z 向和竖向谱特征只用于解释，不允许单独把样本推成 rope 候选。
 
 当前只保留规则链路，不再在钢丝绳专项里保留 centroid 训练、加载或融合逻辑。
 """
@@ -333,17 +329,14 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     mixed = _mix_components(baseline_weight, robust, fallback)
 
     loose_score = (mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"]) / 3.0
-    tight_score = (mixed["rope_coupling"] + mixed["shared_abnormal"]) / 2.0
+    tight_score = mixed["rope_coupling"]
     dominant_branch = "loose_like" if loose_score >= tight_score else "tight_like"
-    rope_specific_score = (
-        mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"] + mixed["rope_coupling"]
-    ) / 4.0
+    rope_specific_score = (mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"]) / 3.0
     baseline_deviation_score = float(mixed["shared_abnormal"])
     core_values = [
         mixed["rope_lateral"],
         mixed["rope_domfreq"],
         mixed["rope_lowband"],
-        mixed["rope_coupling"],
     ]
     core_hits = _count_hits(core_values, rule_cfg["feature_hit_min"])
     core_strong_hits = _count_hits(core_values, rule_cfg["feature_strong_min"])

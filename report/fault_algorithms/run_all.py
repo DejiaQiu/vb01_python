@@ -9,11 +9,9 @@ from typing import Any, Callable
 try:
     from ._base import build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
     from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
-    from .detect_rubber_hardening import RUBBER_BASELINE_KEYS, detect as detect_rubber_hardening
 except ImportError:  # pragma: no cover
     from _base import build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
     from detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
-    from detect_rubber_hardening import RUBBER_BASELINE_KEYS, detect as detect_rubber_hardening
 
 
 _PATTERN = re.compile(r"vibration_30s_\d{8}_(\d{6})\.csv$")
@@ -23,10 +21,10 @@ WATCH_SCORE = 45.0
 HIGH_CONFIDENCE_QUALITY = 0.80
 WATCH_QUALITY = 0.60
 MIN_EFFECTIVE_SAMPLES = 8
-BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS + RUBBER_BASELINE_KEYS))
+BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS))
 PRIMARY_DETECTOR: Callable[[dict[str, Any]], dict[str, Any]] = detect_rope_looseness
-AUXILIARY_DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [detect_rubber_hardening]
-DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [PRIMARY_DETECTOR, *AUXILIARY_DETECTORS]
+AUXILIARY_DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
+DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [PRIMARY_DETECTOR]
 EPS = 1e-9
 SYSTEM_GATE_CONFIG = {
     "watch_score": WATCH_SCORE,
@@ -255,15 +253,6 @@ def _rope_only(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item for item in items if _family_for_fault_type(item.get("fault_type", "")) == "rope"]
 
 
-def _has_type_conflict(items: list[dict[str, Any]]) -> bool:
-    families = {
-        _family_for_fault_type(item.get("fault_type", ""))
-        for item in items
-        if _family_for_fault_type(item.get("fault_type", "")) in {"rope", "rubber"}
-    }
-    return len(families) > 1
-
-
 def _unknown_watch_issue(system_abnormality: dict[str, Any]) -> dict[str, Any]:
     score = max(_safe_float(system_abnormality.get("score"), 0.0), WATCH_SCORE)
     return {
@@ -335,7 +324,7 @@ def run_all_rows(
     if baseline is not None:
         detector_features["baseline"] = baseline
 
-    detectors = DETECTORS if DETECTORS else [PRIMARY_DETECTOR, *AUXILIARY_DETECTORS]
+    detectors = DETECTORS if DETECTORS else [PRIMARY_DETECTOR]
     detector_results = [detector(detector_features) for detector in detectors]
     detector_results = sorted(detector_results, key=_score, reverse=True)
     rope_primary = next((item for item in detector_results if _family_for_fault_type(item.get("fault_type", "")) == "rope"), {})
@@ -359,7 +348,7 @@ def run_all_rows(
     elif candidate_faults:
         screening_status = "candidate_faults"
         top_fault = top_candidate
-    elif watch_faults and not _has_type_conflict(watch_faults):
+    elif watch_faults:
         screening_status = "watch_only"
         top_fault = watch_faults[0]
     elif system_abnormality.get("status") in {"candidate_faults", "watch_only"} or candidate_faults or watch_faults:
@@ -404,7 +393,7 @@ def run_all_rows(
             if isinstance(rope_primary.get("rope_spectral_snapshot"), dict)
             else {},
         },
-        "rubber_primary": dict(rubber_primary) if isinstance(rubber_primary, dict) else {},
+        "rubber_primary": dict(rubber_primary) if rubber_primary else {},
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,

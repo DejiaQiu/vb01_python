@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from report.fault_algorithms._base import build_feature_pack
-from report.fault_algorithms.detect_rope_looseness import detect
+from report.fault_algorithms.detect_rope_looseness import ROPE_RULE_CONFIG, detect
 from report.fault_algorithms.rope_looseness_timeline import run_timeline
 
 
@@ -124,8 +124,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             )
         )
 
-        self.assertTrue(base_result["triggered"], msg=base_result)
-        self.assertTrue(scaled_result["triggered"], msg=scaled_result)
+        self.assertGreaterEqual(base_result["score"], ROPE_RULE_CONFIG["watch_score"], msg=base_result)
+        self.assertGreaterEqual(scaled_result["score"], ROPE_RULE_CONFIG["watch_score"], msg=scaled_result)
+        self.assertFalse(base_result["triggered"], msg=base_result)
+        self.assertFalse(scaled_result["triggered"], msg=scaled_result)
+        self.assertTrue(base_result["type_watch_ready"], msg=base_result)
+        self.assertTrue(scaled_result["type_watch_ready"], msg=scaled_result)
         self.assertLess(abs(base_result["score"] - scaled_result["score"]), 4.0)
         self.assertIn("baseline_mode=robust_baseline", base_result["reasons"])
         self.assertIn("baseline_mode=robust_baseline", scaled_result["reasons"])
@@ -172,8 +176,10 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             )
         )
 
-        self.assertGreaterEqual(result["score"], 60.0)
-        self.assertTrue(result["triggered"])
+        self.assertGreaterEqual(result["score"], ROPE_RULE_CONFIG["watch_score"], msg=result)
+        self.assertFalse(result["triggered"], msg=result)
+        self.assertTrue(result["type_watch_ready"], msg=result)
+        self.assertIn("confirm=watch_hits_pass", result["reasons"])
         self.assertIn("baseline_mode=self_normalized_fallback", result["reasons"])
 
     def test_structural_baseline_mode_can_rescue_low_amplitude_slack(self):
@@ -196,9 +202,10 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             )
         )
 
-        self.assertGreaterEqual(result["score"], 60.0, msg=result)
-        self.assertTrue(result["triggered"], msg=result)
-        self.assertIn("confirm=candidate_hits_pass", result["reasons"])
+        self.assertGreaterEqual(result["score"], ROPE_RULE_CONFIG["watch_score"], msg=result)
+        self.assertFalse(result["triggered"], msg=result)
+        self.assertTrue(result["type_watch_ready"], msg=result)
+        self.assertIn("confirm=watch_hits_pass", result["reasons"])
 
     def test_spiky_impact_signature_does_not_trigger_rope_looseness(self):
         result = detect(

@@ -48,7 +48,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
     def test_default_detectors_only_keep_rope_and_rubber(self):
         self.assertEqual(
             [detector.__module__.rsplit(".", 1)[-1] for detector in run_all_module.DETECTORS],
-            ["detect_rope_looseness", "detect_rubber_hardening"],
+            ["detect_rope_looseness"],
         )
 
     def test_normal_sample_returns_no_high_confidence_candidates(self):

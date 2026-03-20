@@ -1,11 +1,11 @@
 {
   "workflow_type": "scheduled_batch_diagnosis_v1",
-  "generated_at_ms": 1773991022573,
+  "generated_at_ms": 1773993029704,
   "input_dir": "/Users/qiudejia/Downloads/vb01_python/data/captures/three/002/gangsisheng",
   "files_scanned": 12,
   "latest_file": "/Users/qiudejia/Downloads/vb01_python/data/captures/three/002/gangsisheng/part_0015.csv",
   "latest_file_name": "part_0015.csv",
-  "status": "watch_only",
+  "status": "candidate_faults",
   "baseline": {
     "mode": "json",
     "count": 9,
@@ -13,37 +13,30 @@
     "path": "/Users/qiudejia/Downloads/vb01_python/data/baselines/elevator_002/baseline.json"
   },
   "primary_issue": {
-    "fault_type": "unknown",
-    "score": 76.0,
+    "fault_type": "rope_tension_abnormal",
+    "score": 72.0,
     "level": "warning",
-    "triggered": false,
-    "quality_factor": 1.0,
-    "screening": "watch"
+    "triggered": true,
+    "quality_factor": 0.0,
+    "screening": "high_confidence"
   },
   "preferred_issue": {
-    "fault_type": "unknown",
-    "score": 76.0,
+    "fault_type": "rope_tension_abnormal",
+    "score": 72.0,
     "level": "warning",
-    "triggered": false,
-    "quality_factor": 1.0,
-    "screening": "watch"
+    "triggered": true,
+    "quality_factor": 0.0,
+    "screening": "high_confidence"
   },
   "rope_primary": {
     "fault_type": "rope_tension_abnormal",
-    "score": 59.0,
+    "score": 54.0,
     "level": "watch",
     "triggered": false,
     "quality_factor": 0.0,
     "screening": ""
   },
-  "rubber_primary": {
-    "fault_type": "rubber_hardening",
-    "score": 59.0,
-    "level": "watch",
-    "triggered": false,
-    "quality_factor": 1.0,
-    "screening": ""
-  },
+  "rubber_primary": {},
   "system_abnormality": {
     "fault_type": "unknown",
     "score": 76.0,
@@ -52,65 +45,139 @@
     "quality_factor": 0.0,
     "screening": ""
   },
-  "top_candidate": {},
-  "watch_faults": [
-    {
-      "fault_type": "unknown",
-      "score": 76.0,
-      "level": "warning",
-      "triggered": false,
-      "quality_factor": 1.0,
-      "screening": "watch"
-    }
-  ],
-  "auxiliary_results": [
-    {
-      "fault_type": "rope_tension_abnormal",
-      "score": 59.0,
-      "level": "watch",
-      "triggered": false,
-      "quality_factor": 1.0,
-      "screening": ""
-    },
-    {
-      "fault_type": "rubber_hardening",
-      "score": 59.0,
-      "level": "watch",
-      "triggered": false,
-      "quality_factor": 1.0,
-      "screening": ""
-    }
-  ],
-  "risk": {
-    "risk_score": 0.692,
-    "risk_level_now": "high",
-    "risk_24h": 0.842,
-    "risk_level_24h": "high",
-    "reasons": [
-      "current=0.76",
-      "persistence=1.00",
-      "trend=0.00",
-      "quality=1.00"
+  "top_candidate": {
+    "fault_type": "rope_tension_abnormal",
+    "score": 72.0,
+    "level": "warning",
+    "triggered": true,
+    "quality_factor": 0.0,
+    "screening": "high_confidence"
+  },
+  "watch_faults": [],
+  "auxiliary_results": [],
+  "rope_timeline": {
+    "confirm_windows": 2,
+    "watch_min_score": 52.0,
+    "confirmed_trigger_count": 9,
+    "latest_confirmed": true,
+    "rows": [
+      {
+        "file": "part_0004.csv",
+        "rope_raw_triggered": false,
+        "skip_confirmation": false,
+        "rope_confirmed": false,
+        "rope_score": 26.0
+      },
+      {
+        "file": "part_0005.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 54.0
+      },
+      {
+        "file": "part_0006.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 52.0
+      },
+      {
+        "file": "part_0007.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 54.0
+      },
+      {
+        "file": "part_0008.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 54.0
+      },
+      {
+        "file": "part_0009.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 54.0
+      },
+      {
+        "file": "part_0010.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 52.0
+      },
+      {
+        "file": "part_0011.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 52.0
+      },
+      {
+        "file": "part_0012.csv",
+        "rope_raw_triggered": false,
+        "skip_confirmation": false,
+        "rope_confirmed": false,
+        "rope_score": 26.0
+      },
+      {
+        "file": "part_0013.csv",
+        "rope_raw_triggered": false,
+        "skip_confirmation": false,
+        "rope_confirmed": false,
+        "rope_score": 29.0
+      },
+      {
+        "file": "part_0014.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 52.0
+      },
+      {
+        "file": "part_0015.csv",
+        "rope_raw_triggered": true,
+        "skip_confirmation": false,
+        "rope_confirmed": true,
+        "rope_score": 54.0
+      }
     ]
   },
-  "recommendation": "建议继续观察或尽快复测，不建议仅凭一次筛查结果直接拆检。",
+  "risk": {
+    "risk_score": 0.5305,
+    "risk_level_now": "watch",
+    "risk_24h": 0.643,
+    "risk_level_24h": "watch",
+    "reasons": [
+      "current=0.54",
+      "persistence=0.75",
+      "trend=0.00",
+      "quality=1.00",
+      "focus_fault=rope_tension_abnormal"
+    ]
+  },
+  "recommendation": "建议尽快检查钢丝绳张力状态、张力均衡、曳引轮绳槽和钢丝绳外观。",
   "report_summary": {
     "report_title": "unknown-site / elevator-002 诊断与维保报告",
     "screening": {
-      "status": "watch_only",
-      "label": "重点关注"
+      "status": "candidate_faults",
+      "label": "高置信候选"
     },
     "preferred_issue": {
-      "fault_type": "unknown",
-      "fault_label": "暂无明确故障类型",
-      "score": 76.0,
+      "fault_type": "rope_tension_abnormal",
+      "fault_label": "钢丝绳状态异常",
+      "score": 72.0,
       "level": "warning",
-      "quality_factor": 1.0
+      "quality_factor": 0.0
     },
-    "priority": "P2",
+    "priority": "P1",
     "language": "zh-CN"
   },
-  "report_markdown_draft": "# unknown-site / elevator-002 诊断与维保报告\n\n## 1. 一句话结论\n本次检测看到相对健康基线的异常变化，但当前证据还不足以稳定归到钢丝绳或减振橡胶问题，建议尽快复测并结合现场检查确认。\n\n## 2. 给非专业人员的解释\n系统已经看到相对健康基线的异常偏移，但钢丝绳和减振橡胶两条专项规则都还没有形成足够稳定的类型证据，当前更适合继续观察、补采数据或安排现场复核。\n\n## 3. 建议怎么做\n- 检查曳引机及曳引系统周边机械传动链路。\n- 把当前异常波形和本站点历史正常波形做对比。\n- 确认异常在上行和下行中是否都会重复出现。\n\n## 4. 本次判断依据\n- 筛查状态：重点关注\n- 当前最值得关注的问题：暂无明确故障类型\n- 参考匹配分数：76.0/100（分数越高，越像对应故障模式；当前可信度为“较低（待复测确认）”）\n- 数据情况：462 个有效点 / 462 个原始点，采样频率约 39.99 Hz，数据质量较好\n- 风险判断：当前 较高风险，24 小时内 较高风险\n- 处理优先级：尽快安排检查\n- 基线说明：本次使用了已保存的健康基线做对比，结论更偏向“和这台电梯平时状态相比有没有明显变化”。\n- 故障解释：当前没有足够证据把问题稳定归到某一类具体故障。\n- 说明：本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。\n\n## 5. 给维保人员的补充参考\n- 系统故障标签：unknown\n- 原始最高分故障：暂无明确故障类型 / 76.0\n- 维保时限建议：4 小时内\n- 备件与工具参考：\n- 本次报告没有给出必须更换的固定备件，建议以现场复核结果为准。\n",
+  "report_markdown_draft": "# unknown-site / elevator-002 诊断与维保报告\n\n## 1. 一句话结论\n本次检测发现“钢丝绳状态异常”高置信，说明钢丝绳相关异常变化证据已经比较充分，建议在 1 小时内安排现场检查。\n\n## 2. 给非专业人员的解释\n系统识别到了与某类故障比较吻合的振动模式，建议尽快安排现场复核。 当前最像的问题是“钢丝绳状态异常”。这表示系统看到的相对健康基线偏移和钢丝绳相关特征同时成立，但仍建议以现场复核结果为准。\n\n## 3. 建议怎么做\n- 检查曳引机及曳引系统周边机械传动链路。\n- 把当前异常波形和本站点历史正常波形做对比。\n- 确认异常在上行和下行中是否都会重复出现。\n\n## 4. 本次判断依据\n- 筛查状态：高置信候选\n- 当前最值得关注的问题：钢丝绳状态异常\n- 参考匹配分数：72.0/100（分数越高，越像对应故障模式；当前可信度为“较高”）\n- 数据情况：462 个有效点 / 462 个原始点，采样频率约 39.99 Hz，数据质量一般，仅适合保守判断\n- 风险判断：当前 需要关注，24 小时内 需要关注\n- 处理优先级：立即处理\n- 基线说明：本次使用了已保存的健康基线做对比，结论更偏向“和这台电梯平时状态相比有没有明显变化”。\n- 故障解释：系统看到相对健康基线的钢丝绳相关异常变化，建议优先检查钢丝绳张力、张力均衡和曳引轮接触状态。\n- 说明：本报告属于振动筛查结果，不等同于拆检后的最终结论，建议结合现场复核判断。\n\n## 5. 给维保人员的补充参考\n- 系统故障标签：rope_tension_abnormal\n- 原始最高分故障：钢丝绳状态异常 / 72.0\n- 维保时限建议：1 小时内\n- 备件与工具参考：\n- 本次报告没有给出必须更换的固定备件，建议以现场复核结果为准。\n",
   "latest_result": {
     "summary": {
       "n_raw": 462,
@@ -120,7 +187,7 @@
       "new_ratio": 1.0
     },
     "screening": {
-      "status": "watch_only",
+      "status": "candidate_faults",
       "quality_ok": true,
       "high_confidence_min_score": 60.0,
       "watch_min_score": 45.0,
@@ -129,10 +196,10 @@
     },
     "rope_primary": {
       "fault_type": "rope_tension_abnormal",
-      "score": 59.0,
+      "score": 54.0,
       "level": "watch",
       "triggered": false,
-      "rope_rule_score": 59.0,
+      "rope_rule_score": 54.0,
       "rope_branch": "tight_like",
       "rope_spectral_snapshot": {
         "lat_dom_freq_hz": 0.3,
@@ -144,43 +211,125 @@
       }
     },
     "top_fault": {
-      "fault_type": "unknown",
-      "score": 76.0,
+      "fault_type": "rope_tension_abnormal",
+      "score": 72.0,
       "level": "warning",
-      "triggered": false,
-      "quality_factor": 1.0,
-      "screening": "watch"
+      "triggered": true,
+      "quality_factor": 0.0,
+      "screening": "high_confidence"
     },
-    "top_candidate": {},
-    "candidate_faults": [],
-    "watch_faults": [
-      {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
-        "triggered": false,
-        "quality_factor": 1.0,
-        "screening": "watch"
-      }
-    ],
-    "auxiliary_results": [
+    "top_candidate": {
+      "fault_type": "rope_tension_abnormal",
+      "score": 72.0,
+      "level": "warning",
+      "triggered": true,
+      "quality_factor": 0.0,
+      "screening": "high_confidence"
+    },
+    "candidate_faults": [
       {
         "fault_type": "rope_tension_abnormal",
-        "score": 59.0,
-        "level": "watch",
-        "triggered": false,
-        "quality_factor": 1.0,
-        "screening": ""
-      },
-      {
-        "fault_type": "rubber_hardening",
-        "score": 59.0,
-        "level": "watch",
-        "triggered": false,
-        "quality_factor": 1.0,
-        "screening": ""
+        "score": 72.0,
+        "level": "warning",
+        "triggered": true,
+        "quality_factor": 0.0,
+        "screening": "high_confidence"
       }
-    ]
+    ],
+    "watch_faults": [],
+    "auxiliary_results": [],
+    "rope_timeline": {
+      "confirm_windows": 2,
+      "watch_min_score": 52.0,
+      "confirmed_trigger_count": 9,
+      "latest_confirmed": true,
+      "rows": [
+        {
+          "file": "part_0004.csv",
+          "rope_raw_triggered": false,
+          "skip_confirmation": false,
+          "rope_confirmed": false,
+          "rope_score": 26.0
+        },
+        {
+          "file": "part_0005.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 54.0
+        },
+        {
+          "file": "part_0006.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 52.0
+        },
+        {
+          "file": "part_0007.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 54.0
+        },
+        {
+          "file": "part_0008.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 54.0
+        },
+        {
+          "file": "part_0009.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 54.0
+        },
+        {
+          "file": "part_0010.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 52.0
+        },
+        {
+          "file": "part_0011.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 52.0
+        },
+        {
+          "file": "part_0012.csv",
+          "rope_raw_triggered": false,
+          "skip_confirmation": false,
+          "rope_confirmed": false,
+          "rope_score": 26.0
+        },
+        {
+          "file": "part_0013.csv",
+          "rope_raw_triggered": false,
+          "skip_confirmation": false,
+          "rope_confirmed": false,
+          "rope_score": 29.0
+        },
+        {
+          "file": "part_0014.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 52.0
+        },
+        {
+          "file": "part_0015.csv",
+          "rope_raw_triggered": true,
+          "skip_confirmation": false,
+          "rope_confirmed": true,
+          "rope_score": 54.0
+        }
+      ]
+    }
   },
   "history": [
     {
@@ -211,6 +360,14 @@
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 26.0,
+        "level": "normal",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
@@ -235,28 +392,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 54.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -275,28 +440,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 52.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -315,28 +488,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 54.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -355,28 +536,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 54.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -395,28 +584,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 54.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -435,28 +632,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 52.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -475,28 +680,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 52.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -530,6 +743,14 @@
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
+      },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 26.0,
+        "level": "normal",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
       },
       "candidate_faults": [],
       "watch_faults": [
@@ -571,6 +792,14 @@
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 29.0,
+        "level": "normal",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
@@ -595,28 +824,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 52.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 52.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
@@ -635,28 +872,36 @@
         "new_ratio": 1.0
       },
       "top_fault": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
       "top_candidate": {},
       "preferred_issue": {
-        "fault_type": "unknown",
-        "score": 76.0,
-        "level": "warning",
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
         "triggered": false,
         "quality_factor": 1.0,
         "screening": "watch"
       },
+      "rope_primary": {
+        "fault_type": "rope_tension_abnormal",
+        "score": 54.0,
+        "level": "watch",
+        "triggered": false,
+        "quality_factor": 0.0,
+        "screening": ""
+      },
       "candidate_faults": [],
       "watch_faults": [
         {
-          "fault_type": "unknown",
-          "score": 76.0,
-          "level": "warning",
+          "fault_type": "rope_tension_abnormal",
+          "score": 54.0,
+          "level": "watch",
           "triggered": false,
           "quality_factor": 1.0,
           "screening": "watch"
