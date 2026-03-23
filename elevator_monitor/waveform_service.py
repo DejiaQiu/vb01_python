@@ -588,6 +588,8 @@ def build_waveform_payload(
         [
             "## 波形图",
             "",
+            low_frequency_spectrum["markdown"],
+            "",
             acceleration["markdown"],
             "",
             gyroscope["markdown"],
@@ -598,6 +600,8 @@ def build_waveform_payload(
     markdown_echarts = "\n".join(
         [
             "## 波形图",
+            "",
+            low_frequency_spectrum_chart["markdown"],
             "",
             acceleration_chart["markdown"],
             "",

@@ -763,28 +763,7 @@ workflow:
 
           {{#status_parse.waveform_insights#}}
 
-          ## 横向 / 竖向能量对比
-
-          ```echarts
-          {{#status_parse.spectrum_chart#}}
-          ```
-
-          ## 波形图
-
-          ### 加速度三轴
-          ```echarts
-          {{#status_parse.acc_chart#}}
-          ```
-
-          ### 角速度三轴
-          ```echarts
-          {{#status_parse.gyro_chart#}}
-          ```
-
-          ### 加速度合成幅值
-          ```echarts
-          {{#status_parse.mag_chart#}}
-          ```
+          {{#status_parse.waveform_markdown#}}
         desc: ''
         selected: true
         title: 在线状态输出
@@ -1295,9 +1274,7 @@ workflow:
   \"report_title\": str(payload.get(\"report_title\", \"电梯故障诊断报告\")),\n        \"report_markdown\": str(payload.get(\"report_markdown_draft\", \"\")).strip(),\n\
         \"dify_prompt_template\": dify_prompt,\n        \"dify_inputs_json\": json.dumps(dify_inputs, ensure_ascii=False, indent=2) if isinstance(dify_inputs, dict) else \"{}\",\n\
         \"waveform_insights\": str(waveforms.get(\"insight_markdown\", \"\")).strip(),\n\
-        \"spectrum_chart\": _option_json(waveforms, \"low_frequency_spectrum\"),\n\
-        \"acc_chart\": _option_json(waveforms, \"acceleration\"),\n        \"gyro_chart\": _option_json(waveforms, \"gyroscope\"),\n\
-        \"mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"),\n    }\n"
+        \"waveform_markdown\": str(waveforms.get(\"markdown_echarts\") or waveforms.get(\"markdown\", \"\")).strip(),\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1316,16 +1293,7 @@ workflow:
           waveform_insights:
             children: null
             type: string
-          spectrum_chart:
-            children: null
-            type: string
-          acc_chart:
-            children: null
-            type: string
-          gyro_chart:
-            children: null
-            type: string
-          mag_chart:
+          waveform_markdown:
             children: null
             type: string
         selected: false
@@ -1404,43 +1372,7 @@ workflow:
           {{#report_parse.waveform_insights#}}
 
 
-          ## 横向 / 竖向能量对比
-
-          ```echarts
-
-          {{#report_parse.spectrum_chart#}}
-
-          ```
-
-
-          ## 波形图
-
-
-          ### 加速度三轴
-
-          ```echarts
-
-          {{#report_parse.acc_chart#}}
-
-          ```
-
-
-          ### 角速度三轴
-
-          ```echarts
-
-          {{#report_parse.gyro_chart#}}
-
-          ```
-
-
-          ### 加速度合成幅值
-
-          ```echarts
-
-          {{#report_parse.mag_chart#}}
-
-          ```
+          {{#report_parse.waveform_markdown#}}
 
           '
         desc: ''
