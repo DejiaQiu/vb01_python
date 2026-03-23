@@ -176,7 +176,7 @@ def detect(features: dict) -> dict:
     baseline_count = len([key for key in RUBBER_BASELINE_KEYS if key in baseline_stats])
     baseline_weight = _normalize_weight(baseline_count, len(RUBBER_BASELINE_KEYS)) if baseline_match is not False else 0.0
     baseline_mode = "mapping_mismatch_fallback" if baseline_match is False and baseline_payload is not None else ("robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback")
-    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
 
     robust_vertical = _z_to_100((
         _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy"))
@@ -247,7 +247,7 @@ def detect(features: dict) -> dict:
 
     gate_mode = "running"
     if not sampling_ok:
-        gate_mode = "off_target_40hz"
+        gate_mode = "sampling_low_quality"
     elif effective_run_score < rule_cfg["watch_run_min"]:
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
@@ -270,7 +270,7 @@ def detect(features: dict) -> dict:
     )
 
     if not sampling_ok:
-        confirm_mode = "off_target_sampling"
+        confirm_mode = "sampling_low_quality"
         watch_signal = 18.0 + 4.0 * rubber_hits + 2.0 * rubber_strong_hits
         score = min(watch_signal, 44.0)
     elif candidate_ready:

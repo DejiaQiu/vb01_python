@@ -670,40 +670,28 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: '# {{#env.site_name#}} 在线状态
-
+        answer: |
+          # {{#env.site_name#}} 在线状态
 
           {{#status_llm.text#}}
 
-
           ## 后端报告草稿
-
 
           {{#status_parse.report_markdown_draft#}}
 
-
           {{#status_parse.report_tables_html#}}
-
 
           ## 关键对比数据
 
-
           ```text
-
           {{#status_parse.report_tables_text#}}
-
           ```
-
 
           ## 怎么读这些图
 
-
           {{#status_parse.waveform_insights#}}
 
-
           {{#status_parse.waveform_markdown#}}
-
-          '
         desc: ''
         selected: false
         title: 在线状态输出
@@ -945,7 +933,7 @@ workflow:
           tooltip\": {\"trigger\": \"axis\"},\n        \"legend\": {\"top\": 28, \"\
           data\": [item[\"name\"] for item in series_defs]},\n        \"grid\": {\"\
           left\": 48, \"right\": 24, \"top\": 72, \"bottom\": 36},\n        \"xAxis\"\
-          : {\n            \"type\": \"category\",\n            \"name\": \"Time (s)\"\
+          : {\n            \"type\": \"category\",\n            \"name\": \"时间 (秒)\"\
           ,\n            \"boundaryGap\": False,\n            \"data\": x_data,\n\
           \        },\n        \"yAxis\": {\n            \"type\": \"value\",\n  \
           \          \"scale\": True,\n        },\n        \"series\": [],\n    }\n\
@@ -974,7 +962,7 @@ workflow:
           : \"#9467BD\", \"data\": gx},\n            {\"name\": \"Gy\", \"color\"\
           : \"#D62728\", \"data\": gy},\n            {\"name\": \"Gz\", \"color\"\
           : \"#8C564B\", \"data\": gz},\n        ],\n    )\n    mag_chart = _option(\n\
-          \        \"加速度合成幅值波形\",\n        ts_mag,\n        [\n            {\"name\"\
+          \        \"合成加速度幅值\",\n        ts_mag,\n        [\n            {\"name\"\
           : \"A_mag\", \"color\": \"#17BECF\", \"data\": amag},\n        ],\n    )\n\
           \    summary = (\n        f\"本次用于绘图的有效数据点共 {len(rows)} 个，\"\n        f\"\
           {'已优先使用 is_new_frame=1 的真实采样点。' if used_new_only else '未检测到足够多的真实采样标记，直接使用原始记录绘图。'}\"\
@@ -1315,21 +1303,16 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: '# {{#report_parse.report_title#}}
-
+        answer: |
+          # {{#report_parse.report_title#}}
 
           {{#report_llm.text#}}
 
-
           ## 怎么读这些图
-
 
           {{#report_parse.waveform_insights#}}
 
-
           {{#report_parse.waveform_markdown#}}
-
-          '
         desc: ''
         selected: false
         title: 综合报告输出

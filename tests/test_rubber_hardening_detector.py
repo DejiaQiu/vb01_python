@@ -35,8 +35,9 @@ def _feature_overrides(**kwargs):
         "n": 463,
         "fs_hz": 40.0,
         "duration_s": 11.55,
+        "sampling_ok": True,
         "sampling_ok_40hz": True,
-        "sampling_condition": "on_target_40hz",
+        "sampling_condition": "sampling_ok",
         "axis_mapping_mode": "default",
         "axis_mapping_signature": axis_mapping_signature(None),
         "used_new_only": True,
@@ -148,15 +149,16 @@ class TestRubberHardeningDetector(unittest.TestCase):
         self.assertFalse(result["triggered"], msg=result)
         self.assertIn("baseline_match=false", result["reasons"])
 
-    def test_off_target_sampling_does_not_trigger_hardening(self):
+    def test_low_sampling_rate_does_not_trigger_hardening(self):
         result = detect(
             _feature_overrides(
                 baseline=_baseline(),
                 n=120,
-                fs_hz=10.0,
-                duration_s=11.9,
+                fs_hz=2.0,
+                duration_s=60.0,
+                sampling_ok=False,
                 sampling_ok_40hz=False,
-                sampling_condition="off_target_40hz",
+                sampling_condition="low_sampling_rate",
                 a_rms_ac=0.016,
                 g_std=0.070,
                 az_std=0.0165,
@@ -170,7 +172,7 @@ class TestRubberHardeningDetector(unittest.TestCase):
 
         self.assertLess(result["score"], 45.0, msg=result)
         self.assertFalse(result["triggered"], msg=result)
-        self.assertIn("sampling_condition=off_target_40hz", result["reasons"])
+        self.assertIn("sampling_condition=low_sampling_rate", result["reasons"])
 
     def test_spiky_impact_signature_does_not_trigger_hardening(self):
         result = detect(

@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
-    from ._base import TARGET_40HZ_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
+    from ._base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
     from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
 except ImportError:  # pragma: no cover
-    from _base import TARGET_40HZ_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
+    from _base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
     from detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
 
 
@@ -20,7 +20,7 @@ HIGH_CONFIDENCE_SCORE = 60.0
 WATCH_SCORE = 45.0
 HIGH_CONFIDENCE_QUALITY = 0.80
 WATCH_QUALITY = 0.60
-MIN_EFFECTIVE_SAMPLES = int(TARGET_40HZ_CONFIG["min_samples"])
+MIN_EFFECTIVE_SAMPLES = int(SAMPLING_QUALITY_CONFIG["min_samples"])
 BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS))
 PRIMARY_DETECTOR: Callable[[dict[str, Any]], dict[str, Any]] = detect_rope_looseness
 AUXILIARY_DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
@@ -151,7 +151,7 @@ def _to_float(value: Any, default: float = 0.0) -> float:
 
 def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | None) -> dict[str, Any]:
     gate_cfg = SYSTEM_GATE_CONFIG
-    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     sampling_condition = str(features.get("sampling_condition", "unknown"))
     a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
     g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
@@ -187,7 +187,7 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     gate_mode = "running"
     score = 0.0
     if not sampling_ok:
-        gate_mode = "off_target_40hz"
+        gate_mode = "sampling_low_quality"
         status = "normal"
         score = 0.0
     elif run_state_score < gate_cfg["run_watch_min"]:
@@ -217,6 +217,7 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
         "baseline_match": baseline_match,
         "run_state_score": round(float(run_state_score), 2),
         "gate_mode": gate_mode,
+        "sampling_ok": sampling_ok,
         "sampling_ok_40hz": sampling_ok,
         "sampling_condition": sampling_condition,
     }
@@ -347,7 +348,7 @@ def run_all_rows(
     system_abnormality = _system_abnormality(detector_features, baseline)
 
     n_effective = int(features.get("n", 0))
-    quality_ok = bool(features.get("sampling_ok_40hz", False))
+    quality_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     candidate_faults, watch_faults = _screen_detectors(
         detector_results,
         system_abnormality=system_abnormality,
@@ -395,6 +396,7 @@ def run_all_rows(
             "fs_hz": round(float(features.get("fs_hz", 0.0)), 4),
             "used_new_only": bool(features.get("used_new_only", False)),
             "new_ratio": round(float(features.get("new_ratio", 0.0)), 4),
+            "sampling_ok": bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False))),
             "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
             "sampling_condition": str(features.get("sampling_condition", "unknown")),
             "axis_mapping_mode": str(features.get("axis_mapping_mode", "default")),

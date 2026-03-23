@@ -15,10 +15,9 @@ DEFAULT_AXIS_MAPPING = {
     "lateral_x": "Ax",
     "lateral_y": "Ay",
 }
-TARGET_40HZ_CONFIG = {
-    "fs_min_hz": 36.0,
-    "fs_max_hz": 44.0,
-    "min_samples": 320,
+SAMPLING_QUALITY_CONFIG = {
+    "min_fs_hz": 8.0,
+    "min_samples": 64,
     "min_duration_s": 8.0,
 }
 
@@ -111,32 +110,38 @@ def axis_mapping_signature(axis_mapping: dict[str, Any] | None) -> str:
 def evaluate_sampling_condition(n: int, fs_hz: float, duration_s: float) -> dict[str, Any]:
     if int(n) <= 0:
         return {
+            "sampling_ok": False,
             "sampling_ok_40hz": False,
             "sampling_condition": "no_effective_samples",
         }
     if float(fs_hz) <= EPS or float(duration_s) <= EPS:
         return {
+            "sampling_ok": False,
             "sampling_ok_40hz": False,
             "sampling_condition": "invalid_timing",
         }
-    if float(fs_hz) < float(TARGET_40HZ_CONFIG["fs_min_hz"]) or float(fs_hz) > float(TARGET_40HZ_CONFIG["fs_max_hz"]):
+    if float(fs_hz) < float(SAMPLING_QUALITY_CONFIG["min_fs_hz"]):
         return {
+            "sampling_ok": False,
             "sampling_ok_40hz": False,
-            "sampling_condition": "off_target_40hz",
+            "sampling_condition": "low_sampling_rate",
         }
-    if int(n) < int(TARGET_40HZ_CONFIG["min_samples"]):
+    if int(n) < int(SAMPLING_QUALITY_CONFIG["min_samples"]):
         return {
+            "sampling_ok": False,
             "sampling_ok_40hz": False,
-            "sampling_condition": "insufficient_samples_40hz",
+            "sampling_condition": "insufficient_samples",
         }
-    if float(duration_s) < float(TARGET_40HZ_CONFIG["min_duration_s"]):
+    if float(duration_s) < float(SAMPLING_QUALITY_CONFIG["min_duration_s"]):
         return {
+            "sampling_ok": False,
             "sampling_ok_40hz": False,
-            "sampling_condition": "short_window_40hz",
+            "sampling_condition": "short_window",
         }
     return {
+        "sampling_ok": True,
         "sampling_ok_40hz": True,
-        "sampling_condition": "on_target_40hz",
+        "sampling_condition": "sampling_ok",
     }
 
 
@@ -706,6 +711,7 @@ def build_feature_pack(rows: list[dict[str, str]], axis_mapping: dict[str, Any] 
         "new_ratio": float(new_ratio),
         "duration_s": float(duration_s),
         "fs_hz": float(fs_hz),
+        "sampling_ok": bool(sampling_profile["sampling_ok"]),
         "sampling_ok_40hz": bool(sampling_profile["sampling_ok_40hz"]),
         "sampling_condition": str(sampling_profile["sampling_condition"]),
         "axis_mapping_mode": axis_mapping_mode,
@@ -793,6 +799,7 @@ def build_result(
             "n": n,
             "fs_hz": round(fs_hz, 3),
             "duration_s": round(float(features.get("duration_s", 0.0)), 3),
+            "sampling_ok": bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False))),
             "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
             "sampling_condition": str(features.get("sampling_condition", "unknown")),
             "axis_mapping_signature": str(features.get("axis_mapping_signature", axis_mapping_signature(None))),

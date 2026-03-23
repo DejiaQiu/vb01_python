@@ -333,7 +333,7 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         + 0.20 * ratio_to_100(max(lat_peak_ratio, z_peak_ratio), 0.10, 0.50)
     )
 
-    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     baseline_payload = features.get("baseline") if isinstance(features.get("baseline"), dict) else None
     baseline_match = baseline_mapping_match(features, baseline_payload)
     baseline_stats = _baseline_stats(features) if baseline_match is not False else {}
@@ -362,7 +362,7 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     effective_run_score = max(run_state_score, gate_rescue_score)
     gate_mode = "running"
     if not sampling_ok:
-        gate_mode = "off_target_40hz"
+        gate_mode = "sampling_low_quality"
     elif effective_run_score < rule_cfg["watch_run_min"]:
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
@@ -385,7 +385,7 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     )
 
     if not sampling_ok:
-        confirm_mode = "off_target_sampling"
+        confirm_mode = "sampling_low_quality"
         watch_signal = 18.0 + 4.0 * core_hits + 2.0 * core_strong_hits
         rule_score = min(watch_signal, 44.0)
     elif candidate_ready:

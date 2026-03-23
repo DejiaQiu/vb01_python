@@ -255,7 +255,7 @@ def _apply_rope_timeline_confirmation(history: list[dict[str, Any]], *, confirm_
         rope_primary = row.get("rope_primary", {}) if isinstance(row.get("rope_primary"), dict) else {}
         rope_score = _safe_float(rope_primary.get("score"), 0.0)
         summary = row.get("summary", {}) if isinstance(row.get("summary"), dict) else {}
-        quality_ok = bool(summary.get("sampling_ok_40hz", False))
+        quality_ok = bool(summary.get("sampling_ok", summary.get("sampling_ok_40hz", False)))
         timeline_rows.append(
             {
                 "file": str(row.get("name", "")),

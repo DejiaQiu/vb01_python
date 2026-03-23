@@ -50,8 +50,9 @@ def _feature_overrides(**kwargs):
         "n": 463,
         "fs_hz": 40.0,
         "duration_s": 11.55,
+        "sampling_ok": True,
         "sampling_ok_40hz": True,
-        "sampling_condition": "on_target_40hz",
+        "sampling_condition": "sampling_ok",
         "axis_mapping_mode": "default",
         "axis_mapping_signature": axis_mapping_signature(None),
         "used_new_only": True,
@@ -126,9 +127,10 @@ def _rows(*, rotated: bool = False) -> list[dict[str, float]]:
 
 
 class TestRopeLoosenessDetector(unittest.TestCase):
-    def test_feature_pack_extracts_frequency_features_at_40hz(self):
+    def test_feature_pack_extracts_frequency_features_with_valid_sampling(self):
         features = build_feature_pack(_rows())
 
+        self.assertTrue(features["sampling_ok"])
         self.assertTrue(features["sampling_ok_40hz"])
         self.assertGreater(features["lat_dom_freq_hz"], 0.3)
         self.assertGreater(features["lat_low_band_ratio"], 0.10)
@@ -145,7 +147,7 @@ class TestRopeLoosenessDetector(unittest.TestCase):
         self.assertAlmostEqual(original["lat_low_band_ratio"], rotated["lat_low_band_ratio"], places=3)
         self.assertEqual(rotated["axis_mapping_mode"], "explicit")
 
-    def test_feature_pack_marks_off_target_sampling(self):
+    def test_feature_pack_marks_low_sampling_rate(self):
         rows = []
         ts0 = 1_000_000
         for i in range(24):
@@ -163,8 +165,9 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             )
         features = build_feature_pack(rows)
 
+        self.assertFalse(features["sampling_ok"])
         self.assertFalse(features["sampling_ok_40hz"])
-        self.assertEqual(features["sampling_condition"], "off_target_40hz")
+        self.assertEqual(features["sampling_condition"], "low_sampling_rate")
 
     def test_scale_invariant_when_using_baseline(self):
         base_result = detect(
@@ -241,15 +244,16 @@ class TestRopeLoosenessDetector(unittest.TestCase):
         self.assertFalse(result["triggered"], msg=result)
         self.assertIn("baseline_match=false", result["reasons"])
 
-    def test_off_target_sampling_does_not_trigger_candidate(self):
+    def test_low_sampling_rate_does_not_trigger_candidate(self):
         result = detect(
             _feature_overrides(
                 baseline=_baseline(),
                 n=120,
-                fs_hz=10.0,
-                duration_s=11.9,
+                fs_hz=2.0,
+                duration_s=60.0,
+                sampling_ok=False,
                 sampling_ok_40hz=False,
-                sampling_condition="off_target_40hz",
+                sampling_condition="low_sampling_rate",
                 a_rms_ac=0.016,
                 a_p2p=0.092,
                 g_std=0.095,
@@ -261,7 +265,7 @@ class TestRopeLoosenessDetector(unittest.TestCase):
 
         self.assertLess(result["score"], ROPE_RULE_CONFIG["watch_score"], msg=result)
         self.assertFalse(result["triggered"], msg=result)
-        self.assertIn("sampling_condition=off_target_40hz", result["reasons"])
+        self.assertIn("sampling_condition=low_sampling_rate", result["reasons"])
 
     def test_spiky_impact_signature_does_not_trigger_rope_looseness(self):
         result = detect(
@@ -340,8 +344,9 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                     "report.fault_algorithms.rope_looseness_timeline.build_feature_pack",
                     return_value={
                         "n": 463,
+                        "sampling_ok": True,
                         "sampling_ok_40hz": True,
-                        "sampling_condition": "on_target_40hz",
+                        "sampling_condition": "sampling_ok",
                     },
                 ),
                 patch("report.fault_algorithms.rope_looseness_timeline.detect", side_effect=fake_results),

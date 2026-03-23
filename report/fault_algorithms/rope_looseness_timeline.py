@@ -6,15 +6,15 @@ import re
 from pathlib import Path
 
 try:
-    from ._base import TARGET_40HZ_CONFIG, build_clean_feature_baseline, build_feature_pack, load_rows
+    from ._base import SAMPLING_QUALITY_CONFIG, build_clean_feature_baseline, build_feature_pack, load_rows
     from .detect_rope_looseness import ROPE_BASELINE_KEYS, ROPE_RULE_CONFIG, detect
 except ImportError:  # pragma: no cover
-    from _base import TARGET_40HZ_CONFIG, build_clean_feature_baseline, build_feature_pack, load_rows
+    from _base import SAMPLING_QUALITY_CONFIG, build_clean_feature_baseline, build_feature_pack, load_rows
     from detect_rope_looseness import ROPE_BASELINE_KEYS, ROPE_RULE_CONFIG, detect
 
 
 _PATTERN = re.compile(r"vibration_30s_\d{8}_(\d{6})\.csv$")
-TIMELINE_MIN_SAMPLES = int(TARGET_40HZ_CONFIG["min_samples"])
+TIMELINE_MIN_SAMPLES = int(SAMPLING_QUALITY_CONFIG["min_samples"])
 
 
 def _hhmmss(path: Path) -> str:
@@ -133,7 +133,7 @@ def run_timeline(
             features["baseline"] = baseline_payload
         result = detect(features)
         score = float(result.get("score", 0.0))
-        sampling_ok = bool(features.get("sampling_ok_40hz", False))
+        sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
         raw_triggered = sampling_ok and score >= float(min_score)
 
         rows.append(

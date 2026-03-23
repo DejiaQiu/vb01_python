@@ -39,14 +39,15 @@ def _result(fault_type: str, score: float, *, triggered: bool, quality_factor: f
         "level": level,
         "triggered": triggered,
         "quality_factor": quality_factor,
-        "reasons": [f"score={score:.2f}", "sampling_condition=on_target_40hz"],
+        "reasons": [f"score={score:.2f}", "sampling_condition=sampling_ok"],
         "feature_snapshot": {
             "n": 463,
+            "sampling_ok": True,
             "sampling_ok_40hz": True,
-            "sampling_condition": "on_target_40hz",
+            "sampling_condition": "sampling_ok",
             "axis_mapping_signature": "vertical=Az|lateral_x=Ax|lateral_y=Ay",
         },
-        "sampling_condition": "on_target_40hz",
+        "sampling_condition": "sampling_ok",
         "axis_mapping_signature": "vertical=Az|lateral_x=Ax|lateral_y=Ay",
     }
 
@@ -95,8 +96,9 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "baseline_match": True,
                 "run_state_score": 62.0,
                 "gate_mode": "running",
+                "sampling_ok": True,
                 "sampling_ok_40hz": True,
-                "sampling_condition": "on_target_40hz",
+                "sampling_condition": "sampling_ok",
             },
         ):
             with patch.object(run_all_module, "DETECTORS", fake_detectors):
@@ -160,8 +162,9 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "baseline_match": True,
                 "run_state_score": 66.0,
                 "gate_mode": "running",
+                "sampling_ok": True,
                 "sampling_ok_40hz": True,
-                "sampling_condition": "on_target_40hz",
+                "sampling_condition": "sampling_ok",
             },
         ):
             with patch.object(run_all_module, "DETECTORS", fake_detectors):
@@ -192,8 +195,9 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "baseline_match": True,
                 "run_state_score": 61.0,
                 "gate_mode": "running",
+                "sampling_ok": True,
                 "sampling_ok_40hz": True,
-                "sampling_condition": "on_target_40hz",
+                "sampling_condition": "sampling_ok",
             },
         ):
             with patch.object(run_all_module, "DETECTORS", fake_detectors):

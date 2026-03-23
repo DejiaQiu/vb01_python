@@ -217,7 +217,7 @@ def _echarts_option(title: str, series: list[dict[str, Any]]) -> dict[str, Any]:
         "grid": {"left": 48, "right": 24, "top": 72, "bottom": 36},
         "xAxis": {
             "type": "category",
-            "name": "Time (s)",
+            "name": "时间 (秒)",
             "boundaryGap": False,
             "data": x_data,
         },
@@ -267,11 +267,14 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
 def _sampling_condition_text(condition: str) -> str:
     key = str(condition or "").strip().lower()
     labels = {
-        "on_target_40hz": "目标 40Hz 采样条件满足",
-        "off_target_40hz": "采样率偏离 40Hz 目标条件",
+        "sampling_ok": "采样条件满足",
+        "low_sampling_rate": "采样率过低，频域特征稳定性不足",
         "too_few_samples": "有效样本点过少",
+        "insufficient_samples": "有效样本点过少",
         "short_duration": "窗口时长不足",
+        "short_window": "窗口时长不足",
         "invalid_timing": "时间戳异常",
+        "no_effective_samples": "没有有效采样点",
         "no_rows": "没有可用数据",
     }
     return labels.get(key, key or "未知")
@@ -388,13 +391,13 @@ def _build_insight_markdown(
     rope_snapshot = _as_dict(rope_primary.get("feature_snapshot"))
     rope_spectral = _as_dict(rope_primary.get("rope_spectral_snapshot"))
 
-    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     sampling_condition = str(features.get("sampling_condition", "unknown"))
     axis_mode = str(summary.get("axis_mapping_mode", features.get("axis_mapping_mode", "default")))
     axis_signature = str(summary.get("axis_mapping_signature", features.get("axis_mapping_signature", axis_mapping_signature(None))))
     axis_short, axis_long = _axis_description(mapping, axis_mode)
     screening_status = str(screening.get("status") or diag.get("status") or "unknown").strip() or "unknown"
-    data_quality = "这段数据适合按 40Hz 主链路做判断" if sampling_ok else f"这段数据只能保守解释，原因：{_sampling_condition_text(sampling_condition)}"
+    data_quality = "这段数据适合进入主链路判断" if sampling_ok else f"这段数据只能保守解释，原因：{_sampling_condition_text(sampling_condition)}"
     row_origin = "已优先使用真实采样点绘图" if used_new_only else "没有足够多的真实采样标记，本次直接使用原始记录绘图"
     quality_rows = [
         ["这段数据的采样频率", f"{float(features.get('fs_hz', 0.0)):.2f} Hz"],
@@ -521,7 +524,7 @@ def build_waveform_payload(
     x_mag, amag = _downsample(xs, amag, max_points)
 
     acceleration = _plot_block(
-        "Acceleration Waveform",
+        "加速度三轴波形",
         [
             {"label": "Ax", "color": "#1F77B4", "xs": x_acc, "ys": ax},
             {"label": "Ay", "color": "#FF7F0E", "xs": x_acc, "ys": ay},
@@ -531,7 +534,7 @@ def build_waveform_payload(
         height=height,
     )
     acceleration_chart = _echarts_block(
-        "Acceleration Waveform",
+        "加速度三轴波形",
         [
             {"label": "Ax", "color": "#1F77B4", "xs": x_acc, "ys": ax},
             {"label": "Ay", "color": "#FF7F0E", "xs": x_acc, "ys": ay},
@@ -539,7 +542,7 @@ def build_waveform_payload(
         ],
     )
     gyroscope = _plot_block(
-        "Gyroscope Waveform",
+        "角速度三轴波形",
         [
             {"label": "Gx", "color": "#9467BD", "xs": x_gyr, "ys": gx},
             {"label": "Gy", "color": "#D62728", "xs": x_gyr, "ys": gy},
@@ -549,7 +552,7 @@ def build_waveform_payload(
         height=height,
     )
     gyroscope_chart = _echarts_block(
-        "Gyroscope Waveform",
+        "角速度三轴波形",
         [
             {"label": "Gx", "color": "#9467BD", "xs": x_gyr, "ys": gx},
             {"label": "Gy", "color": "#D62728", "xs": x_gyr, "ys": gy},
@@ -557,7 +560,7 @@ def build_waveform_payload(
         ],
     )
     magnitude = _plot_block(
-        "Acceleration Magnitude",
+        "合成加速度幅值",
         [
             {"label": "A_mag", "color": "#17BECF", "xs": x_mag, "ys": amag},
         ],
@@ -565,7 +568,7 @@ def build_waveform_payload(
         height=height,
     )
     magnitude_chart = _echarts_block(
-        "Acceleration Magnitude",
+        "合成加速度幅值",
         [
             {"label": "A_mag", "color": "#17BECF", "xs": x_mag, "ys": amag},
         ],
@@ -620,6 +623,7 @@ def build_waveform_payload(
             "duration_s": round(float(features.get("duration_s", 0.0)), 4),
             "used_new_only": bool(features.get("used_new_only", False)),
             "effective_rows_from_new_frame": bool(used_new_only),
+            "sampling_ok": bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False))),
             "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
             "sampling_condition": str(features.get("sampling_condition", "unknown")),
             "axis_mapping_mode": str(features.get("axis_mapping_mode", "default")),
@@ -632,6 +636,7 @@ def build_waveform_payload(
             "lateral_axes": [str(mapping["lateral_x"]), str(mapping["lateral_y"])],
         },
         "sampling": {
+            "sampling_ok": bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False))),
             "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
             "sampling_condition": str(features.get("sampling_condition", "unknown")),
             "sampling_label": _sampling_condition_text(str(features.get("sampling_condition", "unknown"))),
