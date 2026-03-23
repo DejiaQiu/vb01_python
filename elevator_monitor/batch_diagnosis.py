@@ -448,7 +448,11 @@ def _build_report_outputs(
     report_diagnosis["rope_timeline"] = rope_timeline
     try:
         waveform_rows, waveform_source = load_waveform_rows([], "", str(latest_file))
-        waveform_payload = build_waveform_payload(waveform_rows, source=waveform_source) if waveform_rows else {}
+        waveform_payload = build_waveform_payload(
+            waveform_rows,
+            source=waveform_source,
+            diagnosis_result=report_diagnosis,
+        ) if waveform_rows else {}
     except Exception:
         waveform_payload = {}
 

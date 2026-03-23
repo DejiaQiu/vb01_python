@@ -593,7 +593,11 @@ def _event_issue_payload(event: dict[str, Any], screening_status: str) -> dict[s
     }
 
 
-def _load_waveform_payload_from_event_context(event: dict[str, Any]) -> dict[str, Any]:
+def _load_waveform_payload_from_event_context(
+    event: dict[str, Any],
+    *,
+    diagnosis_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     context = event.get("context", {}) if isinstance(event.get("context"), dict) else {}
     stored_path = str(context.get("stored_path", "")).strip() or str(context.get("local_path", "")).strip()
     if not stored_path:
@@ -606,11 +610,11 @@ def _load_waveform_payload_from_event_context(event: dict[str, Any]) -> dict[str
             text = gzip.decompress(path.read_bytes()).decode("utf-8", errors="replace")
             rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
             if rows:
-                return build_waveform_payload(rows, source=stored_path)
+                return build_waveform_payload(rows, source=stored_path, diagnosis_result=diagnosis_result)
             return {}
         rows, source = load_waveform_rows([], "", stored_path)
         if rows:
-            return build_waveform_payload(rows, source=source)
+            return build_waveform_payload(rows, source=source, diagnosis_result=diagnosis_result)
     except Exception:
         return {}
     return {}
@@ -659,7 +663,9 @@ def build_report_context_from_edge_event(
         manifest_payload={},
         manifest_path="",
     )
-    waveform_payload = _load_waveform_payload_from_event_context(event) if include_waveforms else {}
+    waveform_payload = (
+        _load_waveform_payload_from_event_context(event, diagnosis_result=diagnosis_result) if include_waveforms else {}
+    )
     report_ctx = build_report_context(
         diagnosis_result=diagnosis_result,
         maintenance_package=maintenance_package,

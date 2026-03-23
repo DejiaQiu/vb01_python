@@ -117,8 +117,12 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("acceleration", payload["plots"])
         self.assertIn("gyroscope", payload["plots"])
         self.assertIn("acceleration_magnitude", payload["plots"])
+        self.assertIn("low_frequency_spectrum", payload["plots"])
         self.assertIn("echarts", payload)
         self.assertIn("acceleration", payload["echarts"])
+        self.assertIn("low_frequency_spectrum", payload["echarts"])
+        self.assertIn("insight_markdown", payload)
+        self.assertIn("传感器安装方向说明", payload["insight_markdown"])
         self.assertIn("```echarts", payload["markdown_echarts"])
         self.assertIn("data:image/svg+xml;base64,", payload["plots"]["acceleration"]["data_uri"])
         self.assertIn("## 波形图", payload["markdown"])
@@ -218,6 +222,8 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("waveform_payload", payload)
         self.assertIn("plots", payload["waveform_payload"])
         self.assertIn("markdown_echarts", payload["waveform_payload"])
+        self.assertIn("insight_markdown", payload["waveform_payload"])
+        self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
         self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
 
     def test_batch_run_endpoint_returns_payload(self):
@@ -293,6 +299,8 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("waveform_payload", payload)
         self.assertIn("plots", payload["waveform_payload"])
         self.assertIn("markdown_echarts", payload["waveform_payload"])
+        self.assertIn("insight_markdown", payload["waveform_payload"])
+        self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
 
     def test_diagnosis_report_keeps_preferred_issue_empty_when_status_is_normal(self):
         diagnosis_result = {
@@ -376,16 +384,21 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("检测日期：", workflow_text)
         self.assertIn("固定输出五行", workflow_text)
         self.assertIn("include_waveforms=true", workflow_text)
+        self.assertIn("怎么读这些图", workflow_text)
+        self.assertIn("横向 / 竖向能量对比", workflow_text)
         self.assertIn("## 波形图", workflow_text)
         self.assertIn("### 加速度三轴", workflow_text)
         self.assertIn("### 角速度三轴", workflow_text)
         self.assertIn("### 加速度合成幅值", workflow_text)
+        self.assertIn("status_parse.waveform_insights", workflow_text)
+        self.assertIn("status_parse.spectrum_chart", workflow_text)
         self.assertIn("status_parse.acc_chart", workflow_text)
         self.assertIn("status_parse.gyro_chart", workflow_text)
         self.assertIn("status_parse.mag_chart", workflow_text)
         self.assertIn("answer: |", workflow_text)
         self.assertIn("```echarts", workflow_text)
         self.assertIn("{{#status_parse.acc_chart#}}", workflow_text)
+        self.assertIn("{{#report_parse.spectrum_chart#}}", workflow_text)
 
     def test_ingest_heartbeat_updates_edge_latest_status(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"ELEVATOR_CLOUD_STORE_DIR": tmp_dir}):

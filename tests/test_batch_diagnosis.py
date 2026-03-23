@@ -166,6 +166,8 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("## 波形图", payload["report_markdown_draft"])
             self.assertIn("waveform_payload", payload)
             self.assertIn("markdown_echarts", payload["waveform_payload"])
+            self.assertIn("insight_markdown", payload["waveform_payload"])
+            self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
             self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rope_looseness")
             self.assertTrue(latest_json.exists())
             self.assertTrue(history_jsonl.exists())
@@ -180,6 +182,8 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("## 波形图", latest_payload["report_markdown_draft"])
             self.assertIn("waveform_payload", latest_payload)
             self.assertIn("markdown_echarts", latest_payload["waveform_payload"])
+            self.assertIn("insight_markdown", latest_payload["waveform_payload"])
+            self.assertIn("low_frequency_spectrum", latest_payload["waveform_payload"]["echarts"])
             self.assertIn("waveform_payload", latest_payload["latest_result"])
 
             history_lines = history_jsonl.read_text(encoding="utf-8").strip().splitlines()

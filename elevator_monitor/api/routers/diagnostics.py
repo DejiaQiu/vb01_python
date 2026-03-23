@@ -91,6 +91,7 @@ def _attach_latest_waveforms(
         width=max(320, int(width)),
         height=max(180, int(height)),
         max_points=max(32, int(max_points)),
+        diagnosis_result=payload,
     )
     return enriched
 

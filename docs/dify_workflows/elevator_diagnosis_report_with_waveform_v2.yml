@@ -628,7 +628,9 @@ workflow:
                   "report_tables_html": _tables_to_html(report_markdown_draft),
                   "report_tables_text": _tables_to_text(report_markdown_draft),
                   "waveform_markdown": str(waveforms.get("markdown_echarts") or waveforms.get("markdown", "")).strip(),
+                  "waveform_insights": str(waveforms.get("insight_markdown", "")).strip(),
                   "display_conclusion": display_conclusion,
+                  "spectrum_chart": _option_json(waveforms, "low_frequency_spectrum"),
                   "acc_chart": _option_json(waveforms, "acceleration"),
                   "gyro_chart": _option_json(waveforms, "gyroscope"),
                   "mag_chart": _option_json(waveforms, "acceleration_magnitude"),
@@ -658,6 +660,12 @@ workflow:
             children: null
             type: string
           waveform_markdown:
+            children: null
+            type: string
+          waveform_insights:
+            children: null
+            type: string
+          spectrum_chart:
             children: null
             type: string
           acc_chart:
@@ -751,7 +759,15 @@ workflow:
           {{#status_parse.report_tables_text#}}
           ```
 
-          {{#status_parse.waveform_markdown#}}
+          ## 怎么读这些图
+
+          {{#status_parse.waveform_insights#}}
+
+          ## 横向 / 竖向能量对比
+
+          ```echarts
+          {{#status_parse.spectrum_chart#}}
+          ```
 
           ## 波形图
 
@@ -1179,12 +1195,13 @@ workflow:
         code: "import json\n\n\ndef _loads(text):\n    raw = str(text or \"\").strip()\n\
           \    if not raw:\n        return {}\n    try:\n        return json.loads(raw)\n\
           \    except Exception:\n        return {}\n\n\ndef main(site_name, diagnosis_json,\
-          \ maintenance_json):\n    payload = {\n        \"site_name\": site_name\
-          \ or \"unknown-site\",\n        \"diagnosis_result\": _loads(diagnosis_json),\n\
+          \ maintenance_json, csv_text):\n    payload = {\n        \"site_name\"\
+          : site_name or \"unknown-site\",\n        \"diagnosis_result\": _loads(diagnosis_json),\n\
           \        \"maintenance_package\": _loads(maintenance_json),\n        \"\
-          include_waveforms\": False,\n        \"language\": \"zh-CN\",\n        \"\
-          report_style\": \"standard\",\n    }\n    return {\n        \"report_body\"\
-          : json.dumps(payload, ensure_ascii=False),\n    }\n"
+          csv_text\": str(csv_text or \"\"),\n        \"include_waveforms\": True,\n\
+          \        \"language\": \"zh-CN\",\n        \"report_style\": \"standard\"\
+          ,\n    }\n    return {\n        \"report_body\": json.dumps(payload, ensure_ascii=False),\n\
+          \    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1210,6 +1227,11 @@ workflow:
           - maintenance_json
           value_type: string
           variable: maintenance_json
+        - value_selector:
+          - prepare_csv
+          - csv_text
+          value_type: string
+          variable: csv_text
       height: 52
       id: report_body
       position:
@@ -1262,15 +1284,20 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: "import json\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
-          \    try:\n        payload = json.loads(text) if text else {}\n    except\
-          \ Exception:\n        payload = {}\n    dify_prompt = str(payload.get(\"\
-          dify_prompt_template\", \"\")).strip()\n    dify_inputs = payload.get(\"\
-          dify_report_inputs\", {})\n    return {\n        \"report_title\": str(payload.get(\"\
-          report_title\", \"电梯故障诊断报告\")),\n        \"report_markdown\": str(payload.get(\"\
-          report_markdown_draft\", \"\")).strip(),\n        \"dify_prompt_template\"\
-          : dify_prompt,\n        \"dify_inputs_json\": json.dumps(dify_inputs, ensure_ascii=False,\
-          \ indent=2) if isinstance(dify_inputs, dict) else \"{}\",\n    }\n"
+        code: "import json\n\n\ndef _as_dict(value):\n    return value if isinstance(value, dict) else {}\n\
+\n\ndef _option_json(waveforms, key):\n    echarts = waveforms.get(\"echarts\", {}) if isinstance(waveforms.get(\"echarts\"), dict) else {}\n\
+    chart = echarts.get(key, {}) if isinstance(echarts.get(key), dict) else {}\n\
+    return str(chart.get(\"option_json\") or \"\").strip()\n\n\ndef main(body):\n\
+    text = str(body or \"\").strip()\n    try:\n        payload = json.loads(text) if text else {}\n\
+    except Exception:\n        payload = {}\n    payload = payload if isinstance(payload, dict) else {}\n\
+    dify_prompt = str(payload.get(\"dify_prompt_template\", \"\")).strip()\n    dify_inputs = payload.get(\"dify_report_inputs\", {})\n\
+    waveforms = _as_dict(payload.get(\"waveform_payload\"))\n    return {\n      \
+  \"report_title\": str(payload.get(\"report_title\", \"电梯故障诊断报告\")),\n        \"report_markdown\": str(payload.get(\"report_markdown_draft\", \"\")).strip(),\n\
+        \"dify_prompt_template\": dify_prompt,\n        \"dify_inputs_json\": json.dumps(dify_inputs, ensure_ascii=False, indent=2) if isinstance(dify_inputs, dict) else \"{}\",\n\
+        \"waveform_insights\": str(waveforms.get(\"insight_markdown\", \"\")).strip(),\n\
+        \"spectrum_chart\": _option_json(waveforms, \"low_frequency_spectrum\"),\n\
+        \"acc_chart\": _option_json(waveforms, \"acceleration\"),\n        \"gyro_chart\": _option_json(waveforms, \"gyroscope\"),\n\
+        \"mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"),\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1284,6 +1311,21 @@ workflow:
             children: null
             type: string
           report_title:
+            children: null
+            type: string
+          waveform_insights:
+            children: null
+            type: string
+          spectrum_chart:
+            children: null
+            type: string
+          acc_chart:
+            children: null
+            type: string
+          gyro_chart:
+            children: null
+            type: string
+          mag_chart:
             children: null
             type: string
         selected: false
@@ -1326,7 +1368,7 @@ workflow:
           role: system
           text: "{{#report_parse.dify_prompt_template#}}\n\n下面是后端已经整理好的报告输入，请在此基础上做最终输出润色：\n\
             {{#report_parse.dify_inputs_json#}}\n\n下面是后端草稿，可作为参考，但不要机械照抄：\n{{#report_parse.report_markdown#}}\n\
-            \n下面是波形图数据摘要：\n{{#waveform_code.waveform_summary#}}\n\n输出要求：\n1. 面向普通人，优先说“看到了什么、代表什么、要不要处理”。\n\
+            \n下面是图表说明卡片：\n{{#report_parse.waveform_insights#}}\n\n输出要求：\n1. 面向普通人，优先说“看到了什么、代表什么、要不要处理”。\n\
             2. 结构固定为：\n   ## 1. 一句话结论\n   ## 2. 给非专业人员的解释\n   ## 3. 建议怎么做\n   ## 4.\
             \ 本次判断依据\n   ## 5. 给维保人员的补充参考\n3. 不要重复一级标题，答案节点会单独拼接标题。\n4. 不要输出 JSON，不要生成波形图代码块，答案节点会自动拼接。\n\
             5. 尽量使用自然中文，不要过多直接暴露英文技术字段名。\n"
@@ -1356,17 +1398,29 @@ workflow:
           {{#report_llm.text#}}
 
 
+          ## 怎么读这些图
+
+
+          {{#report_parse.waveform_insights#}}
+
+
+          ## 横向 / 竖向能量对比
+
+          ```echarts
+
+          {{#report_parse.spectrum_chart#}}
+
+          ```
+
+
           ## 波形图
-
-
-          {{#waveform_code.waveform_summary#}}
 
 
           ### 加速度三轴
 
           ```echarts
 
-          {{#waveform_code.acc_chart#}}
+          {{#report_parse.acc_chart#}}
 
           ```
 
@@ -1375,7 +1429,7 @@ workflow:
 
           ```echarts
 
-          {{#waveform_code.gyro_chart#}}
+          {{#report_parse.gyro_chart#}}
 
           ```
 
@@ -1384,7 +1438,7 @@ workflow:
 
           ```echarts
 
-          {{#waveform_code.mag_chart#}}
+          {{#report_parse.mag_chart#}}
 
           ```
 

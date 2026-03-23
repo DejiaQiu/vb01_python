@@ -7,7 +7,15 @@ import math
 from pathlib import Path
 from typing import Any
 
-from report.fault_algorithms._base import build_feature_pack, load_rows, parse_float, parse_int
+from report.fault_algorithms._base import (
+    _scan_spectrum,
+    axis_mapping_signature,
+    build_feature_pack,
+    load_rows,
+    normalize_axis_mapping,
+    parse_float,
+    parse_int,
+)
 
 
 def _extract_series(rows: list[dict[str, Any]], names: tuple[str, ...]) -> list[float]:
@@ -32,6 +40,61 @@ def _extract_ts_ms(rows: list[dict[str, Any]]) -> list[int]:
             value = idx
         ts.append(int(value))
     return ts
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _diag_dict(payload: dict[str, Any] | None, key: str) -> dict[str, Any]:
+    diag = payload if isinstance(payload, dict) else {}
+    latest_result = diag.get("latest_result")
+    if isinstance(latest_result, dict):
+        nested = latest_result.get(key)
+        if isinstance(nested, dict):
+            return nested
+    direct = diag.get(key)
+    return direct if isinstance(direct, dict) else {}
+
+
+def _diag_list(payload: dict[str, Any] | None, key: str) -> list[Any]:
+    diag = payload if isinstance(payload, dict) else {}
+    latest_result = diag.get("latest_result")
+    if isinstance(latest_result, dict):
+        nested = latest_result.get(key)
+        if isinstance(nested, list):
+            return nested
+    direct = diag.get(key)
+    return direct if isinstance(direct, list) else []
+
+
+def _axis_mapping_from_signature(signature: str) -> dict[str, str] | None:
+    text = str(signature or "").strip()
+    if not text:
+        return None
+    parts: dict[str, str] = {}
+    for item in text.split("|"):
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        parts[str(key).strip()] = str(value).strip()
+    candidate = {
+        "vertical": parts.get("vertical", ""),
+        "lateral_x": parts.get("lateral_x", ""),
+        "lateral_y": parts.get("lateral_y", ""),
+    }
+    values = list(candidate.values())
+    if any(value not in {"Ax", "Ay", "Az"} for value in values):
+        return None
+    if len(set(values)) != 3:
+        return None
+    return candidate
+
+
+def _axis_mapping_for_waveforms(diagnosis_result: dict[str, Any] | None) -> dict[str, str]:
+    summary = _diag_dict(diagnosis_result, "summary")
+    signature = str(summary.get("axis_mapping_signature", "")).strip()
+    return normalize_axis_mapping(_axis_mapping_from_signature(signature))
 
 
 def _pick_effective_rows(rows: list[dict[str, Any]], min_real_rows: int = 8) -> tuple[list[dict[str, Any]], bool]:
@@ -187,6 +250,225 @@ def _echarts_block(title: str, series: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
+    if not headers or not rows:
+        return ""
+    lines = [
+        "| " + " | ".join(str(item) for item in headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for row in rows:
+        padded = list(row[: len(headers)]) + [""] * max(0, len(headers) - len(row))
+        cells = [str(item).replace("\n", "<br>").replace("|", "/") for item in padded[: len(headers)]]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def _sampling_condition_text(condition: str) -> str:
+    key = str(condition or "").strip().lower()
+    labels = {
+        "on_target_40hz": "目标 40Hz 采样条件满足",
+        "off_target_40hz": "采样率偏离 40Hz 目标条件",
+        "too_few_samples": "有效样本点过少",
+        "short_duration": "窗口时长不足",
+        "invalid_timing": "时间戳异常",
+        "no_rows": "没有可用数据",
+    }
+    return labels.get(key, key or "未知")
+
+
+def _screening_status_text(status: str) -> str:
+    key = str(status or "").strip().lower()
+    labels = {
+        "candidate_faults": "高度怀疑，需要尽快复核",
+        "watch_only": "看到了异常变化，建议继续观察或复测",
+        "normal": "当前未见明确异常",
+        "low_quality": "数据不足，先不要下结论",
+        "unknown": "暂未形成明确结论",
+    }
+    return labels.get(key, key or "暂未形成明确结论")
+
+
+def _axis_description(mapping: dict[str, str], mode: str) -> tuple[str, str]:
+    vertical = mapping["vertical"]
+    lateral_x = mapping["lateral_x"]
+    lateral_y = mapping["lateral_y"]
+    short = f"当前按 `{vertical}` 作为竖向，`{lateral_x}/{lateral_y}` 作为横向"
+    long = (
+        f"{short}。图里的 `Ax/Ay/Az` 仍是原始轴名，"
+        f"rope 的横向/竖向特征与低频频域图都按这套映射计算。"
+    )
+    if str(mode or "").strip() == "explicit":
+        long += " 这次使用了显式轴向映射配置。"
+    else:
+        long += " 这次使用的是默认轴向映射。"
+    return short, long
+
+
+def _normalized_spectrum_values(bins: list[tuple[float, float]]) -> tuple[list[float], list[float]]:
+    if not bins:
+        return [], []
+    peak = max((float(power) for _, power in bins), default=0.0)
+    scale = peak if peak > 1e-9 else 1.0
+    xs = [float(freq) for freq, _ in bins]
+    ys = [float(power) / scale for _, power in bins]
+    return xs, ys
+
+
+def _build_low_frequency_spectrum(
+    rows: list[dict[str, Any]],
+    *,
+    mapping: dict[str, str],
+    fs_hz: float,
+    width: int,
+    height: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    accel_by_axis = {
+        "Ax": _extract_series(rows, ("Ax", "AX")),
+        "Ay": _extract_series(rows, ("Ay", "AY")),
+        "Az": _extract_series(rows, ("Az", "AZ")),
+    }
+    lat_x = accel_by_axis[mapping["lateral_x"]]
+    lat_y = accel_by_axis[mapping["lateral_y"]]
+    vertical = accel_by_axis[mapping["vertical"]]
+    lat_x_mean = sum(lat_x) / len(lat_x) if lat_x else 0.0
+    lat_y_mean = sum(lat_y) / len(lat_y) if lat_y else 0.0
+    vertical_mean = sum(vertical) / len(vertical) if vertical else 0.0
+    lateral_signal = [
+        math.sqrt((lat_x[idx] - lat_x_mean) * (lat_x[idx] - lat_x_mean) + (lat_y[idx] - lat_y_mean) * (lat_y[idx] - lat_y_mean))
+        for idx in range(min(len(lat_x), len(lat_y)))
+    ]
+    vertical_signal = [value - vertical_mean for value in vertical]
+    lateral_bins = _scan_spectrum(lateral_signal, fs_hz=fs_hz, freq_min_hz=0.3, freq_max_hz=4.0, step_hz=0.1)
+    vertical_bins = _scan_spectrum(vertical_signal, fs_hz=fs_hz, freq_min_hz=0.3, freq_max_hz=4.0, step_hz=0.1)
+    x_lat, y_lat = _normalized_spectrum_values(lateral_bins)
+    x_vert, y_vert = _normalized_spectrum_values(vertical_bins)
+    plot = _plot_block(
+        "横向/竖向低频能量对比",
+        [
+            {"label": "横向摆动", "color": "#E4572E", "xs": x_lat, "ys": y_lat},
+            {"label": "竖向传递", "color": "#4C78A8", "xs": x_vert, "ys": y_vert},
+        ],
+        width=width,
+        height=height,
+    )
+    chart = _echarts_block(
+        "横向/竖向低频能量对比",
+        [
+            {"label": "横向摆动", "color": "#E4572E", "xs": x_lat, "ys": y_lat},
+            {"label": "竖向传递", "color": "#4C78A8", "xs": x_vert, "ys": y_vert},
+        ],
+    )
+    if isinstance(chart.get("option"), dict):
+        chart["option"]["xAxis"]["name"] = "频率 (Hz)"
+        chart["option"]["yAxis"]["name"] = "相对能量"
+        chart["option"]["title"]["text"] = "横向/竖向低频能量对比"
+        chart["option"]["legend"]["data"] = ["横向摆动", "竖向传递"]
+        for series, label in zip(chart["option"]["series"], ["横向摆动", "竖向传递"]):
+            series["name"] = label
+        chart["option_json"] = json.dumps(chart["option"], ensure_ascii=False)
+        chart["markdown"] = f"```echarts\n{chart['option_json']}\n```"
+    plot["title"] = "横向/竖向低频能量对比"
+    plot["markdown"] = f"![横向/竖向低频能量对比]({plot['data_uri']})"
+    return plot, chart
+
+
+def _build_insight_markdown(
+    *,
+    features: dict[str, Any],
+    diagnosis_result: dict[str, Any] | None,
+    mapping: dict[str, str],
+    used_new_only: bool,
+) -> str:
+    diag = diagnosis_result if isinstance(diagnosis_result, dict) else {}
+    summary = _diag_dict(diag, "summary")
+    rope_primary = _diag_dict(diag, "rope_primary")
+    screening = _diag_dict(diag, "screening")
+    rope_timeline = _diag_dict(diag, "rope_timeline")
+    rope_snapshot = _as_dict(rope_primary.get("feature_snapshot"))
+    rope_spectral = _as_dict(rope_primary.get("rope_spectral_snapshot"))
+
+    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    sampling_condition = str(features.get("sampling_condition", "unknown"))
+    axis_mode = str(summary.get("axis_mapping_mode", features.get("axis_mapping_mode", "default")))
+    axis_signature = str(summary.get("axis_mapping_signature", features.get("axis_mapping_signature", axis_mapping_signature(None))))
+    axis_short, axis_long = _axis_description(mapping, axis_mode)
+    screening_status = str(screening.get("status") or diag.get("status") or "unknown").strip() or "unknown"
+    data_quality = "这段数据适合按 40Hz 主链路做判断" if sampling_ok else f"这段数据只能保守解释，原因：{_sampling_condition_text(sampling_condition)}"
+    row_origin = "已优先使用真实采样点绘图" if used_new_only else "没有足够多的真实采样标记，本次直接使用原始记录绘图"
+    quality_rows = [
+        ["这段数据的采样频率", f"{float(features.get('fs_hz', 0.0)):.2f} Hz"],
+        ["这段数据的时长", f"{float(features.get('duration_s', 0.0)):.2f} 秒"],
+        ["可用数据量", f"{int(features.get('n', 0))} 个有效点 / {int(features.get('n_raw', 0))} 个原始点"],
+        ["当前是否适合判断", data_quality],
+        ["这张图使用的数据", row_origin],
+        ["系统识别到的数据条件", _sampling_condition_text(str(features.get("sampling_condition", "unknown")))],
+    ]
+
+    lateral_ratio = float(rope_snapshot.get("lateral_ratio", features.get("lateral_ratio", 0.0)))
+    lat_dom_freq_hz = float(rope_snapshot.get("lat_dom_freq_hz", rope_spectral.get("lat_dom_freq_hz", features.get("lat_dom_freq_hz", 0.0))))
+    lat_low_band_ratio = float(rope_spectral.get("lat_low_band_ratio", features.get("lat_low_band_ratio", 0.0)))
+    rope_rows = [
+        ["横向摆动强度", f"{lateral_ratio:.4f}", "越高，说明左右方向的晃动相对更明显"],
+        ["主摆动节奏", f"{lat_dom_freq_hz:.4f} Hz", "越低，越像慢速摆动而不是高频抖动"],
+        ["低频摆动占比", f"{lat_low_band_ratio:.4f}", "越高，说明能量更集中在慢摆区间"],
+        ["这一窗的钢丝绳异常信号", f"{float(rope_primary.get('rope_rule_score', 0.0)):.1f}", "这是钢丝绳专项规则给出的结果"],
+        ["关键证据命中情况", f"{int(rope_primary.get('core_hits', 0))}/3，强命中 {int(rope_primary.get('core_strong_hits', 0))}", "命中越多，越接近钢丝绳异常画像"],
+        ["系统当前判断", _screening_status_text(screening_status), "最终仍以统一决策层为准"],
+    ]
+
+    timeline_rows_markdown = ""
+    if rope_timeline:
+        timeline_rows = rope_timeline.get("rows", [])
+        recent = timeline_rows[-3:] if isinstance(timeline_rows, list) else []
+        recent_rows = [
+            [
+                str(item.get("file", "")),
+                "是" if bool(item.get("rope_raw_triggered") or item.get("raw_triggered")) else "否",
+                "是" if bool(item.get("rope_confirmed") or item.get("confirmed_triggered")) else "否",
+                f"{float(item.get('rope_score', item.get('score', 0.0))):.1f}",
+            ]
+            for item in recent
+            if isinstance(item, dict)
+        ]
+        if recent_rows:
+            timeline_rows_markdown = _markdown_table(["最近文件", "单窗命中", "连续确认", "分数"], recent_rows)
+
+    latest_confirmed = bool(rope_timeline.get("latest_confirmed", False))
+    confirmation_lines = [
+        f"- 连续确认窗口数：`{int(rope_timeline.get('confirm_windows', 0))}`" if rope_timeline else "- 当前只有单文件结果，暂无连续窗确认。",
+    ]
+    if rope_timeline:
+        confirmation_lines.extend(
+            [
+                f"- 已确认触发次数：`{int(rope_timeline.get('confirmed_trigger_count', 0))}`",
+                f"- 最新窗口是否确认：`{'是' if latest_confirmed else '否'}`",
+                f"- 当前确认逻辑：需要连续 `2` 个有效窗命中 rope 观察级或以上。",
+            ]
+        )
+
+    lines = [
+        "## 怎么读这些图",
+        "",
+        "### 传感器安装方向说明",
+        f"- {axis_short}。",
+        f"- 系统当前识别的安装方向是：`{axis_signature}`。",
+        f"- {axis_long}",
+        "",
+        "### 这段数据是否适合判断",
+        _markdown_table(["项目", "内容"], quality_rows),
+        "",
+        "### 钢丝绳异常信号卡片",
+        _markdown_table(["指标", "当前值", "解释"], rope_rows),
+        "",
+        "### 这类异常有没有连续出现",
+        *confirmation_lines,
+    ]
+    if timeline_rows_markdown:
+        lines.extend(["", timeline_rows_markdown])
+    return "\n".join(lines).strip()
+
+
 def load_waveform_rows(rows: list[dict[str, Any]], csv_text: str, csv_path: str) -> tuple[list[dict[str, Any]], str]:
     if rows:
         normalized = [{str(k): "" if v is None else str(v) for k, v in row.items()} for row in rows if isinstance(row, dict)]
@@ -210,9 +492,11 @@ def build_waveform_payload(
     width: int = 920,
     height: int = 320,
     max_points: int = 240,
+    diagnosis_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     effective_rows, used_new_only = _pick_effective_rows(rows)
-    features = build_feature_pack(rows)
+    mapping = _axis_mapping_for_waveforms(diagnosis_result)
+    features = build_feature_pack(rows, axis_mapping=mapping)
     ts_ms = _extract_ts_ms(effective_rows)
     if ts_ms:
         t0 = ts_ms[0]
@@ -286,6 +570,19 @@ def build_waveform_payload(
             {"label": "A_mag", "color": "#17BECF", "xs": x_mag, "ys": amag},
         ],
     )
+    low_frequency_spectrum, low_frequency_spectrum_chart = _build_low_frequency_spectrum(
+        effective_rows,
+        mapping=mapping,
+        fs_hz=float(features.get("fs_hz", 0.0)),
+        width=width,
+        height=height,
+    )
+    insight_markdown = _build_insight_markdown(
+        features=features,
+        diagnosis_result=diagnosis_result,
+        mapping=mapping,
+        used_new_only=used_new_only,
+    )
 
     markdown = "\n".join(
         [
@@ -319,16 +616,34 @@ def build_waveform_payload(
             "duration_s": round(float(features.get("duration_s", 0.0)), 4),
             "used_new_only": bool(features.get("used_new_only", False)),
             "effective_rows_from_new_frame": bool(used_new_only),
+            "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
+            "sampling_condition": str(features.get("sampling_condition", "unknown")),
+            "axis_mapping_mode": str(features.get("axis_mapping_mode", "default")),
+            "axis_mapping_signature": str(features.get("axis_mapping_signature", axis_mapping_signature(None))),
         },
+        "axis_mapping": {
+            "mode": str(features.get("axis_mapping_mode", "default")),
+            "signature": str(features.get("axis_mapping_signature", axis_mapping_signature(None))),
+            "vertical_axis": str(mapping["vertical"]),
+            "lateral_axes": [str(mapping["lateral_x"]), str(mapping["lateral_y"])],
+        },
+        "sampling": {
+            "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
+            "sampling_condition": str(features.get("sampling_condition", "unknown")),
+            "sampling_label": _sampling_condition_text(str(features.get("sampling_condition", "unknown"))),
+        },
+        "insight_markdown": insight_markdown,
         "plots": {
             "acceleration": acceleration,
             "gyroscope": gyroscope,
             "acceleration_magnitude": magnitude,
+            "low_frequency_spectrum": low_frequency_spectrum,
         },
         "echarts": {
             "acceleration": acceleration_chart,
             "gyroscope": gyroscope_chart,
             "acceleration_magnitude": magnitude_chart,
+            "low_frequency_spectrum": low_frequency_spectrum_chart,
         },
         "markdown": markdown,
         "markdown_echarts": markdown_echarts,

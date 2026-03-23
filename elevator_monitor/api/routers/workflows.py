@@ -80,7 +80,7 @@ def diagnosis_report(request: DiagnosisReportRequest) -> dict[str, Any]:
         except (ValueError, FileNotFoundError):
             rows, source = [], ""
         if rows:
-            waveform_payload = build_waveform_payload(rows, source=source)
+            waveform_payload = build_waveform_payload(rows, source=source, diagnosis_result=diagnosis)
 
     report_ctx = build_report_context(
         diagnosis_result=diagnosis,
