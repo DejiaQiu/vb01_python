@@ -27,16 +27,28 @@ if str(PROJECT_ROOT) not in sys.path:
 
 try:
     from ._base import (
+        baseline_mapping_match,
         build_clean_feature_baseline,
         build_feature_pack,
         build_result,
         clamp,
+        feature_context_reasons,
         load_rows,
         parse_float,
         ratio_to_100,
     )
 except ImportError:  # pragma: no cover
-    from _base import build_clean_feature_baseline, build_feature_pack, build_result, clamp, load_rows, parse_float, ratio_to_100
+    from _base import (
+        baseline_mapping_match,
+        build_clean_feature_baseline,
+        build_feature_pack,
+        build_result,
+        clamp,
+        feature_context_reasons,
+        load_rows,
+        parse_float,
+        ratio_to_100,
+    )
 
 
 FAULT_TYPE = "rope_tension_abnormal"
@@ -321,9 +333,12 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         + 0.20 * ratio_to_100(max(lat_peak_ratio, z_peak_ratio), 0.10, 0.50)
     )
 
-    baseline_stats = _baseline_stats(features)
+    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    baseline_payload = features.get("baseline") if isinstance(features.get("baseline"), dict) else None
+    baseline_match = baseline_mapping_match(features, baseline_payload)
+    baseline_stats = _baseline_stats(features) if baseline_match is not False else {}
     baseline_count = len([key for key in ROPE_BASELINE_KEYS if key in baseline_stats])
-    baseline_weight = _normalize_weight(baseline_count, len(ROPE_BASELINE_KEYS))
+    baseline_weight = _normalize_weight(baseline_count, len(ROPE_BASELINE_KEYS)) if baseline_match is not False else 0.0
     fallback = _branch_fallback_components(features)
     robust = _branch_robust_components(features, baseline_stats) if baseline_stats else {key: 0.0 for key in fallback.keys()}
     mixed = _mix_components(baseline_weight, robust, fallback)
@@ -346,23 +361,34 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     gate_rescue_score = rope_specific_score
     effective_run_score = max(run_state_score, gate_rescue_score)
     gate_mode = "running"
-    if effective_run_score < rule_cfg["watch_run_min"]:
+    if not sampling_ok:
+        gate_mode = "off_target_40hz"
+    elif effective_run_score < rule_cfg["watch_run_min"]:
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
         gate_mode = "weak_running_suppressed"
 
+    candidate_allowed = sampling_ok and baseline_weight > 0.0 and baseline_match is not False
     candidate_ready = (
+        candidate_allowed
+        and
         core_hits >= rule_cfg["candidate_hit_min"]
         and core_strong_hits >= rule_cfg["candidate_strong_min"]
         and effective_run_score >= rule_cfg["candidate_run_min"]
         and mixed["spiky_penalty"] <= rule_cfg["spiky_penalty_max"]
     )
     watch_ready = (
+        sampling_ok
+        and
         core_hits >= rule_cfg["watch_hit_min"]
         and effective_run_score >= rule_cfg["watch_run_min"]
     )
 
-    if candidate_ready:
+    if not sampling_ok:
+        confirm_mode = "off_target_sampling"
+        watch_signal = 18.0 + 4.0 * core_hits + 2.0 * core_strong_hits
+        rule_score = min(watch_signal, 44.0)
+    elif candidate_ready:
         confirm_mode = "candidate_hits_pass"
         candidate_signal = clamp(
             rule_cfg["candidate_score"] + 4.0 * max(0, core_strong_hits - rule_cfg["candidate_strong_min"]) + 2.0 * max(0, core_hits - rule_cfg["candidate_hit_min"]),
@@ -387,7 +413,10 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     return {
         "baseline_count": baseline_count,
         "baseline_weight": baseline_weight,
-        "baseline_mode": "robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback",
+        "baseline_mode": "mapping_mismatch_fallback"
+        if baseline_match is False and baseline_payload is not None
+        else ("robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback"),
+        "baseline_match": baseline_match,
         "run_state_score": float(run_state_score),
         "effective_run_score": float(effective_run_score),
         "gate_rescue_score": float(gate_rescue_score),
@@ -406,6 +435,7 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         "core_strong_hits": int(core_strong_hits),
         "dominant_branch": dominant_branch,
         "rule_score": float(rule_score),
+        "candidate_allowed": bool(candidate_allowed),
         "spectral_snapshot": {
             "lat_dom_freq_hz": round(mixed["lat_dom_freq_hz"], 4),
             "lat_peak_ratio": round(mixed["lat_peak_ratio"], 4),
@@ -444,6 +474,7 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
         f"run_state_score={analysis['run_state_score']:.2f}",
         f"effective_run_score={analysis['effective_run_score']:.2f}",
         f"gate_rescue_score={analysis['gate_rescue_score']:.2f}",
+        f"candidate_allowed={'true' if analysis['candidate_allowed'] else 'false'}",
         f"component_rope_lateral={analysis['mixed']['rope_lateral']:.2f}",
         f"component_rope_domfreq={analysis['mixed']['rope_domfreq']:.2f}",
         f"component_rope_lowband={analysis['mixed']['rope_lowband']:.2f}",
@@ -458,6 +489,7 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
         f"z_peak_ratio={analysis['mixed']['z_peak_ratio']:.4f}",
         f"z_low_band_ratio={analysis['mixed']['z_low_band_ratio']:.4f}",
     ]
+    reasons.extend(feature_context_reasons(features, baseline_match=analysis["baseline_match"]))
 
     result = build_result(
         fault_type=FAULT_TYPE,
@@ -472,6 +504,7 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
     result["rope_spectral_snapshot"] = dict(analysis["spectral_snapshot"])
     result["detector_family"] = "rope"
     result["baseline_mode"] = str(analysis["baseline_mode"])
+    result["baseline_match"] = analysis["baseline_match"]
     result["baseline_deviation_score"] = round(float(analysis["baseline_deviation_score"]), 2)
     result["rope_specific_score"] = round(float(analysis["rope_specific_score"]), 2)
     result["shared_abnormal_score"] = round(float(analysis["mixed"]["shared_abnormal"]), 2)
@@ -479,6 +512,9 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
     result["spiky_penalty_score"] = round(float(analysis["mixed"]["spiky_penalty"]), 2)
     result["run_state_score"] = round(float(analysis["run_state_score"]), 2)
     result["effective_run_score"] = round(float(analysis["effective_run_score"]), 2)
+    result["sampling_condition"] = str(features.get("sampling_condition", "unknown"))
+    result["axis_mapping_mode"] = str(features.get("axis_mapping_mode", "default"))
+    result["axis_mapping_signature"] = str(features.get("axis_mapping_signature", ""))
     result["core_hits"] = int(analysis["core_hits"])
     result["core_strong_hits"] = int(analysis["core_strong_hits"])
     result["specialized_ready"] = str(analysis["confirm_mode"]) == "candidate_hits_pass"

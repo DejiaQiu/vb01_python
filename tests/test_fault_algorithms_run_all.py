@@ -4,13 +4,13 @@ from unittest.mock import patch
 from report.fault_algorithms import run_all as run_all_module
 
 
-def _rows(count: int = 12):
+def _rows(count: int = 463, *, step_ms: int = 25):
     ts0 = 1_000_000
     rows = []
     for i in range(count):
         rows.append(
             {
-                "ts_ms": ts0 + i * 1000,
+                "ts_ms": ts0 + i * step_ms,
                 "Ax": 0.01,
                 "Ay": 0.02,
                 "Az": -0.98,
@@ -39,8 +39,15 @@ def _result(fault_type: str, score: float, *, triggered: bool, quality_factor: f
         "level": level,
         "triggered": triggered,
         "quality_factor": quality_factor,
-        "reasons": [f"score={score:.2f}"],
-        "feature_snapshot": {"n": 12},
+        "reasons": [f"score={score:.2f}", "sampling_condition=on_target_40hz"],
+        "feature_snapshot": {
+            "n": 463,
+            "sampling_ok_40hz": True,
+            "sampling_condition": "on_target_40hz",
+            "axis_mapping_signature": "vertical=Az|lateral_x=Ax|lateral_y=Ay",
+        },
+        "sampling_condition": "on_target_40hz",
+        "axis_mapping_signature": "vertical=Az|lateral_x=Ax|lateral_y=Ay",
     }
 
 
@@ -67,7 +74,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
         self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rope_looseness")
+        self.assertTrue(payload["summary"]["sampling_ok_40hz"])
 
     def test_rope_fault_can_be_promoted_to_candidate(self):
         fake_detectors = [
@@ -85,8 +92,11 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "baseline_mode": "robust_baseline",
                 "baseline_weight": 0.85,
                 "baseline_features": 3,
+                "baseline_match": True,
                 "run_state_score": 62.0,
                 "gate_mode": "running",
+                "sampling_ok_40hz": True,
+                "sampling_condition": "on_target_40hz",
             },
         ):
             with patch.object(run_all_module, "DETECTORS", fake_detectors):
@@ -97,8 +107,8 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
         self.assertEqual(len(payload["candidate_faults"]), 1)
         self.assertEqual(payload["candidate_faults"][0]["screening"], "high_confidence")
-        self.assertEqual(payload["watch_faults"][0]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["watch_faults"], [])
+        self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
 
     def test_auxiliary_rubber_fault_does_not_replace_primary_rope_status(self):
         fake_detectors = [
@@ -115,7 +125,6 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["candidate_faults"], [])
         self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["auxiliary_results"][0]["fault_type"], "rope_looseness")
         self.assertEqual(payload["top_fault"]["score"], 69.0)
 
     def test_low_quality_window_suppresses_candidates(self):
@@ -124,14 +133,15 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         ]
 
         with patch.object(run_all_module, "DETECTORS", fake_detectors):
-            payload = run_all_module.run_all_rows(_rows(count=4), source="inline_rows")
+            payload = run_all_module.run_all_rows(_rows(count=100), source="inline_rows")
 
         self.assertEqual(payload["screening"]["status"], "low_quality")
         self.assertEqual(payload["candidate_faults"], [])
         self.assertEqual(payload["top_candidate"], {})
         self.assertEqual(payload["top_fault"]["fault_type"], "rope_looseness")
+        self.assertFalse(payload["summary"]["sampling_ok_40hz"])
 
-    def test_rubber_candidate_can_outrank_watch_level_rope(self):
+    def test_rubber_candidate_stays_auxiliary_when_rope_only_mainline(self):
         fake_detectors = [
             lambda features: _result("rope_looseness", 46.0, triggered=False),
             lambda features: _result("rubber_hardening", 73.0, triggered=True),
@@ -147,19 +157,21 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "baseline_mode": "robust_baseline",
                 "baseline_weight": 0.85,
                 "baseline_features": 3,
+                "baseline_match": True,
                 "run_state_score": 66.0,
                 "gate_mode": "running",
+                "sampling_ok_40hz": True,
+                "sampling_condition": "on_target_40hz",
             },
         ):
             with patch.object(run_all_module, "DETECTORS", fake_detectors):
                 payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
-        self.assertEqual(payload["screening"]["status"], "candidate_faults")
-        self.assertEqual(payload["top_candidate"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["top_fault"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["primary_issue"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["screening"]["status"], "watch_only")
+        self.assertEqual(payload["top_fault"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["primary_issue"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["candidate_faults"], [])
         self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
 
     def test_system_watch_without_type_specific_signal_returns_unknown_watch(self):
         fake_detectors = [
@@ -177,8 +189,11 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "baseline_mode": "robust_baseline",
                 "baseline_weight": 0.85,
                 "baseline_features": 3,
+                "baseline_match": True,
                 "run_state_score": 61.0,
                 "gate_mode": "running",
+                "sampling_ok_40hz": True,
+                "sampling_condition": "on_target_40hz",
             },
         ):
             with patch.object(run_all_module, "DETECTORS", fake_detectors):

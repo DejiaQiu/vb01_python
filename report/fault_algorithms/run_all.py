@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
-    from ._base import build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
+    from ._base import TARGET_40HZ_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
     from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
 except ImportError:  # pragma: no cover
-    from _base import build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
+    from _base import TARGET_40HZ_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
     from detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
 
 
@@ -20,7 +20,7 @@ HIGH_CONFIDENCE_SCORE = 60.0
 WATCH_SCORE = 45.0
 HIGH_CONFIDENCE_QUALITY = 0.80
 WATCH_QUALITY = 0.60
-MIN_EFFECTIVE_SAMPLES = 8
+MIN_EFFECTIVE_SAMPLES = int(TARGET_40HZ_CONFIG["min_samples"])
 BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS))
 PRIMARY_DETECTOR: Callable[[dict[str, Any]], dict[str, Any]] = detect_rope_looseness
 AUXILIARY_DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
@@ -151,6 +151,8 @@ def _to_float(value: Any, default: float = 0.0) -> float:
 
 def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | None) -> dict[str, Any]:
     gate_cfg = SYSTEM_GATE_CONFIG
+    sampling_ok = bool(features.get("sampling_ok_40hz", False))
+    sampling_condition = str(features.get("sampling_condition", "unknown"))
     a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
     g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
     a_rms_ac = _to_float(features.get("a_rms_ac"))
@@ -162,9 +164,10 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     fallback_a_rms = ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
     fallback_a_p2p = ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
     fallback_g_std = ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
-    baseline_stats = _baseline_stats(baseline)
+    baseline_match = baseline_mapping_match(features, baseline)
+    baseline_stats = _baseline_stats(baseline) if baseline_match is not False else {}
     baseline_count = len([key for key in ("a_rms_ac", "a_p2p", "g_std") if key in baseline_stats])
-    baseline_weight = _normalize_weight(baseline_count, 3)
+    baseline_weight = _normalize_weight(baseline_count, 3) if baseline_match is not False else 0.0
     robust_a_rms = _z_to_100(_positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")))
     robust_a_p2p = _z_to_100(_positive_z(a_p2p, baseline_stats.get("a_p2p")))
     robust_g_std = _z_to_100(_positive_z(g_std, baseline_stats.get("g_std")))
@@ -183,7 +186,11 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     )
     gate_mode = "running"
     score = 0.0
-    if run_state_score < gate_cfg["run_watch_min"]:
+    if not sampling_ok:
+        gate_mode = "off_target_40hz"
+        status = "normal"
+        score = 0.0
+    elif run_state_score < gate_cfg["run_watch_min"]:
         gate_mode = "non_running_suppressed"
         status = "normal"
         score = 0.0
@@ -202,11 +209,16 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
         "status": status,
         "score": round(score, 2),
         "shared_abnormal_score": round(float(shared_score), 2),
-        "baseline_mode": "robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback",
+        "baseline_mode": "mapping_mismatch_fallback"
+        if baseline_match is False and baseline is not None
+        else ("robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback"),
         "baseline_weight": round(float(baseline_weight), 3),
         "baseline_features": baseline_count,
+        "baseline_match": baseline_match,
         "run_state_score": round(float(run_state_score), 2),
         "gate_mode": gate_mode,
+        "sampling_ok_40hz": sampling_ok,
+        "sampling_condition": sampling_condition,
     }
 
 
@@ -280,6 +292,8 @@ def _screen_detectors(
     candidates: list[dict[str, Any]] = []
     watch_faults: list[dict[str, Any]] = []
     for result in results:
+        if _family_for_fault_type(result.get("fault_type", "")) != "rope":
+            continue
         score = _score(result)
         quality = _quality(result)
         specialized_ready = bool(result.get("specialized_ready", bool(result.get("triggered", False))))
@@ -318,8 +332,9 @@ def run_all_rows(
     *,
     baseline: dict | None = None,
     baseline_summary: dict[str, Any] | None = None,
+    axis_mapping: dict[str, Any] | None = None,
 ) -> dict:
-    features = build_feature_pack(rows)
+    features = build_feature_pack(rows, axis_mapping=axis_mapping)
     detector_features = dict(features)
     if baseline is not None:
         detector_features["baseline"] = baseline
@@ -332,13 +347,22 @@ def run_all_rows(
     system_abnormality = _system_abnormality(detector_features, baseline)
 
     n_effective = int(features.get("n", 0))
-    quality_ok = n_effective >= SYSTEM_GATE_CONFIG["min_effective_samples"]
+    quality_ok = bool(features.get("sampling_ok_40hz", False))
     candidate_faults, watch_faults = _screen_detectors(
         detector_results,
         system_abnormality=system_abnormality,
         quality_ok=quality_ok,
     )
     top_candidate = candidate_faults[0] if candidate_faults else {}
+    baseline_match = baseline_mapping_match(features, baseline)
+
+    baseline_payload = dict(baseline_summary or {"mode": "disabled", "count": 0, "stats": 0})
+    if baseline is not None:
+        baseline_payload["mapping_match"] = baseline_match
+        baseline_payload["axis_mapping_signature"] = str(baseline.get("axis_mapping_signature", ""))
+        baseline_payload["axis_mapping_mode"] = str(baseline.get("axis_mapping_mode", "default"))
+    else:
+        baseline_payload["mapping_match"] = None
 
     if not quality_ok:
         screening_status = "low_quality"
@@ -371,8 +395,12 @@ def run_all_rows(
             "fs_hz": round(float(features.get("fs_hz", 0.0)), 4),
             "used_new_only": bool(features.get("used_new_only", False)),
             "new_ratio": round(float(features.get("new_ratio", 0.0)), 4),
+            "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
+            "sampling_condition": str(features.get("sampling_condition", "unknown")),
+            "axis_mapping_mode": str(features.get("axis_mapping_mode", "default")),
+            "axis_mapping_signature": str(features.get("axis_mapping_signature", "")),
         },
-        "baseline": baseline_summary or {"mode": "disabled", "count": 0, "stats": 0},
+        "baseline": baseline_payload,
         "screening": {
             "status": screening_status,
             "quality_ok": quality_ok,
@@ -380,6 +408,7 @@ def run_all_rows(
             "watch_min_score": SYSTEM_GATE_CONFIG["watch_score"],
             "candidate_count": len(candidate_faults),
             "watch_count": len(watch_faults),
+            "sampling_condition": str(features.get("sampling_condition", "unknown")),
         },
         "system_abnormality": system_abnormality,
         "rope_primary": {
@@ -392,6 +421,9 @@ def run_all_rows(
             "rope_spectral_snapshot": dict(rope_primary.get("rope_spectral_snapshot", {}))
             if isinstance(rope_primary.get("rope_spectral_snapshot"), dict)
             else {},
+            "sampling_condition": str(rope_primary.get("sampling_condition", features.get("sampling_condition", "unknown"))),
+            "axis_mapping_signature": str(rope_primary.get("axis_mapping_signature", features.get("axis_mapping_signature", ""))),
+            "baseline_match": rope_primary.get("baseline_match"),
         },
         "rubber_primary": dict(rubber_primary) if rubber_primary else {},
         "top_fault": top_fault,

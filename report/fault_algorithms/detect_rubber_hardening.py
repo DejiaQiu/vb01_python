@@ -16,9 +16,9 @@ from __future__ import annotations
 import math
 
 try:
-    from ._base import build_result, clamp, parse_float, ratio_to_100, run_detector_cli
+    from ._base import baseline_mapping_match, build_result, clamp, feature_context_reasons, parse_float, ratio_to_100, run_detector_cli
 except ImportError:  # pragma: no cover
-    from _base import build_result, clamp, parse_float, ratio_to_100, run_detector_cli
+    from _base import baseline_mapping_match, build_result, clamp, feature_context_reasons, parse_float, ratio_to_100, run_detector_cli
 
 
 FAULT_TYPE = "rubber_hardening"
@@ -169,9 +169,14 @@ def detect(features: dict) -> dict:
     ) / 3.0
 
     baseline_stats = _baseline_stats(features)
+    baseline_payload = features.get("baseline") if isinstance(features.get("baseline"), dict) else None
+    baseline_match = baseline_mapping_match(features, baseline_payload)
+    if baseline_match is False:
+        baseline_stats = {}
     baseline_count = len([key for key in RUBBER_BASELINE_KEYS if key in baseline_stats])
-    baseline_weight = _normalize_weight(baseline_count, len(RUBBER_BASELINE_KEYS))
-    baseline_mode = "robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback"
+    baseline_weight = _normalize_weight(baseline_count, len(RUBBER_BASELINE_KEYS)) if baseline_match is not False else 0.0
+    baseline_mode = "mapping_mismatch_fallback" if baseline_match is False and baseline_payload is not None else ("robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback")
+    sampling_ok = bool(features.get("sampling_ok_40hz", False))
 
     robust_vertical = _z_to_100((
         _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy"))
@@ -241,23 +246,34 @@ def detect(features: dict) -> dict:
     effective_run_score = max(run_state_score, gate_rescue_score)
 
     gate_mode = "running"
-    if effective_run_score < rule_cfg["watch_run_min"]:
+    if not sampling_ok:
+        gate_mode = "off_target_40hz"
+    elif effective_run_score < rule_cfg["watch_run_min"]:
         gate_mode = "non_running_suppressed"
     elif effective_run_score < 45.0:
         gate_mode = "weak_running_suppressed"
 
+    candidate_allowed = sampling_ok and baseline_weight > 0.0 and baseline_match is not False
     candidate_ready = (
+        candidate_allowed
+        and
         rubber_hits >= rule_cfg["candidate_hit_min"]
         and rubber_strong_hits >= rule_cfg["candidate_strong_min"]
         and effective_run_score >= rule_cfg["candidate_run_min"]
         and spiky_penalty <= rule_cfg["spiky_penalty_max"]
     )
     watch_ready = (
+        sampling_ok
+        and
         rubber_hits >= rule_cfg["watch_hit_min"]
         and effective_run_score >= rule_cfg["watch_run_min"]
     )
 
-    if candidate_ready:
+    if not sampling_ok:
+        confirm_mode = "off_target_sampling"
+        watch_signal = 18.0 + 4.0 * rubber_hits + 2.0 * rubber_strong_hits
+        score = min(watch_signal, 44.0)
+    elif candidate_ready:
         confirm_mode = "candidate_hits_pass"
         candidate_signal = clamp(
             rule_cfg["candidate_score"] + 4.0 * max(0, rubber_strong_hits - rule_cfg["candidate_strong_min"]) + 2.0 * max(0, rubber_hits - rule_cfg["candidate_hit_min"]),
@@ -292,6 +308,7 @@ def detect(features: dict) -> dict:
         f"gate_rescue_score={gate_rescue_score:.2f}",
         f"candidate_signal={candidate_signal:.2f}",
         f"watch_signal={watch_signal:.2f}",
+        f"candidate_allowed={'true' if candidate_allowed else 'false'}",
         f"core_hits={rubber_hits}",
         f"core_strong_hits={rubber_strong_hits}",
         f"component_vertical={vertical_component:.2f}",
@@ -310,6 +327,7 @@ def detect(features: dict) -> dict:
         f"az_cv={az_cv:.4f}",
         f"az_jerk_rms={az_jerk_rms:.6f}",
     ]
+    reasons.extend(feature_context_reasons(features, baseline_match=baseline_match))
 
     result = build_result(
         fault_type=FAULT_TYPE,
@@ -321,6 +339,7 @@ def detect(features: dict) -> dict:
     )
     result["detector_family"] = "rubber"
     result["baseline_mode"] = baseline_mode
+    result["baseline_match"] = baseline_match
     result["baseline_deviation_score"] = round(float(baseline_deviation_score), 2)
     result["rubber_specific_score"] = round(float(rubber_specific_score), 2)
     result["shared_abnormal_score"] = round(float(shared_abnormal_score), 2)
@@ -331,6 +350,9 @@ def detect(features: dict) -> dict:
     result["spiky_penalty_score"] = round(float(spiky_penalty), 2)
     result["run_state_score"] = round(float(run_state_score), 2)
     result["effective_run_score"] = round(float(effective_run_score), 2)
+    result["sampling_condition"] = str(features.get("sampling_condition", "unknown"))
+    result["axis_mapping_mode"] = str(features.get("axis_mapping_mode", "default"))
+    result["axis_mapping_signature"] = str(features.get("axis_mapping_signature", ""))
     result["core_hits"] = int(rubber_hits)
     result["core_strong_hits"] = int(rubber_strong_hits)
     result["specialized_ready"] = confirm_mode == "candidate_hits_pass"

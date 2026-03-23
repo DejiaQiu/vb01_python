@@ -442,50 +442,197 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: "import json\nfrom datetime import datetime\n\n\ndef _as_dict(value):\n\
-          \    return value if isinstance(value, dict) else {}\n\n\ndef _format_detected_at(value):\n\
-          \    try:\n        ts_ms = int(float(value))\n    except (TypeError, ValueError):\n\
-          \        return \"未提供\"\n    if ts_ms <= 0:\n        return \"未提供\"\n \
-          \   return datetime.fromtimestamp(ts_ms / 1000.0).strftime(\"%Y-%m-%d %H:%M:%S\")\n\n\n\
-          def _option_json(payload, key):\n    echarts = _as_dict(payload.get(\"echarts\"\
-          ))\n    item = _as_dict(echarts.get(key))\n    return str(item.get(\"option_json\"\
-          ) or \"\").strip()\n\n\n\
-          def _fault_text(primary, preferred, candidate):\n    fault_type = str(primary.get(\"\
-          fault_type\") or preferred.get(\"fault_type\") or candidate.get(\"fault_type\") or \"\
-          none\")\n    if fault_type == \"rope_tension_abnormal\":\n        return \"钢丝绳状态异常\"\
-          \n    if fault_type == \"rope_looseness\":\n        return \"钢丝绳松动或张力不均\"\
-          \n    if fault_type == \"rubber_hardening\":\n        return \"橡胶圈硬化\"\
-          \n    if fault_type == \"unknown\":\n        return \"异常类型待确认\"\n    return fault_type\n\n\n\
-          def _display_conclusion(status, fault_text):\n    if status == \"normal\":\n        return \"当前未见明确异常证据\"\n    if status == \"watch_only\" and fault_text == \"异常类型待确认\":\n        return \"已检测到异常，但类型待确认\"\n    return fault_text\n\n\n\
-          def main(body):\n    text = str(body or \"\").strip()\n    try:\n     \
-          \   payload = json.loads(text) if text else {}\n    except Exception:\n\
-          \        payload = {\"status\": \"unknown\", \"detail\": \"latest status payload is\
-          \ not valid json\"}\n\n    payload = _as_dict(payload)\n    status = str(payload.get(\"\
-          status\", \"unknown\"))\n    risk = _as_dict(payload.get(\"risk\"))\n  \
-          \  primary_issue = _as_dict(payload.get(\"primary_issue\"))\n    rope_primary = _as_dict(payload.get(\"rope_primary\"))\n    preferred = _as_dict(payload.get(\"\
-          preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
-          ))\n    auxiliary_results = payload.get(\"auxiliary_results\", []) if isinstance(payload.get(\"\
-          auxiliary_results\"), list) else []\n    first_aux = auxiliary_results[0] if auxiliary_results and isinstance(auxiliary_results[0], dict) else {}\n\
-          \    waveforms = _as_dict(payload.get(\"waveform_payload\"))\n    report_markdown_draft = str(payload.get(\"report_markdown_draft\", \"\")).strip()\n    requested_elevator_id = str(payload.get(\"requested_elevator_id\", \"\")).strip()\n    latest_file = str(payload.get(\"\
-          latest_file_name\") or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
-          generated_at_ms\"))\n    fault_type = _fault_text(primary_issue, preferred, top_candidate)\n\
-          \    display_conclusion = _display_conclusion(status, fault_type)\n\
-          \    fault_score = primary_issue.get(\"score\", preferred.get(\"score\", top_candidate.get(\"\
-          score\", 0)))\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"\
-          ))\n    risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    rope_branch = str(rope_primary.get(\"\
-          rope_branch\", \"\")).strip()\n    aux_fault = str(first_aux.get(\"fault_type\"\
-          , \"none\") or \"none\")\n    aux_score = first_aux.get(\"score\", 0)\n    summary\
-          \ = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
-          \ 分数={fault_score}; \"\n        f\"分支={rope_branch or 'unknown'}; 当前风险={risk_now};\
-          \ 24h风险={risk_24h}; 目标电梯={requested_elevator_id or 'default'}; 辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file};\
-          \ 后端报告={'已生成' if report_markdown_draft else '未生成'}\"\
-          \n    )\n    return {\n        \"status_json\": json.dumps(payload, ensure_ascii=False),\n\
-          \        \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
-          \        \"report_markdown_draft\": report_markdown_draft,\n\
-          \        \"display_conclusion\": display_conclusion,\n\
-          \        \"acc_chart\": _option_json(waveforms, \"acceleration\"),\n   \
-          \     \"gyro_chart\": _option_json(waveforms, \"gyroscope\"),\n        \"\
-          mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"),\n    }\n"
+        code: |
+          import html
+          import json
+          from datetime import datetime
+
+
+          def _as_dict(value):
+              return value if isinstance(value, dict) else {}
+
+
+          def _format_detected_at(value):
+              try:
+                  ts_ms = int(float(value))
+              except (TypeError, ValueError):
+                  return "未提供"
+              if ts_ms <= 0:
+                  return "未提供"
+              return datetime.fromtimestamp(ts_ms / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+          def _option_json(payload, key):
+              echarts = _as_dict(payload.get("echarts"))
+              item = _as_dict(echarts.get(key))
+              return str(item.get("option_json") or "").strip()
+
+
+          def _fault_text(primary, preferred, candidate):
+              fault_type = str(primary.get("fault_type") or preferred.get("fault_type") or candidate.get("fault_type") or "none")
+              if fault_type == "rope_tension_abnormal":
+                  return "钢丝绳状态异常"
+              if fault_type == "rope_looseness":
+                  return "钢丝绳松动或张力不均"
+              if fault_type == "rubber_hardening":
+                  return "橡胶圈硬化"
+              if fault_type == "unknown":
+                  return "异常类型待确认"
+              return fault_type
+
+
+          def _display_conclusion(status, fault_text):
+              if status == "normal":
+                  return "当前未见明确异常证据"
+              if status == "watch_only" and fault_text == "异常类型待确认":
+                  return "已检测到异常，但类型待确认"
+              return fault_text
+
+
+          def _extract_markdown_tables(text):
+              lines = str(text or "").splitlines()
+              tables = []
+              current = []
+              for line in lines:
+                  stripped = line.rstrip()
+                  if "|" in stripped and stripped.strip().startswith("|"):
+                      current.append(stripped)
+                      continue
+                  if current:
+                      if len(current) >= 2 and "---" in current[1]:
+                          tables.append(current)
+                      current = []
+              if current and len(current) >= 2 and "---" in current[1]:
+                  tables.append(current)
+              return tables
+
+
+          def _table_block_to_html(lines):
+              def split_row(line):
+                  return [part.strip() for part in line.strip().strip("|").split("|")]
+
+              headers = split_row(lines[0])
+              body_lines = lines[2:]
+              rows = []
+              for line in body_lines:
+                  if "|" not in line:
+                      continue
+                  parts = split_row(line)
+                  if len(parts) < len(headers):
+                      parts.extend([""] * (len(headers) - len(parts)))
+                  rows.append(parts[: len(headers)])
+              if not headers or not rows:
+                  return ""
+
+              parts = ["<table>", "<thead><tr>"]
+              for head in headers:
+                  parts.append(f"<th>{html.escape(head)}</th>")
+              parts.append("</tr></thead><tbody>")
+              for row in rows:
+                  parts.append("<tr>")
+                  for cell in row:
+                      parts.append(f"<td>{html.escape(cell)}</td>")
+                  parts.append("</tr>")
+              parts.append("</tbody></table>")
+              return "".join(parts)
+
+
+          def _tables_to_html(text):
+              blocks = _extract_markdown_tables(text)
+              html_tables = [_table_block_to_html(block) for block in blocks]
+              html_tables = [item for item in html_tables if item]
+              if not html_tables:
+                  return ""
+              return "\n\n".join(html_tables)
+
+
+          def _table_block_to_text(lines):
+              def split_row(line):
+                  return [part.strip() for part in line.strip().strip("|").split("|")]
+
+              headers = split_row(lines[0])
+              body_lines = lines[2:]
+              rows = []
+              for line in body_lines:
+                  if "|" not in line:
+                      continue
+                  parts = split_row(line)
+                  if len(parts) < len(headers):
+                      parts.extend([""] * (len(headers) - len(parts)))
+                  rows.append(parts[: len(headers)])
+              if not headers or not rows:
+                  return ""
+
+              widths = [len(head) for head in headers]
+              for row in rows:
+                  for idx, cell in enumerate(row):
+                      widths[idx] = max(widths[idx], len(cell))
+
+              def fmt_row(row):
+                  return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
+
+              parts = [fmt_row(headers), "-+-".join("-" * width for width in widths)]
+              parts.extend(fmt_row(row) for row in rows)
+              return "\n".join(parts)
+
+
+          def _tables_to_text(text):
+              blocks = _extract_markdown_tables(text)
+              rendered = []
+              for idx, block in enumerate(blocks, start=1):
+                  table_text = _table_block_to_text(block)
+                  if table_text:
+                      rendered.append(f"[表{idx}]\n{table_text}")
+              return "\n\n".join(rendered)
+
+
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {"status": "unknown", "detail": "latest status payload is not valid json"}
+
+              payload = _as_dict(payload)
+              status = str(payload.get("status", "unknown"))
+              risk = _as_dict(payload.get("risk"))
+              primary_issue = _as_dict(payload.get("primary_issue"))
+              rope_primary = _as_dict(payload.get("rope_primary"))
+              preferred = _as_dict(payload.get("preferred_issue"))
+              top_candidate = _as_dict(payload.get("top_candidate"))
+              auxiliary_results = payload.get("auxiliary_results", []) if isinstance(payload.get("auxiliary_results"), list) else []
+              first_aux = auxiliary_results[0] if auxiliary_results and isinstance(auxiliary_results[0], dict) else {}
+              waveforms = _as_dict(payload.get("waveform_payload"))
+              report_markdown_draft = str(payload.get("report_markdown_draft", "")).strip()
+              requested_elevator_id = str(payload.get("requested_elevator_id", "")).strip()
+              latest_file = str(payload.get("latest_file_name") or payload.get("latest_file") or "")
+              detected_at = _format_detected_at(payload.get("generated_at_ms"))
+              fault_type = _fault_text(primary_issue, preferred, top_candidate)
+              display_conclusion = _display_conclusion(status, fault_type)
+              fault_score = primary_issue.get("score", preferred.get("score", top_candidate.get("score", 0)))
+              risk_now = str(risk.get("risk_level_now", "unknown"))
+              risk_24h = str(risk.get("risk_level_24h", "unknown"))
+              rope_branch = str(rope_primary.get("rope_branch", "")).strip()
+              aux_fault = str(first_aux.get("fault_type", "none") or "none")
+              aux_score = first_aux.get("score", 0)
+              summary = (
+                  f"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion}; 分数={fault_score}; "
+                  f"分支={rope_branch or 'unknown'}; 当前风险={risk_now}; 24h风险={risk_24h}; 目标电梯={requested_elevator_id or 'default'}; "
+                  f"辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file}; 后端报告={'已生成' if report_markdown_draft else '未生成'}"
+              )
+              return {
+                  "status_json": json.dumps(payload, ensure_ascii=False),
+                  "status_summary": summary,
+                  "detected_at": detected_at,
+                  "report_markdown_draft": report_markdown_draft,
+                  "report_tables_html": _tables_to_html(report_markdown_draft),
+                  "report_tables_text": _tables_to_text(report_markdown_draft),
+                  "waveform_markdown": str(waveforms.get("markdown_echarts") or waveforms.get("markdown", "")).strip(),
+                  "display_conclusion": display_conclusion,
+                  "acc_chart": _option_json(waveforms, "acceleration"),
+                  "gyro_chart": _option_json(waveforms, "gyroscope"),
+                  "mag_chart": _option_json(waveforms, "acceleration_magnitude"),
+              }
         code_language: python3
         desc: ''
         outputs:
@@ -502,6 +649,15 @@ workflow:
             children: null
             type: string
           report_markdown_draft:
+            children: null
+            type: string
+          report_tables_html:
+            children: null
+            type: string
+          report_tables_text:
+            children: null
+            type: string
+          waveform_markdown:
             children: null
             type: string
           acc_chart:
@@ -586,6 +742,16 @@ workflow:
           ## 后端报告草稿
 
           {{#status_parse.report_markdown_draft#}}
+
+          {{#status_parse.report_tables_html#}}
+
+          ## 关键对比数据
+
+          ```text
+          {{#status_parse.report_tables_text#}}
+          ```
+
+          {{#status_parse.waveform_markdown#}}
 
           ## 波形图
 

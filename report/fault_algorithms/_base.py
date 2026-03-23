@@ -10,6 +10,17 @@ from typing import Any, Callable, Optional
 
 
 EPS = 1e-9
+DEFAULT_AXIS_MAPPING = {
+    "vertical": "Az",
+    "lateral_x": "Ax",
+    "lateral_y": "Ay",
+}
+TARGET_40HZ_CONFIG = {
+    "fs_min_hz": 36.0,
+    "fs_max_hz": 44.0,
+    "min_samples": 320,
+    "min_duration_s": 8.0,
+}
 
 
 def parse_float(value: Any) -> Optional[float]:
@@ -63,15 +74,125 @@ def robust_fit(values: list[float]) -> tuple[float, float]:
     return float(med), float(scale)
 
 
+def normalize_axis_mapping(axis_mapping: dict[str, Any] | None) -> dict[str, str]:
+    raw = axis_mapping if isinstance(axis_mapping, dict) else {}
+    requested = {
+        "vertical": str(raw.get("vertical") or DEFAULT_AXIS_MAPPING["vertical"]).strip(),
+        "lateral_x": str(raw.get("lateral_x") or DEFAULT_AXIS_MAPPING["lateral_x"]).strip(),
+        "lateral_y": str(raw.get("lateral_y") or DEFAULT_AXIS_MAPPING["lateral_y"]).strip(),
+    }
+    allowed = ("Ax", "Ay", "Az")
+    normalized: dict[str, str] = {}
+    used: set[str] = set()
+    for key in ("vertical", "lateral_x", "lateral_y"):
+        value = requested.get(key, "")
+        if value not in allowed or value in used:
+            preferred = DEFAULT_AXIS_MAPPING[key]
+            if preferred not in used:
+                value = preferred
+            else:
+                value = next(candidate for candidate in allowed if candidate not in used)
+        normalized[key] = value
+        used.add(value)
+    return normalized
+
+
+def axis_mapping_signature(axis_mapping: dict[str, Any] | None) -> str:
+    mapping = normalize_axis_mapping(axis_mapping)
+    return "|".join(
+        [
+            f"vertical={mapping['vertical']}",
+            f"lateral_x={mapping['lateral_x']}",
+            f"lateral_y={mapping['lateral_y']}",
+        ]
+    )
+
+
+def evaluate_sampling_condition(n: int, fs_hz: float, duration_s: float) -> dict[str, Any]:
+    if int(n) <= 0:
+        return {
+            "sampling_ok_40hz": False,
+            "sampling_condition": "no_effective_samples",
+        }
+    if float(fs_hz) <= EPS or float(duration_s) <= EPS:
+        return {
+            "sampling_ok_40hz": False,
+            "sampling_condition": "invalid_timing",
+        }
+    if float(fs_hz) < float(TARGET_40HZ_CONFIG["fs_min_hz"]) or float(fs_hz) > float(TARGET_40HZ_CONFIG["fs_max_hz"]):
+        return {
+            "sampling_ok_40hz": False,
+            "sampling_condition": "off_target_40hz",
+        }
+    if int(n) < int(TARGET_40HZ_CONFIG["min_samples"]):
+        return {
+            "sampling_ok_40hz": False,
+            "sampling_condition": "insufficient_samples_40hz",
+        }
+    if float(duration_s) < float(TARGET_40HZ_CONFIG["min_duration_s"]):
+        return {
+            "sampling_ok_40hz": False,
+            "sampling_condition": "short_window_40hz",
+        }
+    return {
+        "sampling_ok_40hz": True,
+        "sampling_condition": "on_target_40hz",
+    }
+
+
+def baseline_mapping_match(features: dict[str, Any], baseline: dict[str, Any] | None) -> bool | None:
+    if not isinstance(baseline, dict):
+        return None
+    current_signature = str(features.get("axis_mapping_signature", "")).strip()
+    current_mode = str(features.get("axis_mapping_mode", "default")).strip() or "default"
+    baseline_signature = str(baseline.get("axis_mapping_signature", "")).strip()
+    if not baseline_signature:
+        return current_mode == "default"
+    if baseline_signature == "mixed":
+        return False
+    return baseline_signature == current_signature
+
+
+def feature_context_reasons(features: dict[str, Any], *, baseline_match: bool | None = None) -> list[str]:
+    reasons = [
+        f"sampling_condition={str(features.get('sampling_condition', 'unknown'))}",
+        f"axis_mapping={str(features.get('axis_mapping_signature', axis_mapping_signature(None)))}",
+    ]
+    if baseline_match is None:
+        reasons.append("baseline_match=na")
+    else:
+        reasons.append(f"baseline_match={'true' if baseline_match else 'false'}")
+    return reasons
+
+
+def _baseline_axis_metadata(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    signatures = [str(row.get("axis_mapping_signature", "")).strip() for row in rows if str(row.get("axis_mapping_signature", "")).strip()]
+    modes = [str(row.get("axis_mapping_mode", "")).strip() for row in rows if str(row.get("axis_mapping_mode", "")).strip()]
+    unique_signatures = sorted(set(signatures))
+    unique_modes = sorted(set(modes))
+    if not unique_signatures:
+        return {
+            "axis_mapping_signature": axis_mapping_signature(None),
+            "axis_mapping_mode": "default",
+        }
+    signature = unique_signatures[0] if len(unique_signatures) == 1 else "mixed"
+    mode = unique_modes[0] if len(unique_modes) == 1 else "mixed"
+    return {
+        "axis_mapping_signature": signature,
+        "axis_mapping_mode": mode or "default",
+    }
+
+
 def build_feature_baseline(
     feature_rows: list[dict[str, Any]],
     keys: tuple[str, ...],
     *,
     min_samples: int = 8,
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     """按选定特征构建基线统计，用于后续“相对健康状态”的判断。"""
     eligible_rows = [row for row in feature_rows if parse_int(row.get("n")) is not None and int(parse_int(row.get("n")) or 0) >= min_samples]
     rows_to_use = eligible_rows if len(eligible_rows) >= 3 else feature_rows
+    axis_meta = _baseline_axis_metadata(rows_to_use)
     stats: dict[str, dict[str, float]] = {}
     for key in keys:
         values: list[float] = []
@@ -95,6 +216,8 @@ def build_feature_baseline(
         "eligible_count": int(len(eligible_rows)),
         "min_samples": int(min_samples),
         "keys": list(keys),
+        "axis_mapping_signature": str(axis_meta.get("axis_mapping_signature", axis_mapping_signature(None))),
+        "axis_mapping_mode": str(axis_meta.get("axis_mapping_mode", "default")),
     }
 
 
@@ -451,26 +574,51 @@ def _channel_feature_pack(xs: list[float], fs_hz: float) -> dict[str, float]:
     }
 
 
-def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
+def build_feature_pack(rows: list[dict[str, str]], axis_mapping: dict[str, Any] | None = None) -> dict[str, Any]:
     raw_n = len(rows)
     effective_rows, used_new_only, new_ratio = _pick_effective_rows(rows)
     n = len(effective_rows)
 
-    ax = _extract_series(effective_rows, ("Ax", "AX"))
-    ay = _extract_series(effective_rows, ("Ay", "AY"))
-    az = _extract_series(effective_rows, ("Az", "AZ"))
+    mapping = normalize_axis_mapping(axis_mapping)
+    axis_mapping_mode = "explicit" if isinstance(axis_mapping, dict) and bool(axis_mapping) else "default"
+    axis_signature = axis_mapping_signature(mapping)
 
-    gx = _extract_series(effective_rows, ("Gx", "GX"))
-    gy = _extract_series(effective_rows, ("Gy", "GY"))
-    gz = _extract_series(effective_rows, ("Gz", "GZ"))
+    accel_by_axis = {
+        "Ax": _extract_series(effective_rows, ("Ax", "AX")),
+        "Ay": _extract_series(effective_rows, ("Ay", "AY")),
+        "Az": _extract_series(effective_rows, ("Az", "AZ")),
+    }
+    gyro_by_axis = {
+        "Ax": _extract_series(effective_rows, ("Gx", "GX")),
+        "Ay": _extract_series(effective_rows, ("Gy", "GY")),
+        "Az": _extract_series(effective_rows, ("Gz", "GZ")),
+    }
+    displacement_by_axis = {
+        "Ax": _extract_series(effective_rows, ("sx", "DX")),
+        "Ay": _extract_series(effective_rows, ("sy", "DY")),
+        "Az": _extract_series(effective_rows, ("sz", "DZ")),
+    }
+    frequency_by_axis = {
+        "Ax": _extract_series(effective_rows, ("fx", "HZX")),
+        "Ay": _extract_series(effective_rows, ("fy", "HZY")),
+        "Az": _extract_series(effective_rows, ("fz", "HZZ")),
+    }
+
+    ax = accel_by_axis[mapping["lateral_x"]]
+    ay = accel_by_axis[mapping["lateral_y"]]
+    az = accel_by_axis[mapping["vertical"]]
+
+    gx = gyro_by_axis[mapping["lateral_x"]]
+    gy = gyro_by_axis[mapping["lateral_y"]]
+    gz = gyro_by_axis[mapping["vertical"]]
 
     t_arr = _extract_series(effective_rows, ("t", "TEMPB", "TEMP"))
-    sx = _extract_series(effective_rows, ("sx", "DX"))
-    sy = _extract_series(effective_rows, ("sy", "DY"))
-    sz = _extract_series(effective_rows, ("sz", "DZ"))
-    fx = _extract_series(effective_rows, ("fx", "HZX"))
-    fy = _extract_series(effective_rows, ("fy", "HZY"))
-    fz = _extract_series(effective_rows, ("fz", "HZZ"))
+    sx = displacement_by_axis[mapping["lateral_x"]]
+    sy = displacement_by_axis[mapping["lateral_y"]]
+    sz = displacement_by_axis[mapping["vertical"]]
+    fx = frequency_by_axis[mapping["lateral_x"]]
+    fy = frequency_by_axis[mapping["lateral_y"]]
+    fz = frequency_by_axis[mapping["vertical"]]
 
     # 合成幅值先把三轴原始波形压成“整体振动/整体转动”两个基底，
     # 后续共同异常强度特征大多从这里展开。
@@ -485,6 +633,7 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
     ts_ms = _extract_ts_ms(effective_rows)
     duration_s = _duration_seconds(ts_ms)
     fs_hz = float((n - 1) / duration_s) if n > 1 and duration_s > EPS else 0.0
+    sampling_profile = evaluate_sampling_condition(n, fs_hz, duration_s)
 
     # 总体幅值特征：先回答“相对健康基线，整体振动是不是变强了”。
     a_std = safe_std(a_mag)
@@ -557,6 +706,10 @@ def build_feature_pack(rows: list[dict[str, str]]) -> dict[str, Any]:
         "new_ratio": float(new_ratio),
         "duration_s": float(duration_s),
         "fs_hz": float(fs_hz),
+        "sampling_ok_40hz": bool(sampling_profile["sampling_ok_40hz"]),
+        "sampling_condition": str(sampling_profile["sampling_condition"]),
+        "axis_mapping_mode": axis_mapping_mode,
+        "axis_mapping_signature": axis_signature,
         "a_mean": float(a_mean),
         "a_std": float(a_std),
         "a_rms_ac": float(a_rms_ac),
@@ -640,6 +793,9 @@ def build_result(
             "n": n,
             "fs_hz": round(fs_hz, 3),
             "duration_s": round(float(features.get("duration_s", 0.0)), 3),
+            "sampling_ok_40hz": bool(features.get("sampling_ok_40hz", False)),
+            "sampling_condition": str(features.get("sampling_condition", "unknown")),
+            "axis_mapping_signature": str(features.get("axis_mapping_signature", axis_mapping_signature(None))),
             "a_std": round(float(features.get("a_std", 0.0)), 6),
             "a_p2p": round(float(features.get("a_p2p", 0.0)), 6),
             "a_crest": round(float(features.get("a_crest", 0.0)), 4),

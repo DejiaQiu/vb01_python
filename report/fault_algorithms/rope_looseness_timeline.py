@@ -6,14 +6,15 @@ import re
 from pathlib import Path
 
 try:
-    from ._base import build_feature_baseline, build_feature_pack, load_rows
-    from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect
+    from ._base import TARGET_40HZ_CONFIG, build_clean_feature_baseline, build_feature_pack, load_rows
+    from .detect_rope_looseness import ROPE_BASELINE_KEYS, ROPE_RULE_CONFIG, detect
 except ImportError:  # pragma: no cover
-    from _base import build_feature_baseline, build_feature_pack, load_rows
-    from detect_rope_looseness import ROPE_BASELINE_KEYS, detect
+    from _base import TARGET_40HZ_CONFIG, build_clean_feature_baseline, build_feature_pack, load_rows
+    from detect_rope_looseness import ROPE_BASELINE_KEYS, ROPE_RULE_CONFIG, detect
 
 
 _PATTERN = re.compile(r"vibration_30s_\d{8}_(\d{6})\.csv$")
+TIMELINE_MIN_SAMPLES = int(TARGET_40HZ_CONFIG["min_samples"])
 
 
 def _hhmmss(path: Path) -> str:
@@ -45,7 +46,7 @@ def _build_baseline_from_dir(input_dir: Path, start_hhmm: str, end_hhmm: str) ->
         feature_rows.append(build_feature_pack(rows))
     if not feature_rows:
         return None
-    baseline = build_feature_baseline(feature_rows, ROPE_BASELINE_KEYS, min_samples=8)
+    baseline = build_clean_feature_baseline(feature_rows, ROPE_BASELINE_KEYS, min_samples=TIMELINE_MIN_SAMPLES)
     baseline["source"] = str(input_dir)
     baseline["window"] = {"start_hhmm": start_hhmm, "end_hhmm": end_hhmm}
     return baseline
@@ -132,7 +133,8 @@ def run_timeline(
             features["baseline"] = baseline_payload
         result = detect(features)
         score = float(result.get("score", 0.0))
-        raw_triggered = score >= float(min_score)
+        sampling_ok = bool(features.get("sampling_ok_40hz", False))
+        raw_triggered = sampling_ok and score >= float(min_score)
 
         rows.append(
             {
@@ -145,7 +147,12 @@ def run_timeline(
                 "confirmed_triggered": False,
                 "quality_factor": float(result.get("quality_factor", 0.0)),
                 "n": int(result.get("feature_snapshot", {}).get("n", 0)),
-                "skip_confirmation": bool(result.get("quality_factor", 0.0) < 0.45 or result.get("feature_snapshot", {}).get("n", 0) < 8),
+                "sampling_condition": str(features.get("sampling_condition", "unknown")),
+                "skip_confirmation": bool(
+                    not sampling_ok
+                    or result.get("quality_factor", 0.0) < 0.45
+                    or result.get("feature_snapshot", {}).get("n", 0) < TIMELINE_MIN_SAMPLES
+                ),
             }
         )
 
@@ -173,7 +180,7 @@ def main() -> int:
     parser.add_argument("--baseline-dir", default="", help="可选：健康样本目录")
     parser.add_argument("--baseline-start-hhmm", default="0000", help="基线开始时间 HHMM")
     parser.add_argument("--baseline-end-hhmm", default="2359", help="基线结束时间 HHMM")
-    parser.add_argument("--min-score", type=float, default=60.0, help="单窗触发分数阈值")
+    parser.add_argument("--min-score", type=float, default=float(ROPE_RULE_CONFIG["watch_score"]), help="单窗触发分数阈值")
     parser.add_argument("--confirm-windows", type=int, default=2, help="连续命中窗口数")
     parser.add_argument("--pretty", action="store_true", help="格式化输出JSON")
     args = parser.parse_args()

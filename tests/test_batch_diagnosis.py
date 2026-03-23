@@ -54,7 +54,17 @@ def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, 
     watch_faults = watch_faults or []
     candidate_faults = [top_candidate] if top_candidate else []
     return {
-        "summary": {"n_raw": 12, "n_effective": 12, "fs_hz": 1.0, "used_new_only": True, "new_ratio": 1.0},
+        "summary": {
+            "n_raw": 463,
+            "n_effective": 463,
+            "fs_hz": 40.0,
+            "used_new_only": True,
+            "new_ratio": 1.0,
+            "sampling_ok_40hz": True,
+            "sampling_condition": "on_target_40hz",
+            "axis_mapping_mode": "default",
+            "axis_mapping_signature": "vertical=Az|lateral_x=Ax|lateral_y=Ay",
+        },
         "baseline": {"mode": "disabled", "count": 0, "stats": 0},
         "screening": {
             "status": status,
@@ -63,6 +73,7 @@ def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, 
             "watch_min_score": 45.0,
             "candidate_count": len(candidate_faults),
             "watch_count": len(watch_faults),
+            "sampling_condition": "on_target_40hz",
         },
         "rope_primary": {
             "fault_type": top_fault.get("fault_type", ""),
@@ -152,6 +163,9 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("report_markdown_draft", payload)
             self.assertIn("一句话结论", payload["report_markdown_draft"])
             self.assertIn("连续窗口确认", payload["report_markdown_draft"])
+            self.assertIn("## 波形图", payload["report_markdown_draft"])
+            self.assertIn("waveform_payload", payload)
+            self.assertIn("markdown_echarts", payload["waveform_payload"])
             self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rope_looseness")
             self.assertTrue(latest_json.exists())
             self.assertTrue(history_jsonl.exists())
@@ -163,6 +177,10 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("report_markdown_draft", latest_payload)
             self.assertIn("当前最值得关注的问题", latest_payload["report_markdown_draft"])
             self.assertIn("连续窗口确认", latest_payload["report_markdown_draft"])
+            self.assertIn("## 波形图", latest_payload["report_markdown_draft"])
+            self.assertIn("waveform_payload", latest_payload)
+            self.assertIn("markdown_echarts", latest_payload["waveform_payload"])
+            self.assertIn("waveform_payload", latest_payload["latest_result"])
 
             history_lines = history_jsonl.read_text(encoding="utf-8").strip().splitlines()
             self.assertEqual(len(history_lines), 1)

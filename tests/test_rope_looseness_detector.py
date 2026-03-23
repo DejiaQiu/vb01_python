@@ -4,87 +4,167 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from report.fault_algorithms._base import build_feature_pack
+from report.fault_algorithms._base import axis_mapping_signature, build_feature_pack
 from report.fault_algorithms.detect_rope_looseness import ROPE_RULE_CONFIG, detect
 from report.fault_algorithms.rope_looseness_timeline import run_timeline
 
 
-def _baseline(scale_factor: float = 1.0) -> dict:
+def _baseline(scale_factor: float = 1.0, *, mapping_signature: str | None = None) -> dict:
     scaled = {
         "a_rms_ac": (0.0050, 0.0009),
         "a_p2p": (0.0280, 0.0060),
         "g_std": (0.0220, 0.0045),
-        "zc_rate_hz": (1.80, 0.42),
         "lateral_ratio": (1.05, 0.09),
         "ag_corr": (0.14, 0.035),
         "gx_ax_corr": (0.14, 0.035),
         "gy_ay_corr": (0.14, 0.035),
-        "peak_rate_hz": (0.30, 0.08),
+        "peak_rate_hz": (0.20, 0.08),
         "a_crest": (1.60, 0.25),
         "a_kurt": (0.70, 0.40),
+        "energy_z_over_xy": (0.92, 0.12),
+        "az_p2p": (0.037, 0.005),
+        "az_jerk_rms": (0.013, 0.002),
+        "lat_dom_freq_hz": (1.10, 0.18),
+        "lat_low_band_ratio": (0.40, 0.08),
+        "z_dom_freq_hz": (2.60, 0.25),
+        "z_peak_ratio": (0.20, 0.05),
     }
+    amplitude_keys = {"a_rms_ac", "a_p2p", "g_std", "az_p2p", "az_jerk_rms"}
     stats = {}
     for key, (median, scale) in scaled.items():
-        multiplier = scale_factor if key in {"a_rms_ac", "a_p2p", "g_std"} else 1.0
+        multiplier = scale_factor if key in amplitude_keys else 1.0
         stats[key] = {
             "median": median * multiplier,
             "scale": scale * multiplier,
         }
-    return {"stats": stats, "count": 48}
+    return {
+        "stats": stats,
+        "count": 48,
+        "axis_mapping_signature": mapping_signature or axis_mapping_signature(None),
+        "axis_mapping_mode": "default",
+    }
 
 
 def _feature_overrides(**kwargs):
     base = {
-        "n": 24,
-        "fs_hz": 5.0,
-        "duration_s": 24.0,
+        "n": 463,
+        "fs_hz": 40.0,
+        "duration_s": 11.55,
+        "sampling_ok_40hz": True,
+        "sampling_condition": "on_target_40hz",
+        "axis_mapping_mode": "default",
+        "axis_mapping_signature": axis_mapping_signature(None),
         "used_new_only": True,
         "a_mean": 1.0,
         "g_mean": 0.90,
-        "a_rms_ac": 0.002,
-        "a_p2p": 0.015,
-        "a_std": 0.003,
-        "a_crest": 1.3,
-        "a_kurt": 0.5,
-        "g_std": 0.010,
-        "peak_rate_hz": 0.1,
-        "zc_rate_hz": 4.0,
-        "lateral_ratio": 1.0,
-        "ag_corr": 0.10,
-        "gx_ax_corr": 0.10,
-        "gy_ay_corr": 0.10,
-        "jerk_rms": 0.002,
-        "rope_disable_model": True,
+        "a_rms_ac": 0.0052,
+        "a_p2p": 0.029,
+        "a_std": 0.006,
+        "a_crest": 1.62,
+        "a_kurt": 0.72,
+        "g_std": 0.0225,
+        "peak_rate_hz": 0.20,
+        "zc_rate_hz": 1.60,
+        "lateral_ratio": 1.08,
+        "ag_corr": 0.15,
+        "gx_ax_corr": 0.16,
+        "gy_ay_corr": 0.15,
+        "jerk_rms": 0.003,
+        "energy_z_over_xy": 0.92,
+        "az_p2p": 0.038,
+        "az_cv": 0.82,
+        "az_jerk_rms": 0.013,
+        "lat_dom_freq_hz": 1.10,
+        "lat_peak_ratio": 0.28,
+        "lat_low_band_ratio": 0.42,
+        "z_dom_freq_hz": 2.60,
+        "z_peak_ratio": 0.20,
+        "z_low_band_ratio": 0.26,
     }
     base.update(kwargs)
     return base
 
 
-class TestRopeLoosenessDetector(unittest.TestCase):
-    def test_feature_pack_extracts_frequency_features(self):
-        rows = []
-        ts0 = 1_000_000
-        for i in range(120):
-            angle = (2.0 * math.pi * i) / 20.0
+def _rows(*, rotated: bool = False) -> list[dict[str, float]]:
+    rows = []
+    ts0 = 1_000_000
+    for i in range(480):
+        t = i / 40.0
+        lateral_x = 0.09 * math.sin(2.0 * math.pi * 0.8 * t)
+        lateral_y = 0.05 * math.cos(2.0 * math.pi * 0.8 * t)
+        vertical = -0.98 + 0.03 * math.sin(2.0 * math.pi * 2.6 * t)
+        gx = 0.35 * math.sin(2.0 * math.pi * 0.8 * t)
+        gy = 0.24 * math.cos(2.0 * math.pi * 0.8 * t)
+        gz = 0.12 * math.sin(2.0 * math.pi * 2.6 * t)
+        if rotated:
             rows.append(
                 {
-                    "ts_ms": ts0 + i * 50,
-                    "Ax": 0.03 * math.sin(angle),
-                    "Ay": 0.02 * math.cos(angle),
-                    "Az": -0.98 + 0.08 * math.sin(angle),
+                    "ts_ms": ts0 + i * 25,
+                    "Ax": vertical,
+                    "Ay": lateral_x,
+                    "Az": lateral_y,
+                    "Gx": gz,
+                    "Gy": gx,
+                    "Gz": gy,
+                    "is_new_frame": 1,
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "ts_ms": ts0 + i * 25,
+                    "Ax": lateral_x,
+                    "Ay": lateral_y,
+                    "Az": vertical,
+                    "Gx": gx,
+                    "Gy": gy,
+                    "Gz": gz,
+                    "is_new_frame": 1,
+                }
+            )
+    return rows
+
+
+class TestRopeLoosenessDetector(unittest.TestCase):
+    def test_feature_pack_extracts_frequency_features_at_40hz(self):
+        features = build_feature_pack(_rows())
+
+        self.assertTrue(features["sampling_ok_40hz"])
+        self.assertGreater(features["lat_dom_freq_hz"], 0.3)
+        self.assertGreater(features["lat_low_band_ratio"], 0.10)
+
+    def test_axis_mapping_recovers_rotated_installation(self):
+        original = build_feature_pack(_rows())
+        rotated = build_feature_pack(
+            _rows(rotated=True),
+            axis_mapping={"vertical": "Ax", "lateral_x": "Ay", "lateral_y": "Az"},
+        )
+
+        self.assertAlmostEqual(original["lateral_ratio"], rotated["lateral_ratio"], places=3)
+        self.assertAlmostEqual(original["lat_dom_freq_hz"], rotated["lat_dom_freq_hz"], places=1)
+        self.assertAlmostEqual(original["lat_low_band_ratio"], rotated["lat_low_band_ratio"], places=3)
+        self.assertEqual(rotated["axis_mapping_mode"], "explicit")
+
+    def test_feature_pack_marks_off_target_sampling(self):
+        rows = []
+        ts0 = 1_000_000
+        for i in range(24):
+            rows.append(
+                {
+                    "ts_ms": ts0 + i * 1000,
+                    "Ax": 0.01,
+                    "Ay": 0.02,
+                    "Az": -0.98,
                     "Gx": 0.1,
                     "Gy": 0.2,
                     "Gz": 0.3,
                     "is_new_frame": 1,
                 }
             )
-
         features = build_feature_pack(rows)
 
-        self.assertGreater(features["lat_dom_freq_hz"], 0.4)
-        self.assertGreater(features["lat_peak_ratio"], 0.01)
-        self.assertGreater(features["z_dom_freq_hz"], 0.4)
-        self.assertGreater(features["z_peak_ratio"], 0.01)
+        self.assertFalse(features["sampling_ok_40hz"])
+        self.assertEqual(features["sampling_condition"], "off_target_40hz")
 
     def test_scale_invariant_when_using_baseline(self):
         base_result = detect(
@@ -95,12 +175,13 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                 a_rms_ac=0.016,
                 a_p2p=0.092,
                 g_std=0.095,
-                zc_rate_hz=0.35,
-                peak_rate_hz=0.12,
-                lateral_ratio=1.88,
+                peak_rate_hz=0.10,
+                lateral_ratio=1.90,
                 ag_corr=0.46,
                 gx_ax_corr=0.52,
                 gy_ay_corr=0.45,
+                lat_dom_freq_hz=0.72,
+                lat_low_band_ratio=0.76,
                 a_crest=1.75,
                 a_kurt=1.10,
             )
@@ -113,12 +194,13 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                 a_rms_ac=0.032,
                 a_p2p=0.184,
                 g_std=0.190,
-                zc_rate_hz=0.35,
-                peak_rate_hz=0.12,
-                lateral_ratio=1.88,
+                peak_rate_hz=0.10,
+                lateral_ratio=1.90,
                 ag_corr=0.46,
                 gx_ax_corr=0.52,
                 gy_ay_corr=0.45,
+                lat_dom_freq_hz=0.72,
+                lat_low_band_ratio=0.76,
                 a_crest=1.75,
                 a_kurt=1.10,
             )
@@ -126,101 +208,75 @@ class TestRopeLoosenessDetector(unittest.TestCase):
 
         self.assertGreaterEqual(base_result["score"], ROPE_RULE_CONFIG["watch_score"], msg=base_result)
         self.assertGreaterEqual(scaled_result["score"], ROPE_RULE_CONFIG["watch_score"], msg=scaled_result)
-        self.assertFalse(base_result["triggered"], msg=base_result)
-        self.assertFalse(scaled_result["triggered"], msg=scaled_result)
-        self.assertTrue(base_result["type_watch_ready"], msg=base_result)
-        self.assertTrue(scaled_result["type_watch_ready"], msg=scaled_result)
         self.assertLess(abs(base_result["score"] - scaled_result["score"]), 4.0)
-        self.assertIn("baseline_mode=robust_baseline", base_result["reasons"])
-        self.assertIn("baseline_mode=robust_baseline", scaled_result["reasons"])
+        self.assertTrue(base_result["triggered"], msg=base_result)
+        self.assertTrue(scaled_result["triggered"], msg=scaled_result)
+        self.assertIn("baseline_match=true", base_result["reasons"])
 
     def test_baseline_normal_like_sample_stays_suppressed(self):
-        result = detect(
-            _feature_overrides(
-                baseline=_baseline(1.0),
-                a_mean=1.0,
-                g_mean=0.90,
-                a_rms_ac=0.0052,
-                a_p2p=0.029,
-                g_std=0.0225,
-                zc_rate_hz=1.75,
-                peak_rate_hz=0.30,
-                lateral_ratio=1.08,
-                ag_corr=0.15,
-                gx_ax_corr=0.16,
-                gy_ay_corr=0.15,
-                a_crest=1.62,
-                a_kurt=0.72,
-            )
-        )
+        result = detect(_feature_overrides(baseline=_baseline()))
 
         self.assertLess(result["score"], 35.0, msg=result)
         self.assertFalse(result["triggered"], msg=result)
 
-    def test_fallback_mode_triggers_for_clear_low_frequency_sway(self):
+    def test_baseline_mapping_mismatch_caps_to_watch(self):
         result = detect(
             _feature_overrides(
-                a_mean=1.0,
-                g_mean=0.90,
-                a_rms_ac=0.015,
-                a_p2p=0.090,
-                g_std=0.085,
-                zc_rate_hz=0.40,
-                peak_rate_hz=0.15,
+                baseline=_baseline(mapping_signature="vertical=Ax|lateral_x=Ay|lateral_y=Az"),
+                a_rms_ac=0.016,
+                a_p2p=0.092,
+                g_std=0.095,
+                peak_rate_hz=0.10,
                 lateral_ratio=1.90,
-                ag_corr=0.48,
-                gx_ax_corr=0.53,
-                gy_ay_corr=0.44,
-                a_crest=1.70,
-                a_kurt=1.00,
+                ag_corr=0.46,
+                gx_ax_corr=0.52,
+                gy_ay_corr=0.45,
+                lat_dom_freq_hz=0.72,
+                lat_low_band_ratio=0.76,
             )
         )
 
         self.assertGreaterEqual(result["score"], ROPE_RULE_CONFIG["watch_score"], msg=result)
+        self.assertLess(result["score"], ROPE_RULE_CONFIG["candidate_score"], msg=result)
         self.assertFalse(result["triggered"], msg=result)
-        self.assertTrue(result["type_watch_ready"], msg=result)
-        self.assertIn("confirm=watch_hits_pass", result["reasons"])
-        self.assertIn("baseline_mode=self_normalized_fallback", result["reasons"])
+        self.assertIn("baseline_match=false", result["reasons"])
 
-    def test_structural_baseline_mode_can_rescue_low_amplitude_slack(self):
+    def test_off_target_sampling_does_not_trigger_candidate(self):
         result = detect(
             _feature_overrides(
-                baseline=_baseline(1.0),
-                a_mean=1.0,
-                g_mean=1.05,
-                a_rms_ac=0.0064,
-                a_p2p=0.025,
-                g_std=0.078,
-                zc_rate_hz=0.18,
-                peak_rate_hz=0.05,
-                lateral_ratio=2.75,
-                ag_corr=0.18,
-                gx_ax_corr=0.82,
-                gy_ay_corr=0.31,
-                a_crest=1.02,
-                a_kurt=0.10,
+                baseline=_baseline(),
+                n=120,
+                fs_hz=10.0,
+                duration_s=11.9,
+                sampling_ok_40hz=False,
+                sampling_condition="off_target_40hz",
+                a_rms_ac=0.016,
+                a_p2p=0.092,
+                g_std=0.095,
+                lateral_ratio=1.90,
+                lat_dom_freq_hz=0.72,
+                lat_low_band_ratio=0.76,
             )
         )
 
-        self.assertGreaterEqual(result["score"], ROPE_RULE_CONFIG["watch_score"], msg=result)
+        self.assertLess(result["score"], ROPE_RULE_CONFIG["watch_score"], msg=result)
         self.assertFalse(result["triggered"], msg=result)
-        self.assertTrue(result["type_watch_ready"], msg=result)
-        self.assertIn("confirm=watch_hits_pass", result["reasons"])
+        self.assertIn("sampling_condition=off_target_40hz", result["reasons"])
 
     def test_spiky_impact_signature_does_not_trigger_rope_looseness(self):
         result = detect(
             _feature_overrides(
-                a_mean=1.0,
-                g_mean=0.90,
+                baseline=_baseline(),
                 a_rms_ac=0.018,
                 a_p2p=0.140,
                 g_std=0.080,
-                zc_rate_hz=8.0,
                 peak_rate_hz=5.5,
                 lateral_ratio=0.85,
                 ag_corr=0.12,
                 gx_ax_corr=0.10,
                 gy_ay_corr=0.09,
+                lat_dom_freq_hz=3.60,
+                lat_low_band_ratio=0.18,
                 a_crest=4.8,
                 a_kurt=8.0,
             )
@@ -232,13 +288,10 @@ class TestRopeLoosenessDetector(unittest.TestCase):
     def test_vertical_rubber_like_signature_stays_below_candidate(self):
         result = detect(
             _feature_overrides(
-                baseline=_baseline(1.0),
-                a_mean=1.0,
-                g_mean=0.90,
+                baseline=_baseline(),
                 a_rms_ac=0.013,
                 a_p2p=0.085,
                 g_std=0.060,
-                zc_rate_hz=5.8,
                 peak_rate_hz=0.35,
                 lateral_ratio=0.82,
                 ag_corr=0.12,
@@ -247,8 +300,8 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                 energy_z_over_xy=1.95,
                 az_p2p=0.26,
                 az_cv=1.10,
-                az_jerk_rms=0.95,
-                lat_dom_freq_hz=4.20,
+                az_jerk_rms=0.095,
+                lat_dom_freq_hz=3.20,
                 lat_peak_ratio=0.18,
                 lat_low_band_ratio=0.16,
                 z_dom_freq_hz=2.10,
@@ -276,14 +329,21 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                     "level": "warning" if score >= 60.0 else "normal",
                     "reasons": ["mode=test"],
                     "quality_factor": 1.0,
-                    "feature_snapshot": {"n": 24},
+                    "feature_snapshot": {"n": 463},
                 }
                 for score in scores
             ]
 
             with (
                 patch("report.fault_algorithms.rope_looseness_timeline.load_rows", return_value=[]),
-                patch("report.fault_algorithms.rope_looseness_timeline.build_feature_pack", return_value={"n": 24}),
+                patch(
+                    "report.fault_algorithms.rope_looseness_timeline.build_feature_pack",
+                    return_value={
+                        "n": 463,
+                        "sampling_ok_40hz": True,
+                        "sampling_condition": "on_target_40hz",
+                    },
+                ),
                 patch("report.fault_algorithms.rope_looseness_timeline.detect", side_effect=fake_results),
             ):
                 payload = run_timeline(

@@ -9,6 +9,7 @@ from typing import Any
 
 from .maintenance_workflow import build_maintenance_package
 from .reporting_service import build_report_context, render_report_markdown
+from .waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms._base import build_clean_feature_baseline, build_feature_pack, load_rows
 from report.fault_algorithms.detect_rope_looseness import ROPE_BASELINE_KEYS, ROPE_RULE_CONFIG
 from report.fault_algorithms.run_all import MIN_EFFECTIVE_SAMPLES, run_all_rows
@@ -145,7 +146,7 @@ def _build_baseline_summary(
 def _compact_fault(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict) or not payload:
         return {}
-    return {
+    compacted = {
         "fault_type": str(payload.get("fault_type", "unknown")),
         "score": round(_safe_float(payload.get("score"), 0.0), 2),
         "level": str(payload.get("level", "normal")),
@@ -153,6 +154,10 @@ def _compact_fault(payload: dict[str, Any]) -> dict[str, Any]:
         "quality_factor": round(_safe_float(payload.get("quality_factor"), 0.0), 3),
         "screening": str(payload.get("screening", "")),
     }
+    for key in ("sampling_condition", "axis_mapping_signature", "baseline_mode", "baseline_match"):
+        if key in payload:
+            compacted[key] = payload.get(key)
+    return compacted
 
 
 def _is_rope_fault_type(fault_type: Any) -> bool:
@@ -250,7 +255,7 @@ def _apply_rope_timeline_confirmation(history: list[dict[str, Any]], *, confirm_
         rope_primary = row.get("rope_primary", {}) if isinstance(row.get("rope_primary"), dict) else {}
         rope_score = _safe_float(rope_primary.get("score"), 0.0)
         summary = row.get("summary", {}) if isinstance(row.get("summary"), dict) else {}
-        quality_ok = int(summary.get("n_effective", 0)) >= MIN_EFFECTIVE_SAMPLES
+        quality_ok = bool(summary.get("sampling_ok_40hz", False))
         timeline_rows.append(
             {
                 "file": str(row.get("name", "")),
@@ -258,6 +263,7 @@ def _apply_rope_timeline_confirmation(history: list[dict[str, Any]], *, confirm_
                 "skip_confirmation": not quality_ok,
                 "rope_confirmed": False,
                 "rope_score": round(rope_score, 2),
+                "sampling_condition": str(summary.get("sampling_condition", "unknown")),
             }
         )
     _apply_consecutive_confirmation(timeline_rows, confirm_windows=confirm_windows)
@@ -380,7 +386,7 @@ def _build_report_outputs(
     rope_timeline: dict[str, Any],
     latest_file: Path,
     input_dir: str,
-) -> tuple[dict[str, Any], str]:
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
     elevator_id = _infer_elevator_id(
         latest_result.get("input"),
         latest_file,
@@ -440,13 +446,18 @@ def _build_report_outputs(
     report_diagnosis = dict(latest_result)
     report_diagnosis["baseline_reference"] = baseline_reference
     report_diagnosis["rope_timeline"] = rope_timeline
+    try:
+        waveform_rows, waveform_source = load_waveform_rows([], "", str(latest_file))
+        waveform_payload = build_waveform_payload(waveform_rows, source=waveform_source) if waveform_rows else {}
+    except Exception:
+        waveform_payload = {}
 
     report_context = build_report_context(
         diagnosis_result=report_diagnosis,
         maintenance_package=maintenance_package,
         language="zh-CN",
         report_style="standard",
-        waveform_payload={},
+        waveform_payload=waveform_payload,
     )
     report_markdown_draft = render_report_markdown(report_context)
     report_summary = {
@@ -456,7 +467,7 @@ def _build_report_outputs(
         "priority": str(report_context.get("priority", "")),
         "language": str(report_context.get("language", "zh-CN")),
     }
-    return report_summary, report_markdown_draft
+    return report_summary, report_markdown_draft, waveform_payload
 
 
 def _write_latest_json(path: str, payload: dict[str, Any]) -> str:
@@ -547,7 +558,7 @@ def run_batch_diagnosis(
     latest_issue = _preferred_issue(latest_result)
     latest_status = str((latest_result.get("screening") or {}).get("status", "normal"))
     risk = _build_risk(history)
-    report_summary, report_markdown_draft = _build_report_outputs(
+    report_summary, report_markdown_draft, waveform_payload = _build_report_outputs(
         latest_result=latest_result,
         latest_issue=latest_issue,
         latest_status=latest_status,
@@ -567,12 +578,12 @@ def run_batch_diagnosis(
         "latest_file": str(latest_file),
         "latest_file_name": latest_file.name,
         "status": latest_status,
-        "baseline": baseline_summary,
+        "baseline": dict(latest_result.get("baseline", {})) if isinstance(latest_result.get("baseline"), dict) else baseline_summary,
         "primary_issue": _compact_fault(latest_result.get("primary_issue", {}) or latest_issue),
         "preferred_issue": _compact_fault(latest_issue),
         "rope_primary": _compact_fault(latest_result.get("rope_primary", {})),
         "rubber_primary": _compact_fault(latest_result.get("rubber_primary", {})),
-        "system_abnormality": _compact_fault(latest_result.get("system_abnormality", {})),
+        "system_abnormality": dict(latest_result.get("system_abnormality", {})) if isinstance(latest_result.get("system_abnormality"), dict) else {},
         "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
         "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
         "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
@@ -581,16 +592,21 @@ def run_batch_diagnosis(
         "recommendation": _status_recommendation(latest_status, str(latest_issue.get("fault_type", "unknown"))),
         "report_summary": report_summary,
         "report_markdown_draft": report_markdown_draft,
+        "waveform_payload": waveform_payload,
         "latest_result": {
             "summary": dict(latest_result.get("summary", {})) if isinstance(latest_result.get("summary"), dict) else {},
+            "baseline": dict(latest_result.get("baseline", {})) if isinstance(latest_result.get("baseline"), dict) else {},
             "screening": dict(latest_result.get("screening", {})) if isinstance(latest_result.get("screening"), dict) else {},
             "rope_primary": dict(latest_result.get("rope_primary", {})) if isinstance(latest_result.get("rope_primary"), dict) else {},
+            "rubber_primary": dict(latest_result.get("rubber_primary", {})) if isinstance(latest_result.get("rubber_primary"), dict) else {},
+            "system_abnormality": dict(latest_result.get("system_abnormality", {})) if isinstance(latest_result.get("system_abnormality"), dict) else {},
             "top_fault": _compact_fault(latest_result.get("top_fault", {})),
             "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
             "candidate_faults": [_compact_fault(item) for item in latest_result.get("candidate_faults", []) if isinstance(item, dict)],
             "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
             "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
             "rope_timeline": rope_timeline,
+            "waveform_payload": waveform_payload,
         },
         "history": history,
     }
