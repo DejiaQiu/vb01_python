@@ -90,7 +90,7 @@ Typical answer style:
 - abnormal conclusion
 - abnormal clues when present
 - whether to continue observation or arrange inspection
-- then fixed charts in this order: low-frequency spectrum, acceleration, gyroscope, acceleration magnitude
+- then fixed charts in this order: full-frequency spectrum, low-frequency spectrum, acceleration, gyroscope, acceleration magnitude
 
 ### Branch B: CSV uploaded
 
@@ -98,7 +98,7 @@ Purpose:
 
 - Upload a CSV
 - run the candidate-fault screening chain
-- draw a low-frequency spectrum chart plus waveform charts in Dify
+- draw full-frequency and low-frequency spectrum charts plus waveform charts in Dify
 - generate a readable report
 - this branch should tolerate empty user text and rely on the uploaded file as the primary input
 

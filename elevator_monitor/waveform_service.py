@@ -318,13 +318,23 @@ def _normalized_spectrum_values(bins: list[tuple[float, float]]) -> tuple[list[f
     return xs, ys
 
 
-def _build_low_frequency_spectrum(
+def _spectrum_upper_bound(fs_hz: float, requested_max_hz: float) -> float:
+    if fs_hz <= 0.0:
+        return 0.0
+    return max(0.0, min(float(requested_max_hz), float(fs_hz) / 2.0 - 0.05))
+
+
+def _build_spectrum_comparison(
     rows: list[dict[str, Any]],
     *,
     mapping: dict[str, str],
     fs_hz: float,
     width: int,
     height: int,
+    freq_min_hz: float,
+    freq_max_hz: float,
+    step_hz: float,
+    title: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     accel_by_axis = {
         "Ax": _extract_series(rows, ("Ax", "AX")),
@@ -342,13 +352,24 @@ def _build_low_frequency_spectrum(
         for idx in range(min(len(lat_x), len(lat_y)))
     ]
     vertical_signal = [value - vertical_mean for value in vertical]
-    lateral_bins = _scan_spectrum(lateral_signal, fs_hz=fs_hz, freq_min_hz=0.3, freq_max_hz=4.0, step_hz=0.1)
-    vertical_bins = _scan_spectrum(vertical_signal, fs_hz=fs_hz, freq_min_hz=0.3, freq_max_hz=4.0, step_hz=0.1)
+    lateral_bins = _scan_spectrum(
+        lateral_signal,
+        fs_hz=fs_hz,
+        freq_min_hz=freq_min_hz,
+        freq_max_hz=freq_max_hz,
+        step_hz=step_hz,
+    )
+    vertical_bins = _scan_spectrum(
+        vertical_signal,
+        fs_hz=fs_hz,
+        freq_min_hz=freq_min_hz,
+        freq_max_hz=freq_max_hz,
+        step_hz=step_hz,
+    )
     x_lat, y_lat = _normalized_spectrum_values(lateral_bins)
     x_vert, y_vert = _normalized_spectrum_values(vertical_bins)
-    spectrum_title = "低频频谱图：横向/竖向能量对比"
     plot = _plot_block(
-        spectrum_title,
+        title,
         [
             {"label": "横向摆动", "color": "#E4572E", "xs": x_lat, "ys": y_lat},
             {"label": "竖向传递", "color": "#4C78A8", "xs": x_vert, "ys": y_vert},
@@ -357,7 +378,7 @@ def _build_low_frequency_spectrum(
         height=height,
     )
     chart = _echarts_block(
-        spectrum_title,
+        title,
         [
             {"label": "横向摆动", "color": "#E4572E", "xs": x_lat, "ys": y_lat},
             {"label": "竖向传递", "color": "#4C78A8", "xs": x_vert, "ys": y_vert},
@@ -366,15 +387,61 @@ def _build_low_frequency_spectrum(
     if isinstance(chart.get("option"), dict):
         chart["option"]["xAxis"]["name"] = "频率 (Hz)"
         chart["option"]["yAxis"]["name"] = "相对能量"
-        chart["option"]["title"]["text"] = spectrum_title
+        chart["option"]["title"]["text"] = title
         chart["option"]["legend"]["data"] = ["横向摆动", "竖向传递"]
         for series, label in zip(chart["option"]["series"], ["横向摆动", "竖向传递"]):
             series["name"] = label
         chart["option_json"] = json.dumps(chart["option"], ensure_ascii=False)
         chart["markdown"] = f"```echarts\n{chart['option_json']}\n```"
-    plot["title"] = spectrum_title
-    plot["markdown"] = f"![{spectrum_title}]({plot['data_uri']})"
+    plot["title"] = title
+    plot["markdown"] = f"![{title}]({plot['data_uri']})"
     return plot, chart
+
+
+def _build_low_frequency_spectrum(
+    rows: list[dict[str, Any]],
+    *,
+    mapping: dict[str, str],
+    fs_hz: float,
+    width: int,
+    height: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    # 低频图专门放大慢摆区间，便于观察 0.3~4Hz 的横向/竖向能量分布。
+    return _build_spectrum_comparison(
+        rows,
+        mapping=mapping,
+        fs_hz=fs_hz,
+        width=width,
+        height=height,
+        freq_min_hz=0.3,
+        freq_max_hz=4.0,
+        step_hz=0.1,
+        title="低频频谱图：横向/竖向能量对比",
+    )
+
+
+def _build_full_frequency_spectrum(
+    rows: list[dict[str, Any]],
+    *,
+    mapping: dict[str, str],
+    fs_hz: float,
+    width: int,
+    height: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    visible_max_hz = _spectrum_upper_bound(fs_hz, 20.0)
+    # 全频图用于回答“这份数据到底能看到多高频率”，标题里直接写出当前可见上限。
+    title = f"全频频谱图：横向/竖向能量对比（当前上限 {visible_max_hz:.1f}Hz）"
+    return _build_spectrum_comparison(
+        rows,
+        mapping=mapping,
+        fs_hz=fs_hz,
+        width=width,
+        height=height,
+        freq_min_hz=0.3,
+        freq_max_hz=20.0,
+        step_hz=0.1,
+        title=title,
+    )
 
 
 def _build_insight_markdown(
@@ -401,6 +468,7 @@ def _build_insight_markdown(
         ["这段数据的采样频率", f"{float(features.get('fs_hz', 0.0)):.2f} Hz"],
         ["这段数据的时长", f"{float(features.get('duration_s', 0.0)):.2f} 秒"],
         ["可用数据量", f"{int(features.get('n', 0))} 个有效点 / {int(features.get('n_raw', 0))} 个原始点"],
+        ["这次频谱可见上限", f"{_spectrum_upper_bound(float(features.get('fs_hz', 0.0)), 20.0):.1f} Hz"],
         ["当前是否适合判断", data_quality],
         ["这张图使用的数据", row_origin],
         ["系统识别到的数据条件", _sampling_condition_text(str(features.get("sampling_condition", "unknown")))],
@@ -584,6 +652,13 @@ def build_waveform_payload(
         width=width,
         height=height,
     )
+    full_frequency_spectrum, full_frequency_spectrum_chart = _build_full_frequency_spectrum(
+        effective_rows,
+        mapping=mapping,
+        fs_hz=float(features.get("fs_hz", 0.0)),
+        width=width,
+        height=height,
+    )
     insight_markdown = _build_insight_markdown(
         features=features,
         diagnosis_result=diagnosis_result,
@@ -593,7 +668,9 @@ def build_waveform_payload(
 
     markdown = "\n".join(
         [
-            "## 波形图与低频频谱图",
+            "## 波形图与频谱图",
+            "",
+            full_frequency_spectrum["markdown"],
             "",
             low_frequency_spectrum["markdown"],
             "",
@@ -606,7 +683,9 @@ def build_waveform_payload(
     )
     markdown_echarts = "\n".join(
         [
-            "## 波形图与低频频谱图",
+            "## 波形图与频谱图",
+            "",
+            full_frequency_spectrum_chart["markdown"],
             "",
             low_frequency_spectrum_chart["markdown"],
             "",
@@ -650,12 +729,14 @@ def build_waveform_payload(
             "acceleration": acceleration,
             "gyroscope": gyroscope,
             "acceleration_magnitude": magnitude,
+            "full_frequency_spectrum": full_frequency_spectrum,
             "low_frequency_spectrum": low_frequency_spectrum,
         },
         "echarts": {
             "acceleration": acceleration_chart,
             "gyroscope": gyroscope_chart,
             "acceleration_magnitude": magnitude_chart,
+            "full_frequency_spectrum": full_frequency_spectrum_chart,
             "low_frequency_spectrum": low_frequency_spectrum_chart,
         },
         "markdown": markdown,

@@ -68,7 +68,7 @@ workflow:
         - local_file
         - remote_url
       number_limits: 3
-    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；可在问题里写“查看 002 号梯状态”。上传电梯振动 CSV 后，可只传文件、不输入文字，系统会自动执行规则诊断、绘制低频频谱图与三轴波形，并输出综合报告。
+    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；可在问题里写“查看 002 号梯状态”。上传电梯振动 CSV 后，可只传文件、不输入文字，系统会自动执行规则诊断、绘制全频/低频频谱图与三轴波形，并输出综合报告。
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:

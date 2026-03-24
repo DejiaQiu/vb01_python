@@ -117,9 +117,11 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("acceleration", payload["plots"])
         self.assertIn("gyroscope", payload["plots"])
         self.assertIn("acceleration_magnitude", payload["plots"])
+        self.assertIn("full_frequency_spectrum", payload["plots"])
         self.assertIn("low_frequency_spectrum", payload["plots"])
         self.assertIn("echarts", payload)
         self.assertIn("acceleration", payload["echarts"])
+        self.assertIn("full_frequency_spectrum", payload["echarts"])
         self.assertIn("low_frequency_spectrum", payload["echarts"])
         self.assertIn("insight_markdown", payload)
         self.assertIn("传感器安装方向说明", payload["insight_markdown"])
@@ -223,6 +225,7 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("plots", payload["waveform_payload"])
         self.assertIn("markdown_echarts", payload["waveform_payload"])
         self.assertIn("insight_markdown", payload["waveform_payload"])
+        self.assertIn("full_frequency_spectrum", payload["waveform_payload"]["echarts"])
         self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
         self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
 
@@ -300,6 +303,7 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("plots", payload["waveform_payload"])
         self.assertIn("markdown_echarts", payload["waveform_payload"])
         self.assertIn("insight_markdown", payload["waveform_payload"])
+        self.assertIn("full_frequency_spectrum", payload["waveform_payload"]["echarts"])
         self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
 
     def test_diagnosis_report_keeps_preferred_issue_empty_when_status_is_normal(self):
