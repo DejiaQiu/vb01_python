@@ -510,9 +510,8 @@ workflow:
           ,\n        \"preferred_issue\",\n        \"top_candidate\",\n        \"\
           watch_faults\",\n        \"auxiliary_results\",\n        \"risk\",\n   \
           \     \"recommendation\",\n        \"latest_file\",\n        \"latest_file_name\"\
-          ,\n        \"requested_elevator_id\",\n        \"rope_primary\",\n     \
-          \   \"rubber_primary\",\n        \"system_abnormality\",\n        \"rope_timeline\"\
-          ,\n        \"report_summary\",\n    ]\n    compact = {}\n    for key in\
+          ,\n        \"requested_elevator_id\",\n        \"system_abnormality\",\n\
+          \        \"report_summary\",\n    ]\n    compact = {}\n    for key in\
           \ keep_keys:\n        if key in payload:\n            compact[key] = payload.get(key)\n\
           \    return compact\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
           \    try:\n        payload = json.loads(text) if text else {}\n    except\
@@ -520,12 +519,9 @@ workflow:
           latest status payload is not valid json\"}\n\n    payload = _as_dict(payload)\n\
           \    status = str(payload.get(\"status\", \"unknown\"))\n    risk = _as_dict(payload.get(\"\
           risk\"))\n    primary_issue = _as_dict(payload.get(\"primary_issue\"))\n\
-          \    rope_primary = _as_dict(payload.get(\"rope_primary\"))\n    preferred\
-          \ = _as_dict(payload.get(\"preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"\
-          top_candidate\"))\n    auxiliary_results = payload.get(\"auxiliary_results\"\
-          , []) if isinstance(payload.get(\"auxiliary_results\"), list) else []\n\
-          \    first_aux = auxiliary_results[0] if auxiliary_results and isinstance(auxiliary_results[0],\
-          \ dict) else {}\n    waveforms = _as_dict(payload.get(\"waveform_payload\"\
+          \    system_abnormality = _as_dict(payload.get(\"system_abnormality\"))\n\
+          \    preferred = _as_dict(payload.get(\"preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"\
+          top_candidate\"))\n    waveforms = _as_dict(payload.get(\"waveform_payload\"\
           ))\n    report_markdown_draft = str(payload.get(\"report_markdown_draft\"\
           , \"\")).strip()\n    requested_elevator_id = str(payload.get(\"requested_elevator_id\"\
           , \"\")).strip()\n    latest_file = str(payload.get(\"latest_file_name\"\
@@ -533,16 +529,14 @@ workflow:
           generated_at_ms\"))\n    fault_type = _fault_text(primary_issue, preferred,\
           \ top_candidate)\n    display_conclusion = _display_conclusion(status, fault_type)\n\
           \    fault_score = primary_issue.get(\"score\", preferred.get(\"score\"\
-          , top_candidate.get(\"score\", 0)))\n    risk_now = str(risk.get(\"risk_level_now\"\
-          , \"unknown\"))\n    risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"\
-          ))\n    rope_branch = str(rope_primary.get(\"rope_branch\", \"\")).strip()\n\
-          \    aux_fault = str(first_aux.get(\"fault_type\", \"none\") or \"none\"\
-          )\n    aux_score = first_aux.get(\"score\", 0)\n    compact_payload = _compact_latest_payload(payload)\n\
+          , top_candidate.get(\"score\", 0)))\n    abnormal_score = system_abnormality.get(\"score\",\
+          \ 0)\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"))\n \
+          \   risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    compact_payload\
+          \ = _compact_latest_payload(payload)\n\
           \    report_markdown_for_llm = _trim_report_for_llm(report_markdown_draft)\n\
           \    summary = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
-          \ 分数={fault_score}; \"\n        f\"分支={rope_branch or 'unknown'}; 当前风险={risk_now};\
-          \ 24h风险={risk_24h}; 目标电梯={requested_elevator_id or 'default'}; \"\n    \
-          \    f\"辅助异常={aux_fault}; 辅助分数={aux_score}; 最新文件={latest_file}; 后端报告={'已生成'\
+          \ 分数={fault_score}; 异常分={abnormal_score}; 当前风险={risk_now}; 24h风险={risk_24h};\
+          \ 目标电梯={requested_elevator_id or 'default'}; 最新文件={latest_file}; 后端报告={'已生成'\
           \ if report_markdown_draft else '未生成'}\"\n    )\n    return {\n        \"\
           status_json\": json.dumps(compact_payload, ensure_ascii=False),\n      \
           \  \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
@@ -1019,17 +1013,13 @@ workflow:
           \    except Exception:\n        payload = {}\n    payload = payload if isinstance(payload,\
           \ dict) else {}\n    screening = _as_dict(payload.get(\"screening\"))\n\
           \    status = str(screening.get(\"status\", \"unknown\"))\n    primary_issue\
-          \ = _as_dict(payload.get(\"primary_issue\"))\n    rope_primary = _as_dict(payload.get(\"\
-          rope_primary\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
-          ))\n    auxiliary_results = payload.get(\"auxiliary_results\", []) if isinstance(payload.get(\"\
-          auxiliary_results\"), list) else []\n    first_aux = auxiliary_results[0]\
-          \ if auxiliary_results and isinstance(auxiliary_results[0], dict) else {}\n\
-          \    branch = str(rope_primary.get(\"rope_branch\", \"\")).strip()\n   \
-          \ if primary_issue.get(\"fault_type\") or top_candidate.get(\"fault_type\"\
+          \ = _as_dict(payload.get(\"primary_issue\"))\n    system_abnormality = _as_dict(payload.get(\"\
+          system_abnormality\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
+          ))\n    if primary_issue.get(\"fault_type\") or top_candidate.get(\"fault_type\"\
           ):\n        summary = (\n            f\"筛查状态：{status}；主结论：{_fault_text(primary_issue,\
           \ top_candidate)}；\"\n            f\"分数：{primary_issue.get('score', top_candidate.get('score',\
-          \ 0))}；分支：{branch or 'unknown'}；\"\n            f\"辅助异常：{first_aux.get('fault_type',\
-          \ 'none')}。\"\n        )\n    else:\n        summary = f\"筛查状态：{status}。\"\
+          \ 0))}；异常分：{system_abnormality.get('score', 0)}。\"\n        )\n    else:\n\
+          \        summary = f\"筛查状态：{status}；异常分：{system_abnormality.get('score', 0)}。\"\
           \n    return {\n        \"diagnosis_json\": json.dumps(payload, ensure_ascii=False),\n\
           \        \"diagnosis_summary\": summary,\n    }\n"
         code_language: python3

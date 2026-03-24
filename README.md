@@ -136,9 +136,9 @@ alerts.csv]  alerts.csv]
 - Manifest 版本清单
 
 ### 专项诊断
-- `report/fault_algorithms` 当前总控默认启用 2 类故障规则算法（钢丝绳松动、橡胶圈硬化）
+- `report/fault_algorithms` 当前总控默认只做“相对健康基线的异常筛查”
 - 可对单个 CSV 或批量 CSV 进行离线诊断
-- 支持时间序列确认（如松绳连续窗口确认）
+- 输出保持保守，只给 `normal`、`watch_only`、`candidate_faults`
 
 ## 目录结构（重点）
 ```text
@@ -151,7 +151,7 @@ alerts.csv]  alerts.csv]
 │   ├── realtime_monitor.py      # 在线监控入口（兼容入口）
 │   └── realtime_vibration.py    # 实时振动读取 SDK + CLI
 ├── report/
-│   ├── fault_algorithms/        # 专项故障算法（机械松动/钢丝绳松动等）
+│   ├── fault_algorithms/        # 健康基线 + 通用异常筛查
 │   ├── wire_looseness_index.py  # 保留的历史松绳实验工具（可选）
 │   └── *.md                     # 诊断报告
 ├── deploy/
@@ -481,26 +481,18 @@ python -m elevator_monitor.maintenance_workflow \
 - Markdown 版值班报告，便于钉钉/企业微信/工单系统直接引用
 
 ## 专项诊断（report/fault_algorithms）
-单算法示例（钢丝绳松动）：
-```bash
-python3 report/fault_algorithms/detect_rope_looseness.py \
-  --input report/vibration_30s_20260303_110622.csv --pretty
-```
-
-一次输出 8 类结果：
+单文件异常筛查：
 ```bash
 python3 report/fault_algorithms/run_all.py \
   --input report/vibration_30s_20260303_110622.csv --pretty
 ```
 
-松绳时间序列确认：
+带健康基线的筛查：
 ```bash
-python3 report/fault_algorithms/rope_looseness_timeline.py \
-  --input-dir report \
-  --start-hhmm 1016 \
-  --end-hhmm 1057 \
-  --min-score 60 \
-  --confirm-windows 2 --pretty
+python3 report/fault_algorithms/run_all.py \
+  --input report/vibration_30s_20260303_110622.csv \
+  --baseline-dir data/baselines/elevator_002/healthy \
+  --pretty
 ```
 
 ## 在线输出文件

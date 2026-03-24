@@ -244,12 +244,14 @@ def _headline_text(status: str, issue: dict[str, Any], dispatch_hours: int) -> s
     issue_fault_type = str(issue.get("fault_type", "")).strip().lower()
     score = _safe_float(issue.get("score"), 0.0)
     if status == "candidate_faults":
+        if issue_fault_type == "unknown":
+            return f"本次检测稳定看到相对健康基线的异常变化，建议在 {max(1, dispatch_hours)} 小时内安排现场检查。"
         if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
             return f"本次检测发现“{issue_label}”高置信，说明钢丝绳相关异常变化证据已经比较充分，建议在 {max(1, dispatch_hours)} 小时内安排现场检查。"
         return f"本次检测发现“{issue_label}”高置信候选，建议在 {max(1, dispatch_hours)} 小时内安排现场检查。"
     if status == "watch_only":
         if issue_fault_type == "unknown":
-            return "本次检测看到相对健康基线的异常变化，但当前证据还不足以稳定归到钢丝绳或减振橡胶问题，建议尽快复测并结合现场检查确认。"
+            return "本次检测看到相对健康基线的异常变化，但当前更适合作为异常提醒，不建议直接下故障类型结论。"
         if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
             return f"本次检测发现“{issue_label}”变化线索，说明相对健康基线已经有偏移，但钢丝绳专属性还不够强，建议尽快复测或结合现场检查确认。"
         return f"本次检测发现“{issue_label}”可疑迹象，但证据还不够强，建议尽快复测或结合现场检查确认。"
@@ -264,12 +266,14 @@ def _explanation_text(status: str, issue: dict[str, Any]) -> str:
     issue_label = _fault_label(str(issue.get("fault_type", "")))
     issue_fault_type = str(issue.get("fault_type", "")).strip().lower()
     if status == "candidate_faults":
+        if issue_fault_type == "unknown":
+            return "系统已经稳定看到相对健康基线的异常偏移，说明这段振动和这台电梯平时状态差异明显，但当前阶段仍不直接归因到具体部件。"
         if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
             return f"{_screening_explanation(status)} 当前最像的问题是“{issue_label}”。这表示系统看到的相对健康基线偏移和钢丝绳相关特征同时成立，但仍建议以现场复核结果为准。"
         return f"{_screening_explanation(status)} 当前最像的问题是“{issue_label}”。这表示系统看到的振动模式与该类故障较为接近，但仍建议以现场复核结果为准。"
     if status == "watch_only":
         if issue_fault_type == "unknown":
-            return "系统已经看到相对健康基线的异常偏移，但钢丝绳和减振橡胶两条专项规则都还没有形成足够稳定的类型证据，当前更适合继续观察、补采数据或安排现场复核。"
+            return "系统已经看到相对健康基线的异常偏移，但当前阶段只把它当作异常提醒，不直接归因到钢丝绳、减振橡胶或其他具体部件。"
         if issue_fault_type in {"rope_looseness", "rope_tension_abnormal"}:
             return f"{_screening_explanation(status)} 当前最值得关注的是“{issue_label}”，它更像一个相对健康基线的钢丝绳异常提醒信号，而不是已经确认的故障结论。"
         return f"{_screening_explanation(status)} 当前最值得关注的是“{issue_label}”，它更像一个提醒信号，而不是已经确认的故障结论。"
@@ -347,111 +351,40 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     return table
 
 
-def _maybe_float(value: Any) -> float | None:
-    try:
-        if value in (None, ""):
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _rope_detail_result(diag: dict[str, Any]) -> dict[str, Any]:
-    results = diag.get("results", [])
-    if isinstance(results, list):
-        for item in results:
-            if isinstance(item, dict) and str(item.get("fault_type", "")).strip().lower() in {"rope_looseness", "rope_tension_abnormal"}:
-                return item
-    rope_primary = diag.get("rope_primary", {})
-    return dict(rope_primary) if isinstance(rope_primary, dict) else {}
-
-
-def _baseline_stat(diag: dict[str, Any], key: str) -> tuple[float | None, float | None]:
-    ref = diag.get("baseline_reference", {})
-    stats = ref.get("stats", {}) if isinstance(ref, dict) else {}
-    item = stats.get(key, {}) if isinstance(stats, dict) else {}
-    if not isinstance(item, dict):
-        return None, None
-    median = _maybe_float(item.get("median"))
-    scale = _maybe_float(item.get("scale"))
-    return median, scale
-
-
-def _comparison_text(current: float | None, median: float | None, *, expected: str) -> str:
-    if current is None or median is None:
-        return "基线不足"
-    if expected == "higher":
-        if current > median:
-            return "高于基线"
-        if current < median:
-            return "低于基线"
-    if expected == "lower":
-        if current < median:
-            return "低于基线"
-        if current > median:
-            return "高于基线"
-    return "接近基线"
-
-
-def _format_delta(current: float | None, median: float | None) -> str:
-    if current is None or median is None:
-        return "-"
-    return f"{current - median:+.4f}"
-
-
-def _build_rope_comparison_rows(diag: dict[str, Any]) -> list[list[Any]]:
-    rope_detail = _rope_detail_result(diag)
-    if str(rope_detail.get("fault_type", "")).strip().lower() not in {"rope_looseness", "rope_tension_abnormal"}:
+def _build_system_deviation_rows(diag: dict[str, Any]) -> list[list[Any]]:
+    system_abnormality = diag.get("system_abnormality", {})
+    if not isinstance(system_abnormality, dict):
         return []
-    snapshot = rope_detail.get("feature_snapshot", {}) if isinstance(rope_detail.get("feature_snapshot"), dict) else {}
-    spectral = rope_detail.get("rope_spectral_snapshot", {}) if isinstance(rope_detail.get("rope_spectral_snapshot"), dict) else {}
-
-    lateral_ratio = _maybe_float(snapshot.get("lateral_ratio"))
-    lat_dom_freq_hz = _maybe_float(snapshot.get("lat_dom_freq_hz"))
-    lat_low_band_ratio = _maybe_float(spectral.get("lat_low_band_ratio"))
-    ag_corr = _maybe_float(snapshot.get("ag_corr"))
-
+    top_deviations = system_abnormality.get("top_deviations", [])
+    if not isinstance(top_deviations, list):
+        return []
+    labels = {
+        "a_rms_ac": "加速度 RMS",
+        "a_p2p": "加速度峰峰值",
+        "g_std": "角速度波动",
+        "a_peak_std": "局部峰值离散度",
+        "a_pca_primary_ratio": "主方向能量占比",
+        "a_band_log_ratio_0_5_over_5_20": "低/高频能量比",
+        "lateral_ratio": "横向占比",
+        "lat_dom_freq_hz": "横向主频",
+        "lat_low_band_ratio": "横向低频占比",
+        "z_peak_ratio": "竖向谱峰集中度",
+    }
     rows: list[list[Any]] = []
-    for label, key, current, expected in [
-        ("横向占比 lateral_ratio", "lateral_ratio", lateral_ratio, "higher"),
-        ("横向主频 lat_dom_freq_hz", "lat_dom_freq_hz", lat_dom_freq_hz, "lower"),
-        ("横向低频能量占比 lat_low_band_ratio", "lat_low_band_ratio", lat_low_band_ratio, "higher"),
-        ("振动-转动耦合 ag_corr", "ag_corr", ag_corr, "higher"),
-    ]:
-        median, scale = _baseline_stat(diag, key)
+    for item in top_deviations:
+        if not isinstance(item, dict):
+            continue
         rows.append(
             [
-                label,
-                "-" if current is None else f"{float(current):.4f}",
-                "-" if median is None else f"{float(median):.4f}",
-                _format_delta(current, median),
-                _comparison_text(current, median, expected=expected),
-                "-" if scale is None else f"{float(scale):.4f}",
+                labels.get(str(item.get("key", "")), str(item.get("key", ""))),
+                f"{_safe_float(item.get('value'), 0.0):.4f}",
+                f"{_safe_float(item.get('median'), 0.0):.4f}",
+                f"{_safe_float(item.get('z'), 0.0):.2f}",
+                f"{_safe_float(item.get('score'), 0.0):.1f}",
+                f"{_safe_float(item.get('effective_scale'), 0.0):.4f}",
             ]
         )
-    if not any(row[1] != "-" for row in rows):
-        return []
     return rows
-
-
-def _build_rope_timeline_rows(diag: dict[str, Any]) -> list[list[Any]]:
-    timeline = diag.get("rope_timeline", {})
-    if not isinstance(timeline, dict):
-        return []
-    rows = timeline.get("rows", [])
-    if not isinstance(rows, list) or not rows:
-        return []
-    tail = rows[-5:]
-    return [
-        [
-            str(item.get("file", "")),
-            "是" if bool(item.get("rope_raw_triggered", False)) else "否",
-            "是" if bool(item.get("rope_confirmed", False)) else "否",
-            f"{_safe_float(item.get('rope_score'), 0.0):.1f}",
-        ]
-        for item in tail
-        if isinstance(item, dict)
-    ]
 
 
 def build_report_context(
@@ -687,7 +620,6 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
     risk = report_context.get("risk", {})
     package = report_context.get("maintenance_package", {})
     waveforms = report_context.get("waveform_payload", {})
-    rope_detail = _rope_detail_result(diagnosis)
     actions = package.get("recommended_actions", []) or []
     parts = package.get("suggested_parts", []) or []
     screening_status = str(screening.get("status", "normal")).strip().lower()
@@ -732,37 +664,25 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
         ["维保时限建议", f"{max(1, dispatch_hours)} 小时内"],
         ["备件与工具参考", "<br>".join(line.removeprefix("- ").strip() for line in _render_parts_lines(parts))],
     ]
-    rope_comparison_rows = _build_rope_comparison_rows(diagnosis)
-    timeline_rows = _build_rope_timeline_rows(diagnosis)
-    timeline = diagnosis.get("rope_timeline", {}) if isinstance(diagnosis.get("rope_timeline"), dict) else {}
+    system_deviation_rows = _build_system_deviation_rows(diagnosis)
+    system_abnormality = diagnosis.get("system_abnormality", {}) if isinstance(diagnosis.get("system_abnormality"), dict) else {}
 
     lines.extend(["", "## 4. 本次判断依据"])
     lines.extend(_markdown_table(["项目", "内容"], basis_rows))
-    if rope_comparison_rows:
-        lines.extend(["", "### 4.1 钢丝绳特征对比健康基线"])
-        lines.extend(_markdown_table(["特征", "当前值", "基线中位数", "偏移量", "相对基线判断", "基线尺度"], rope_comparison_rows))
-    if timeline_rows:
-        lines.extend(
-            [
-                "",
-                "### 4.2 连续窗口确认",
-                f"- 连续确认窗口数：{_safe_int(timeline.get('confirm_windows'), 0)}",
-                f"- 已确认触发次数：{_safe_int(timeline.get('confirmed_trigger_count'), 0)}",
-                f"- 最新窗口是否确认：{'是' if bool(timeline.get('latest_confirmed', False)) else '否'}",
-            ]
-        )
-        lines.extend(_markdown_table(["文件", "单窗触发", "连续确认", "单窗分数"], timeline_rows))
+    if system_deviation_rows:
+        lines.extend(["", "### 4.1 相对健康基线偏离最明显的特征"])
+        lines.extend(_markdown_table(["特征", "当前值", "基线中位数", "偏离 z", "异常分", "基线尺度"], system_deviation_rows))
     lines.extend(["", "## 5. 给维保人员的补充参考"])
     lines.extend(_markdown_table(["项目", "内容"], maintenance_rows))
-    if rope_detail:
+    if system_abnormality:
         lines.extend(
             [
                 "",
-                "### 5.1 钢丝绳规则摘要",
-                f"- 钢丝绳单窗规则分：{_safe_float(rope_detail.get('rope_rule_score'), 0.0):.1f}",
-                f"- 钢丝绳分支画像：{str(rope_detail.get('rope_branch', 'unknown')) or 'unknown'}",
-                f"- 钢丝绳特异证据分：{_safe_float(rope_detail.get('rope_specific_score'), 0.0):.1f}",
-                f"- 相对基线偏离分：{_safe_float(rope_detail.get('baseline_deviation_score'), 0.0):.1f}",
+                "### 5.1 通用异常门摘要",
+                f"- 异常门状态：{_screening_label(str(system_abnormality.get('status', 'normal')))}",
+                f"- 相对基线异常分：{_safe_float(system_abnormality.get('score'), 0.0):.1f}",
+                f"- 命中特征数：{_safe_int(system_abnormality.get('shared_hits'), 0)}/{_safe_int(system_abnormality.get('shared_feature_total'), 0)}，强命中 {_safe_int(system_abnormality.get('shared_strong_hits'), 0)}",
+                f"- 判定模式：{str(system_abnormality.get('baseline_mode', 'unknown')) or 'unknown'}",
             ]
         )
 

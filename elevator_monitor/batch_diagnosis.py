@@ -11,8 +11,7 @@ from .maintenance_workflow import build_maintenance_package
 from .reporting_service import build_report_context, render_report_markdown
 from .waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms._base import build_clean_feature_baseline, build_feature_pack, load_rows
-from report.fault_algorithms.detect_rope_looseness import ROPE_BASELINE_KEYS, ROPE_RULE_CONFIG
-from report.fault_algorithms.run_all import MIN_EFFECTIVE_SAMPLES, run_all_rows
+from report.fault_algorithms.run_all import BASELINE_KEYS, MIN_EFFECTIVE_SAMPLES, run_all_rows
 
 
 _FILE_TS_PATTERN = re.compile(r"(\d{8})_(\d{6})")
@@ -23,8 +22,7 @@ _RISK_LEVELS = (
     (0.40, "watch"),
     (0.0, "normal"),
 )
-_BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS))
-_ROPE_CONFIRM_WINDOWS = 2
+_BASELINE_KEYS = tuple(dict.fromkeys(BASELINE_KEYS))
 
 
 def _clamp01(value: float) -> float:
@@ -122,10 +120,9 @@ def _build_baseline_summary(
 
     if str(baseline_dir).strip():
         root = Path(baseline_dir).expanduser().resolve()
-        files = sorted(
-            [path for path in root.glob("vibration_30s_*.csv") if _in_range(path, baseline_start_hhmm, baseline_end_hhmm)],
-            key=_timestamp_key,
-        )
+        files = sorted(root.glob("*.csv"), key=_timestamp_key)
+        timed_files = [path for path in files if _FILE_TS_PATTERN.search(path.name)]
+        files = [path for path in timed_files if _in_range(path, baseline_start_hhmm, baseline_end_hhmm)] if timed_files else files
         feature_rows = [build_feature_pack(load_rows(path)) for path in files]
         if feature_rows:
             payload = build_clean_feature_baseline(feature_rows, _BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
@@ -158,23 +155,6 @@ def _compact_fault(payload: dict[str, Any]) -> dict[str, Any]:
         if key in payload:
             compacted[key] = payload.get(key)
     return compacted
-
-
-def _is_rope_fault_type(fault_type: Any) -> bool:
-    key = str(fault_type or "").strip().lower()
-    return key in {"rope_looseness", "rope_tension_abnormal"}
-
-
-def _promote_fault(payload: dict[str, Any], *, screening: str) -> dict[str, Any]:
-    promoted = _compact_fault(payload)
-    if not promoted:
-        return {}
-    promoted["screening"] = screening
-    promoted["triggered"] = screening == "high_confidence"
-    promoted["level"] = "warning" if screening == "high_confidence" else promoted.get("level", "watch")
-    if screening == "high_confidence":
-        promoted["score"] = max(72.0, _safe_float(promoted.get("score"), 0.0))
-    return promoted
 
 
 def _preferred_issue(result: dict[str, Any]) -> dict[str, Any]:
@@ -215,67 +195,35 @@ def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _apply_consecutive_confirmation(rows: list[dict[str, Any]], confirm_windows: int) -> None:
-    k = max(1, int(confirm_windows))
-    if k <= 1:
-        for row in rows:
-            row["rope_confirmed"] = bool(row.get("rope_raw_triggered")) and not bool(row.get("skip_confirmation"))
-        return
-
-    for row in rows:
-        row["rope_confirmed"] = False
-
-    start = None
-    for i, row in enumerate(rows):
-        if row.get("skip_confirmation"):
-            continue
-        if row.get("rope_raw_triggered"):
-            if start is None:
-                start = i
-        else:
-            if start is not None:
-                run_indices = [j for j in range(start, i) if not rows[j].get("skip_confirmation")]
-                if len(run_indices) >= k:
-                    for j in run_indices:
-                        if rows[j].get("rope_raw_triggered"):
-                            rows[j]["rope_confirmed"] = True
-            start = None
-    if start is not None:
-        run_indices = [j for j in range(start, len(rows)) if not rows[j].get("skip_confirmation")]
-        if len(run_indices) >= k:
-            for j in run_indices:
-                if rows[j].get("rope_raw_triggered"):
-                    rows[j]["rope_confirmed"] = True
+def _screening_rank(status: str) -> int:
+    key = str(status or "").strip().lower()
+    if key == "candidate_faults":
+        return 2
+    if key == "watch_only":
+        return 1
+    return 0
 
 
-def _apply_rope_timeline_confirmation(history: list[dict[str, Any]], *, confirm_windows: int) -> dict[str, Any]:
-    rope_min_score = float(ROPE_RULE_CONFIG["watch_score"])
-    timeline_rows: list[dict[str, Any]] = []
-    for row in history:
-        rope_primary = row.get("rope_primary", {}) if isinstance(row.get("rope_primary"), dict) else {}
-        rope_score = _safe_float(rope_primary.get("score"), 0.0)
-        summary = row.get("summary", {}) if isinstance(row.get("summary"), dict) else {}
-        quality_ok = bool(summary.get("sampling_ok", summary.get("sampling_ok_40hz", False)))
-        timeline_rows.append(
-            {
-                "file": str(row.get("name", "")),
-                "rope_raw_triggered": _is_rope_fault_type(rope_primary.get("fault_type")) and rope_score >= rope_min_score,
-                "skip_confirmation": not quality_ok,
-                "rope_confirmed": False,
-                "rope_score": round(rope_score, 2),
-                "sampling_condition": str(summary.get("sampling_condition", "unknown")),
-            }
-        )
-    _apply_consecutive_confirmation(timeline_rows, confirm_windows=confirm_windows)
-    confirmed_count = sum(1 for row in timeline_rows if row["rope_confirmed"])
-    latest_confirmed = bool(timeline_rows[-1]["rope_confirmed"]) if timeline_rows else False
-    return {
-        "confirm_windows": int(confirm_windows),
-        "watch_min_score": rope_min_score,
-        "confirmed_trigger_count": confirmed_count,
-        "latest_confirmed": latest_confirmed,
-        "rows": timeline_rows,
-    }
+def _history_summary_issue(history: list[dict[str, Any]]) -> dict[str, Any]:
+    abnormal_rows = [row for row in history if _screening_rank(str(row.get("screening_status", ""))) > 0]
+    if not abnormal_rows:
+        return {}
+    strongest = max(
+        abnormal_rows,
+        key=lambda row: (
+            _screening_rank(str(row.get("screening_status", ""))),
+            _safe_float((row.get("preferred_issue") or {}).get("score"), 0.0),
+        ),
+    )
+    issue = dict(strongest.get("preferred_issue", {})) if isinstance(strongest.get("preferred_issue"), dict) else {}
+    if not issue:
+        issue = dict(strongest.get("top_fault", {})) if isinstance(strongest.get("top_fault"), dict) else {}
+    if not issue:
+        return {}
+    issue["screening"] = "watch"
+    issue["triggered"] = False
+    issue["level"] = "watch"
+    return issue
 
 
 def _risk_level(score: float) -> str:
@@ -383,7 +331,6 @@ def _build_report_outputs(
     risk: dict[str, Any],
     baseline_summary: dict[str, Any],
     baseline_payload: dict[str, Any] | None,
-    rope_timeline: dict[str, Any],
     latest_file: Path,
     input_dir: str,
 ) -> tuple[dict[str, Any], str, dict[str, Any]]:
@@ -445,7 +392,6 @@ def _build_report_outputs(
 
     report_diagnosis = dict(latest_result)
     report_diagnosis["baseline_reference"] = baseline_reference
-    report_diagnosis["rope_timeline"] = rope_timeline
     try:
         waveform_rows, waveform_source = load_waveform_rows([], "", str(latest_file))
         waveform_payload = build_waveform_payload(
@@ -546,18 +492,21 @@ def run_batch_diagnosis(
         if path == latest_file:
             latest_result = result
 
-    rope_timeline = _apply_rope_timeline_confirmation(history, confirm_windows=_ROPE_CONFIRM_WINDOWS)
-    if rope_timeline["latest_confirmed"]:
-        rope_issue = _promote_fault(latest_result.get("rope_primary", {}), screening="high_confidence")
-        latest_result["screening"] = {
-            **(latest_result.get("screening", {}) if isinstance(latest_result.get("screening"), dict) else {}),
-            "status": "candidate_faults",
-        }
-        latest_result["top_fault"] = dict(rope_issue)
-        latest_result["top_candidate"] = dict(rope_issue)
-        latest_result["primary_issue"] = dict(rope_issue)
-        latest_result["candidate_faults"] = [dict(rope_issue)]
-        latest_result["watch_faults"] = []
+    latest_status = str((latest_result.get("screening") or {}).get("status", "normal"))
+    if latest_status == "normal":
+        summary_issue = _history_summary_issue(history)
+        if summary_issue:
+            latest_result["screening"] = {
+                **(latest_result.get("screening", {}) if isinstance(latest_result.get("screening"), dict) else {}),
+                "status": "watch_only",
+                "watch_count": 1,
+                "candidate_count": 0,
+            }
+            latest_result["top_fault"] = dict(summary_issue)
+            latest_result["primary_issue"] = dict(summary_issue)
+            latest_result["top_candidate"] = {}
+            latest_result["candidate_faults"] = []
+            latest_result["watch_faults"] = [dict(summary_issue)]
 
     latest_issue = _preferred_issue(latest_result)
     latest_status = str((latest_result.get("screening") or {}).get("status", "normal"))
@@ -569,7 +518,6 @@ def run_batch_diagnosis(
         risk=risk,
         baseline_summary=baseline_summary,
         baseline_payload=baseline_payload,
-        rope_timeline=rope_timeline,
         latest_file=latest_file,
         input_dir=input_dir,
     )
@@ -591,7 +539,7 @@ def run_batch_diagnosis(
         "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
         "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
         "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
-        "rope_timeline": rope_timeline,
+        "rope_timeline": {},
         "risk": risk,
         "recommendation": _status_recommendation(latest_status, str(latest_issue.get("fault_type", "unknown"))),
         "report_summary": report_summary,
@@ -609,7 +557,7 @@ def run_batch_diagnosis(
             "candidate_faults": [_compact_fault(item) for item in latest_result.get("candidate_faults", []) if isinstance(item, dict)],
             "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
             "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
-            "rope_timeline": rope_timeline,
+            "rope_timeline": {},
             "waveform_payload": waveform_payload,
         },
         "history": history,

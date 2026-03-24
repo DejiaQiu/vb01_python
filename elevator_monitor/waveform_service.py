@@ -299,7 +299,7 @@ def _axis_description(mapping: dict[str, str], mode: str) -> tuple[str, str]:
     short = f"当前按 `{vertical}` 作为竖向，`{lateral_x}/{lateral_y}` 作为横向"
     long = (
         f"{short}。图里的 `Ax/Ay/Az` 仍是原始轴名，"
-        f"rope 的横向/竖向特征与低频频域图都按这套映射计算。"
+        f"横向/竖向特征与低频频域图都按这套映射计算。"
     )
     if str(mode or "").strip() == "explicit":
         long += " 这次使用了显式轴向映射配置。"
@@ -385,11 +385,8 @@ def _build_insight_markdown(
 ) -> str:
     diag = diagnosis_result if isinstance(diagnosis_result, dict) else {}
     summary = _diag_dict(diag, "summary")
-    rope_primary = _diag_dict(diag, "rope_primary")
     screening = _diag_dict(diag, "screening")
-    rope_timeline = _diag_dict(diag, "rope_timeline")
-    rope_snapshot = _as_dict(rope_primary.get("feature_snapshot"))
-    rope_spectral = _as_dict(rope_primary.get("rope_spectral_snapshot"))
+    system_abnormality = _diag_dict(diag, "system_abnormality")
 
     sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     sampling_condition = str(features.get("sampling_condition", "unknown"))
@@ -408,47 +405,40 @@ def _build_insight_markdown(
         ["系统识别到的数据条件", _sampling_condition_text(str(features.get("sampling_condition", "unknown")))],
     ]
 
-    lateral_ratio = float(rope_snapshot.get("lateral_ratio", features.get("lateral_ratio", 0.0)))
-    lat_dom_freq_hz = float(rope_snapshot.get("lat_dom_freq_hz", rope_spectral.get("lat_dom_freq_hz", features.get("lat_dom_freq_hz", 0.0))))
-    lat_low_band_ratio = float(rope_spectral.get("lat_low_band_ratio", features.get("lat_low_band_ratio", 0.0)))
-    rope_rows = [
+    lateral_ratio = float(features.get("lateral_ratio", 0.0))
+    lat_dom_freq_hz = float(features.get("lat_dom_freq_hz", 0.0))
+    lat_low_band_ratio = float(features.get("lat_low_band_ratio", 0.0))
+    anomaly_rows = [
         ["横向摆动强度", f"{lateral_ratio:.4f}", "越高，说明左右方向的晃动相对更明显"],
         ["主摆动节奏", f"{lat_dom_freq_hz:.4f} Hz", "越低，越像慢速摆动而不是高频抖动"],
         ["低频摆动占比", f"{lat_low_band_ratio:.4f}", "越高，说明能量更集中在慢摆区间"],
-        ["这一窗的钢丝绳异常信号", f"{float(rope_primary.get('rope_rule_score', 0.0)):.1f}", "这是钢丝绳专项规则给出的结果"],
-        ["关键证据命中情况", f"{int(rope_primary.get('core_hits', 0))}/3，强命中 {int(rope_primary.get('core_strong_hits', 0))}", "命中越多，越接近钢丝绳异常画像"],
+        ["相对基线异常分", f"{float(system_abnormality.get('score', 0.0)):.1f}", "这是统一异常门给出的结果，只回答“像不像健康状态”"],
+        ["异常命中特征数", f"{int(system_abnormality.get('shared_hits', 0))}/{int(system_abnormality.get('shared_feature_total', 0))}，强命中 {int(system_abnormality.get('shared_strong_hits', 0))}", "命中越多，说明和健康基线偏离越明显"],
         ["系统当前判断", _screening_status_text(screening_status), "最终仍以统一决策层为准"],
     ]
-
-    timeline_rows_markdown = ""
-    if rope_timeline:
-        timeline_rows = rope_timeline.get("rows", [])
-        recent = timeline_rows[-3:] if isinstance(timeline_rows, list) else []
-        recent_rows = [
-            [
-                str(item.get("file", "")),
-                "是" if bool(item.get("rope_raw_triggered") or item.get("raw_triggered")) else "否",
-                "是" if bool(item.get("rope_confirmed") or item.get("confirmed_triggered")) else "否",
-                f"{float(item.get('rope_score', item.get('score', 0.0))):.1f}",
-            ]
-            for item in recent
-            if isinstance(item, dict)
+    feature_labels = {
+        "a_rms_ac": "加速度 RMS",
+        "a_p2p": "加速度峰峰值",
+        "g_std": "角速度波动",
+        "a_peak_std": "局部峰值离散度",
+        "a_pca_primary_ratio": "主方向能量占比",
+        "a_band_log_ratio_0_5_over_5_20": "低/高频能量比",
+        "lateral_ratio": "横向占比",
+        "lat_dom_freq_hz": "横向主频",
+        "lat_low_band_ratio": "横向低频占比",
+        "z_peak_ratio": "竖向谱峰集中度",
+    }
+    top_deviation_rows = [
+        [
+            feature_labels.get(str(item.get("key", "")), str(item.get("key", ""))),
+            f"{float(item.get('value', 0.0)):.4f}",
+            f"{float(item.get('median', 0.0)):.4f}",
+            f"{float(item.get('z', 0.0)):.2f}",
+            f"{float(item.get('score', 0.0)):.1f}",
         ]
-        if recent_rows:
-            timeline_rows_markdown = _markdown_table(["最近文件", "单窗命中", "连续确认", "分数"], recent_rows)
-
-    latest_confirmed = bool(rope_timeline.get("latest_confirmed", False))
-    confirmation_lines = [
-        f"- 连续确认窗口数：`{int(rope_timeline.get('confirm_windows', 0))}`" if rope_timeline else "- 当前只有单文件结果，暂无连续窗确认。",
+        for item in system_abnormality.get("top_deviations", [])
+        if isinstance(item, dict)
     ]
-    if rope_timeline:
-        confirmation_lines.extend(
-            [
-                f"- 已确认触发次数：`{int(rope_timeline.get('confirmed_trigger_count', 0))}`",
-                f"- 最新窗口是否确认：`{'是' if latest_confirmed else '否'}`",
-                f"- 当前确认逻辑：需要连续 `2` 个有效窗命中 rope 观察级或以上。",
-            ]
-        )
 
     lines = [
         "## 怎么读这些图",
@@ -461,14 +451,17 @@ def _build_insight_markdown(
         "### 这段数据是否适合判断",
         _markdown_table(["项目", "内容"], quality_rows),
         "",
-        "### 钢丝绳异常信号卡片",
-        _markdown_table(["指标", "当前值", "解释"], rope_rows),
-        "",
-        "### 这类异常有没有连续出现",
-        *confirmation_lines,
+        "### 相对健康基线偏离卡片",
+        _markdown_table(["指标", "当前值", "解释"], anomaly_rows),
     ]
-    if timeline_rows_markdown:
-        lines.extend(["", timeline_rows_markdown])
+    if top_deviation_rows:
+        lines.extend(
+            [
+                "",
+                "### 偏离最明显的特征",
+                _markdown_table(["特征", "当前值", "基线中位数", "偏离 z", "异常分"], top_deviation_rows),
+            ]
+        )
     return "\n".join(lines).strip()
 
 

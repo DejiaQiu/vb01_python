@@ -12,27 +12,23 @@ from report.fault_algorithms.rope_looseness_timeline import run_timeline
 def _baseline(scale_factor: float = 1.0, *, mapping_signature: str | None = None) -> dict:
     scaled = {
         "a_rms_ac": (0.0050, 0.0009),
-        "a_p2p": (0.0280, 0.0060),
-        "g_std": (0.0220, 0.0045),
-        "lateral_ratio": (1.05, 0.09),
-        "ag_corr": (0.14, 0.035),
-        "gx_ax_corr": (0.14, 0.035),
-        "gy_ay_corr": (0.14, 0.035),
-        "peak_rate_hz": (0.20, 0.08),
-        "a_crest": (1.60, 0.25),
-        "a_kurt": (0.70, 0.40),
-        "energy_z_over_xy": (0.92, 0.12),
-        "az_p2p": (0.037, 0.005),
-        "az_jerk_rms": (0.013, 0.002),
-        "lat_dom_freq_hz": (1.10, 0.18),
-        "lat_low_band_ratio": (0.40, 0.08),
-        "z_dom_freq_hz": (2.60, 0.25),
-        "z_peak_ratio": (0.20, 0.05),
+        "a_band_0_5_energy": (0.25, 0.08),
+        "a_band_5_20_energy": (0.20, 0.06),
+        "a_band_log_ratio_0_5_over_5_20": (0.82, 0.18),
+        "a_zcr_hz": (11.5, 1.8),
+        "a_peak_std": (0.0048, 0.0012),
+        "a_pca_primary_ratio": (0.52, 0.06),
     }
-    amplitude_keys = {"a_rms_ac", "a_p2p", "g_std", "az_p2p", "az_jerk_rms"}
+    linear_keys = {"a_rms_ac", "a_peak_std"}
+    quadratic_keys = {"a_band_0_5_energy", "a_band_5_20_energy"}
     stats = {}
     for key, (median, scale) in scaled.items():
-        multiplier = scale_factor if key in amplitude_keys else 1.0
+        if key in linear_keys:
+            multiplier = scale_factor
+        elif key in quadratic_keys:
+            multiplier = scale_factor * scale_factor
+        else:
+            multiplier = 1.0
         stats[key] = {
             "median": median * multiplier,
             "scale": scale * multiplier,
@@ -59,6 +55,9 @@ def _feature_overrides(**kwargs):
         "a_mean": 1.0,
         "g_mean": 0.90,
         "a_rms_ac": 0.0052,
+        "a_band_0_5_energy": 0.27,
+        "a_band_5_20_energy": 0.21,
+        "a_band_log_ratio_0_5_over_5_20": math.log1p(0.27 / 0.21),
         "a_p2p": 0.029,
         "a_std": 0.006,
         "a_crest": 1.62,
@@ -66,6 +65,9 @@ def _feature_overrides(**kwargs):
         "g_std": 0.0225,
         "peak_rate_hz": 0.20,
         "zc_rate_hz": 1.60,
+        "a_zcr_hz": 11.8,
+        "a_peak_std": 0.0047,
+        "a_pca_primary_ratio": 0.53,
         "lateral_ratio": 1.08,
         "ag_corr": 0.15,
         "gx_ax_corr": 0.16,
@@ -132,6 +134,9 @@ class TestRopeLoosenessDetector(unittest.TestCase):
 
         self.assertTrue(features["sampling_ok"])
         self.assertTrue(features["sampling_ok_40hz"])
+        self.assertGreater(features["a_band_0_5_energy"], 0.0)
+        self.assertGreater(features["a_band_log_ratio_0_5_over_5_20"], 0.0)
+        self.assertGreater(features["a_pca_primary_ratio"], 0.5)
         self.assertGreater(features["lat_dom_freq_hz"], 0.3)
         self.assertGreater(features["lat_low_band_ratio"], 0.10)
 
@@ -176,6 +181,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                 a_mean=1.0,
                 g_mean=0.90,
                 a_rms_ac=0.016,
+                a_band_0_5_energy=1.40,
+                a_band_5_20_energy=0.04,
+                a_band_log_ratio_0_5_over_5_20=math.log1p(1.40 / 0.04),
+                a_zcr_hz=4.6,
+                a_peak_std=0.0015,
+                a_pca_primary_ratio=0.84,
                 a_p2p=0.092,
                 g_std=0.095,
                 peak_rate_hz=0.10,
@@ -195,6 +206,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                 a_mean=2.0,
                 g_mean=1.80,
                 a_rms_ac=0.032,
+                a_band_0_5_energy=5.60,
+                a_band_5_20_energy=0.16,
+                a_band_log_ratio_0_5_over_5_20=math.log1p(5.60 / 0.16),
+                a_zcr_hz=4.6,
+                a_peak_std=0.0030,
+                a_pca_primary_ratio=0.84,
                 a_p2p=0.184,
                 g_std=0.190,
                 peak_rate_hz=0.10,
@@ -227,6 +244,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             _feature_overrides(
                 baseline=_baseline(mapping_signature="vertical=Ax|lateral_x=Ay|lateral_y=Az"),
                 a_rms_ac=0.016,
+                a_band_0_5_energy=1.40,
+                a_band_5_20_energy=0.04,
+                a_band_log_ratio_0_5_over_5_20=math.log1p(1.40 / 0.04),
+                a_zcr_hz=4.6,
+                a_peak_std=0.0015,
+                a_pca_primary_ratio=0.84,
                 a_p2p=0.092,
                 g_std=0.095,
                 peak_rate_hz=0.10,
@@ -255,6 +278,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
                 sampling_ok_40hz=False,
                 sampling_condition="low_sampling_rate",
                 a_rms_ac=0.016,
+                a_band_0_5_energy=1.40,
+                a_band_5_20_energy=0.04,
+                a_band_log_ratio_0_5_over_5_20=math.log1p(1.40 / 0.04),
+                a_zcr_hz=4.6,
+                a_peak_std=0.0015,
+                a_pca_primary_ratio=0.84,
                 a_p2p=0.092,
                 g_std=0.095,
                 lateral_ratio=1.90,
@@ -272,6 +301,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             _feature_overrides(
                 baseline=_baseline(),
                 a_rms_ac=0.018,
+                a_band_0_5_energy=0.32,
+                a_band_5_20_energy=0.95,
+                a_band_log_ratio_0_5_over_5_20=math.log1p(0.32 / 0.95),
+                a_zcr_hz=17.5,
+                a_peak_std=0.024,
+                a_pca_primary_ratio=0.38,
                 a_p2p=0.140,
                 g_std=0.080,
                 peak_rate_hz=5.5,
@@ -294,6 +329,12 @@ class TestRopeLoosenessDetector(unittest.TestCase):
             _feature_overrides(
                 baseline=_baseline(),
                 a_rms_ac=0.013,
+                a_band_0_5_energy=0.40,
+                a_band_5_20_energy=0.56,
+                a_band_log_ratio_0_5_over_5_20=math.log1p(0.40 / 0.56),
+                a_zcr_hz=11.0,
+                a_peak_std=0.013,
+                a_pca_primary_ratio=0.43,
                 a_p2p=0.085,
                 g_std=0.060,
                 peak_rate_hz=0.35,

@@ -43,7 +43,7 @@ Branch rule:
 
 Purpose:
 
-- Answer questions like "current status", "steel rope main diagnosis", "should maintenance be arranged now"
+- Answer questions like "current status", "whether abnormal", "should maintenance be arranged now"
 - In the edge/cloud path, read the latest synchronized elevator status and recent alert event
 - Keep the old scheduled-batch `latest_status.json` query path only as a compatibility fallback
 
@@ -68,8 +68,7 @@ Expected status payload:
 
 - `status`
 - `primary_issue`
-- `rope_primary`
-- `auxiliary_results`
+- `system_abnormality`
 - `preferred_issue` as a compatibility field
 - `top_candidate` as a compatibility field
 - `watch_faults`
@@ -85,8 +84,8 @@ Typical answer style:
 - current status
 - risk level now
 - 24h risk level
-- steel rope main diagnosis
-- auxiliary abnormal clues when present
+- abnormal conclusion
+- abnormal clues when present
 - whether to continue observation or arrange inspection
 - then fixed charts in this order: acceleration, gyroscope, acceleration magnitude
 
@@ -140,7 +139,7 @@ What it does:
 
 - pick the latest batch of CSV files
 - reuse `report/fault_algorithms/run_all.py`
-- keep `rope_tension_abnormal` as the main screening result and `rubber_hardening` as an auxiliary explanation result
+- keep the user-facing result conservative and centered on abnormal vs normal
 - compute a trend-aware risk score from repeated appearances, score trend, and data quality
 - write a stable `latest_status.json` for Dify to query
 - include backend-generated `report_markdown_draft`, so the online-status branch can directly display a report-style summary without re-running the report workflow
@@ -204,8 +203,8 @@ Output:
 - `workflow_type`
 - `generated_at_ms`
 - `status`
-- `rope_primary`
-- `auxiliary_results`
+- `primary_issue`
+- `system_abnormality`
 - `preferred_issue`
 - `top_candidate`
 - `watch_faults`
@@ -237,12 +236,11 @@ Output:
 - `summary`
 - `screening`
 - `primary_issue`
-- `rope_primary`
+- `system_abnormality`
 - `top_fault`
 - `top_candidate`
 - `candidate_faults`
 - `watch_faults`
-- `auxiliary_results`
 - `results`
 
 ### `POST /api/v1/workflows/diagnosis-report`
@@ -259,8 +257,7 @@ Important Dify mapping rule:
 
 - Prefer `primary_issue` as the main diagnosis source
 - Treat `preferred_issue` and `top_candidate` as compatibility fallbacks only
-- Treat `auxiliary_results` as optional secondary clues and do not elevate them above `primary_issue`
-- When available, expose `rope_branch` and `rope_rule_score` in report rendering
+- Prefer `system_abnormality` when you only need to answer "abnormal or not"
 - When `status=watch_only` and `primary_issue.fault_type=unknown`, render the main conclusion as `已检测到异常，但类型待确认`
 
 ## Recommended Product Split
@@ -269,7 +266,7 @@ No CSV uploaded:
 
 - read latest status only
 - return a short answer
-- answer current risk and latest candidate
+- answer current risk and whether the latest batch already shows abnormality
 
 CSV uploaded:
 

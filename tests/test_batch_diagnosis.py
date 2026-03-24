@@ -163,7 +163,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("risk", payload)
             self.assertIn("report_markdown_draft", payload)
             self.assertIn("一句话结论", payload["report_markdown_draft"])
-            self.assertIn("连续窗口确认", payload["report_markdown_draft"])
+            self.assertIn("本次判断依据", payload["report_markdown_draft"])
             self.assertIn("## 波形图", payload["report_markdown_draft"])
             self.assertIn("waveform_payload", payload)
             self.assertIn("markdown_echarts", payload["waveform_payload"])
@@ -179,7 +179,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertEqual(latest_payload["primary_issue"]["fault_type"], "rope_looseness")
             self.assertIn("report_markdown_draft", latest_payload)
             self.assertIn("当前最值得关注的问题", latest_payload["report_markdown_draft"])
-            self.assertIn("连续窗口确认", latest_payload["report_markdown_draft"])
+            self.assertIn("本次判断依据", latest_payload["report_markdown_draft"])
             self.assertIn("## 波形图", latest_payload["report_markdown_draft"])
             self.assertIn("waveform_payload", latest_payload)
             self.assertIn("markdown_echarts", latest_payload["waveform_payload"])
@@ -228,6 +228,39 @@ class TestBatchDiagnosis(unittest.TestCase):
 
         self.assertEqual(payload["status"], "watch_only")
         self.assertEqual(payload["preferred_issue"]["fault_type"], "rubber_hardening")
+
+    def test_batch_status_stays_watch_when_recent_history_has_abnormal_windows(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            paths = [
+                root / "vibration_30s_20260303_101500.csv",
+                root / "vibration_30s_20260303_103800.csv",
+            ]
+            for path in paths:
+                _write_csv(path)
+
+            fake_results = [
+                _result(
+                    "watch_only",
+                    top_fault=_compact_fault("unknown", 52.0),
+                    watch_faults=[_compact_fault("unknown", 52.0, screening="watch")],
+                ),
+                _result(
+                    "normal",
+                    top_fault=_compact_fault("unknown", 22.0),
+                ),
+            ]
+
+            with patch("elevator_monitor.batch_diagnosis.run_all_rows", side_effect=fake_results):
+                payload = run_batch_diagnosis(
+                    input_dir=str(root),
+                    max_files=2,
+                    write_outputs=False,
+                )
+
+        self.assertEqual(payload["status"], "watch_only")
+        self.assertEqual(payload["preferred_issue"]["fault_type"], "unknown")
+        self.assertEqual(payload["latest_result"]["screening"]["status"], "watch_only")
 
 
 if __name__ == "__main__":

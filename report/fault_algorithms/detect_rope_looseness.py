@@ -1,15 +1,16 @@
 """钢丝绳状态异常单窗诊断。
 
-当前版本收敛成“频域 + 少量横向特征”的规则链：
+当前版本收敛成“少量证据值 + hit 数”的规则链，主判依赖这组特征：
 
-1. 核心特征只保留 3 类：
-   - 横向比例 `lateral_ratio`
-   - 横向主频偏移 `lat_dom_freq_hz`
-   - 横向低频占比 `lat_low_band_ratio`
-2. 加速度/角速度耦合与通用异常只做辅助解释，不参与主判。
-3. Z 向和竖向谱特征只用于解释，不允许单独把样本推成 rope 候选。
+1. `A_mag RMS`
+2. `0-5Hz` 低频能量
+3. `5-20Hz` 高频能量
+4. 低/高频 band ratio
+5. `A_mag` 过零率 `ZCR`
+6. 局部峰值离散度 `peak_std`
+7. 三轴加速度 `PCA` 主方向能量占比
 
-当前只保留规则链路，不再在钢丝绳专项里保留 centroid 训练、加载或融合逻辑。
+当前只保留规则链路，不在钢丝绳专项里保留 centroid 训练、加载或融合逻辑。
 """
 
 from __future__ import annotations
@@ -55,35 +56,25 @@ FAULT_TYPE = "rope_tension_abnormal"
 
 ROPE_BASELINE_KEYS = (
     "a_rms_ac",
-    "a_p2p",
-    "g_std",
-    "lateral_ratio",
-    "ag_corr",
-    "gx_ax_corr",
-    "gy_ay_corr",
-    "peak_rate_hz",
-    "a_crest",
-    "a_kurt",
-    "energy_z_over_xy",
-    "az_p2p",
-    "az_jerk_rms",
-    "lat_dom_freq_hz",
-    "lat_low_band_ratio",
-    "z_dom_freq_hz",
-    "z_peak_ratio",
+    "a_band_0_5_energy",
+    "a_band_5_20_energy",
+    "a_band_log_ratio_0_5_over_5_20",
+    "a_zcr_hz",
+    "a_peak_std",
+    "a_pca_primary_ratio",
 )
 
 ROPE_RULE_CONFIG = {
     "watch_score": 52.0,
     "candidate_score": 72.0,
-    "feature_hit_min": 45.0,
-    "feature_strong_min": 60.0,
-    "watch_hit_min": 2,
-    "candidate_hit_min": 3,
+    "feature_hit_min": 48.0,
+    "feature_strong_min": 63.0,
+    "watch_hit_min": 3,
+    "candidate_hit_min": 4,
     "candidate_strong_min": 2,
     "watch_run_min": 30.0,
     "candidate_run_min": 35.0,
-    "spiky_penalty_max": 60.0,
+    "spiky_penalty_max": 58.0,
     "watch_score_cap": 59.0,
 }
 
@@ -169,132 +160,106 @@ def _score_to_level(score: float) -> str:
 
 
 def _branch_fallback_components(features: dict[str, Any]) -> dict[str, float]:
-    a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
-    g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
     a_rms_ac = _to_float(features.get("a_rms_ac"))
-    az_rms_ac = max(abs(_to_float(features.get("az_rms_ac"), 0.01)), 1e-4)
-    lateral_ratio = _to_float(features.get("lateral_ratio"), 1.0)
-    a_p2p = _to_float(features.get("a_p2p"))
-    g_std = _to_float(features.get("g_std"))
-    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
-    a_crest = _to_float(features.get("a_crest"))
-    a_kurt = _to_float(features.get("a_kurt"))
-    energy_z_over_xy = _to_float(features.get("energy_z_over_xy"), 1.0)
-    az_p2p = _to_float(features.get("az_p2p"))
-    az_jerk_rms = _to_float(features.get("az_jerk_rms"))
-    ag_corr = _to_float(features.get("ag_corr"))
-    gx_ax_corr = _to_float(features.get("gx_ax_corr"))
-    gy_ay_corr = _to_float(features.get("gy_ay_corr"))
-    lat_dom_freq_hz = _to_float(features.get("lat_dom_freq_hz"))
-    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
-    lat_low_band_ratio = _to_float(features.get("lat_low_band_ratio"))
-    z_dom_freq_hz = _to_float(features.get("z_dom_freq_hz"))
-    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
-    corr_major = max(ag_corr, gx_ax_corr, gy_ay_corr)
+    a_band_0_5_energy = _to_float(features.get("a_band_0_5_energy"))
+    a_band_5_20_energy = _to_float(features.get("a_band_5_20_energy"))
+    a_band_0_5_share = _to_float(features.get("a_band_0_5_share"))
+    a_band_5_20_share = _to_float(features.get("a_band_5_20_share"))
+    a_band_log_ratio = _to_float(features.get("a_band_log_ratio_0_5_over_5_20"))
+    a_zcr_hz = _to_float(features.get("a_zcr_hz"))
+    a_peak_std = _to_float(features.get("a_peak_std"))
+    a_pca_primary_ratio = _to_float(features.get("a_pca_primary_ratio"))
 
-    rope_lateral = ratio_to_100(lateral_ratio, 1.05, 1.70)
-    rope_domfreq = 100.0 - ratio_to_100(lat_dom_freq_hz, 1.40, 4.60)
-    rope_lowband = ratio_to_100(lat_low_band_ratio, 0.22, 0.70)
-    rope_coupling = ratio_to_100(corr_major, 0.10, 0.60)
-    shared_abnormal = (
-        ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
-        + ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
-        + ratio_to_100(g_std / max(g_mean, EPS), 0.020, 0.260)
-    ) / 3.0
-    confounding_score = (
-        ratio_to_100(energy_z_over_xy, 0.95, 1.85)
-        + ratio_to_100(az_p2p, 0.10, 0.28)
-        + ratio_to_100(az_jerk_rms / max(az_rms_ac, EPS), 0.85, 2.50)
-        + ratio_to_100(z_peak_ratio, 0.16, 0.58)
-        + ratio_to_100(abs(z_dom_freq_hz - 2.5), 0.10, 3.00)
-    ) / 5.0
-
-    spiky_penalty = (
-        0.40 * ratio_to_100(a_crest, 1.8, 4.2)
-        + 0.35 * ratio_to_100(a_kurt, 1.0, 6.0)
-        + 0.25 * ratio_to_100(peak_rate_hz, 0.40, 4.00)
+    # 这组 fallback 是“没有足够健康基线时”的自归一化经验规则：
+    # - rope_rms: 整体振动是否明显起来了
+    # - rope_lowband / rope_band_ratio: 能量是否向低频摆动区集中
+    # - rope_zcr / rope_peak_regular: 是否更像连续慢摆，而不是快抖或冲击
+    # - rope_directional: 三轴能量是否收敛到主方向，避免把全向噪声误判成 rope
+    rope_rms = ratio_to_100(a_rms_ac, 0.006, 0.028)
+    rope_lowband = (
+        0.65 * ratio_to_100(a_band_0_5_share, 0.60, 0.95)
+        + 0.35 * ratio_to_100(math.log1p(a_band_0_5_energy), math.log1p(0.05), math.log1p(12.0))
     )
+    rope_highband = (
+        0.65 * ratio_to_100(a_band_5_20_share, 0.04, 0.28)
+        + 0.35 * ratio_to_100(math.log1p(a_band_5_20_energy), math.log1p(1e-5), math.log1p(0.8))
+    )
+    rope_band_ratio = ratio_to_100(a_band_log_ratio, math.log1p(1.5), math.log1p(120.0))
+    rope_zcr = 100.0 - ratio_to_100(a_zcr_hz, 7.0, 18.0)
+    rope_peak_regular = 100.0 - ratio_to_100(a_peak_std, 0.0015, 0.018)
+    rope_directional = ratio_to_100(a_pca_primary_ratio, 0.48, 0.82)
+    shared_abnormal = (
+        0.40 * rope_rms
+        + 0.30 * rope_lowband
+        + 0.20 * rope_band_ratio
+        + 0.10 * rope_directional
+    )
+    confounding_score = 0.70 * rope_highband + 0.30 * (100.0 - rope_peak_regular)
+    spiky_penalty = confounding_score
 
     return {
-        "rope_lateral": float(rope_lateral),
-        "rope_domfreq": float(rope_domfreq),
+        "rope_rms": float(rope_rms),
         "rope_lowband": float(rope_lowband),
-        "rope_coupling": float(rope_coupling),
+        "rope_highband": float(rope_highband),
+        "rope_band_ratio": float(rope_band_ratio),
+        "rope_zcr": float(rope_zcr),
+        "rope_peak_regular": float(rope_peak_regular),
+        "rope_directional": float(rope_directional),
         "shared_abnormal": float(shared_abnormal),
         "confounding_score": float(confounding_score),
         "spiky_penalty": float(spiky_penalty),
-        "corr_major": float(corr_major),
-        "lat_dom_freq_hz": float(lat_dom_freq_hz),
-        "lat_peak_ratio": float(lat_peak_ratio),
-        "lat_low_band_ratio": float(lat_low_band_ratio),
-        "z_dom_freq_hz": float(z_dom_freq_hz),
-        "z_peak_ratio": float(z_peak_ratio),
-        "z_low_band_ratio": 0.0,
+        "a_band_0_5_energy": float(a_band_0_5_energy),
+        "a_band_5_20_energy": float(a_band_5_20_energy),
+        "a_band_log_ratio": float(a_band_log_ratio),
+        "a_zcr_hz": float(a_zcr_hz),
+        "a_peak_std": float(a_peak_std),
+        "a_pca_primary_ratio": float(a_pca_primary_ratio),
     }
 
 
 def _branch_robust_components(features: dict[str, Any], baseline_stats: dict[str, tuple[float, float]]) -> dict[str, float]:
-    lateral_ratio = _to_float(features.get("lateral_ratio"), 1.0)
     a_rms_ac = _to_float(features.get("a_rms_ac"))
-    a_p2p = _to_float(features.get("a_p2p"))
-    g_std = _to_float(features.get("g_std"))
-    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
-    a_crest = _to_float(features.get("a_crest"))
-    a_kurt = _to_float(features.get("a_kurt"))
-    energy_z_over_xy = _to_float(features.get("energy_z_over_xy"), 1.0)
-    az_p2p = _to_float(features.get("az_p2p"))
-    az_jerk_rms = _to_float(features.get("az_jerk_rms"))
-    ag_corr = _to_float(features.get("ag_corr"))
-    gx_ax_corr = _to_float(features.get("gx_ax_corr"))
-    gy_ay_corr = _to_float(features.get("gy_ay_corr"))
-    lat_dom_freq_hz = _to_float(features.get("lat_dom_freq_hz"))
-    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
-    lat_low_band_ratio = _to_float(features.get("lat_low_band_ratio"))
-    z_dom_freq_hz = _to_float(features.get("z_dom_freq_hz"))
-    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
-    corr_major = max(ag_corr, gx_ax_corr, gy_ay_corr)
+    a_band_0_5_energy = _to_float(features.get("a_band_0_5_energy"))
+    a_band_5_20_energy = _to_float(features.get("a_band_5_20_energy"))
+    a_band_log_ratio = _to_float(features.get("a_band_log_ratio_0_5_over_5_20"))
+    a_zcr_hz = _to_float(features.get("a_zcr_hz"))
+    a_peak_std = _to_float(features.get("a_peak_std"))
+    a_pca_primary_ratio = _to_float(features.get("a_pca_primary_ratio"))
 
-    rope_lateral = _z_to_100(_positive_z(lateral_ratio, baseline_stats.get("lateral_ratio")))
-    rope_domfreq = _z_to_100(_negative_z(lat_dom_freq_hz, baseline_stats.get("lat_dom_freq_hz")))
-    rope_lowband = _z_to_100(_positive_z(lat_low_band_ratio, baseline_stats.get("lat_low_band_ratio")))
-    rope_coupling = _z_to_100(max(
-        _positive_z(ag_corr, baseline_stats.get("ag_corr")),
-        _positive_z(gx_ax_corr, baseline_stats.get("gx_ax_corr")),
-        _positive_z(gy_ay_corr, baseline_stats.get("gy_ay_corr")),
-    ))
-    shared_abnormal = _z_to_100((
-        _positive_z(a_rms_ac, baseline_stats.get("a_rms_ac"))
-        + _positive_z(a_p2p, baseline_stats.get("a_p2p"))
-        + _positive_z(g_std, baseline_stats.get("g_std"))
-    ) / 3.0)
-    confounding_score = _z_to_100((
-        _positive_z(energy_z_over_xy, baseline_stats.get("energy_z_over_xy"))
-        + _positive_z(az_p2p, baseline_stats.get("az_p2p"))
-        + _positive_z(az_jerk_rms, baseline_stats.get("az_jerk_rms"))
-        + _positive_z(z_peak_ratio, baseline_stats.get("z_peak_ratio"))
-        + _abs_shift_z(z_dom_freq_hz, baseline_stats.get("z_dom_freq_hz"))
-    ) / 5.0)
-    spiky_penalty = _z_to_100(
-        0.40 * _positive_z(a_crest, baseline_stats.get("a_crest"))
-        + 0.35 * _positive_z(a_kurt, baseline_stats.get("a_kurt"))
-        + 0.25 * _positive_z(peak_rate_hz, baseline_stats.get("peak_rate_hz"))
+    # 有基线时，同一组证据统一改成“相对健康状态偏离多少”的 z-score 口径。
+    rope_rms = _z_to_100(_positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")))
+    rope_lowband = _z_to_100(_positive_z(a_band_0_5_energy, baseline_stats.get("a_band_0_5_energy")))
+    rope_highband = _z_to_100(_positive_z(a_band_5_20_energy, baseline_stats.get("a_band_5_20_energy")))
+    rope_band_ratio = _z_to_100(_positive_z(a_band_log_ratio, baseline_stats.get("a_band_log_ratio_0_5_over_5_20")))
+    rope_zcr = _z_to_100(_negative_z(a_zcr_hz, baseline_stats.get("a_zcr_hz")))
+    rope_peak_regular = _z_to_100(_negative_z(a_peak_std, baseline_stats.get("a_peak_std")))
+    rope_directional = _z_to_100(_positive_z(a_pca_primary_ratio, baseline_stats.get("a_pca_primary_ratio")))
+    shared_abnormal = (
+        0.40 * rope_rms
+        + 0.30 * rope_lowband
+        + 0.20 * rope_band_ratio
+        + 0.10 * rope_directional
     )
+    confounding_score = 0.70 * rope_highband + 0.30 * (100.0 - rope_peak_regular)
+    spiky_penalty = confounding_score
 
     return {
-        "rope_lateral": float(rope_lateral),
-        "rope_domfreq": float(rope_domfreq),
+        "rope_rms": float(rope_rms),
         "rope_lowband": float(rope_lowband),
-        "rope_coupling": float(rope_coupling),
+        "rope_highband": float(rope_highband),
+        "rope_band_ratio": float(rope_band_ratio),
+        "rope_zcr": float(rope_zcr),
+        "rope_peak_regular": float(rope_peak_regular),
+        "rope_directional": float(rope_directional),
         "shared_abnormal": float(shared_abnormal),
         "confounding_score": float(confounding_score),
         "spiky_penalty": float(spiky_penalty),
-        "corr_major": float(corr_major),
-        "lat_dom_freq_hz": float(lat_dom_freq_hz),
-        "lat_peak_ratio": float(lat_peak_ratio),
-        "lat_low_band_ratio": float(lat_low_band_ratio),
-        "z_dom_freq_hz": float(z_dom_freq_hz),
-        "z_peak_ratio": float(z_peak_ratio),
-        "z_low_band_ratio": 0.0,
+        "a_band_0_5_energy": float(a_band_0_5_energy),
+        "a_band_5_20_energy": float(a_band_5_20_energy),
+        "a_band_log_ratio": float(a_band_log_ratio),
+        "a_zcr_hz": float(a_zcr_hz),
+        "a_peak_std": float(a_peak_std),
+        "a_pca_primary_ratio": float(a_pca_primary_ratio),
     }
 
 
@@ -317,22 +282,6 @@ def _count_hits(values: list[float], min_score: float) -> int:
 
 def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     rule_cfg = ROPE_RULE_CONFIG
-    a_mean = max(abs(_to_float(features.get("a_mean"), 1.0)), 1e-3)
-    g_mean = max(abs(_to_float(features.get("g_mean"), 0.3)), 0.05)
-    a_rms_ac = _to_float(features.get("a_rms_ac"))
-    g_std = _to_float(features.get("g_std"))
-    peak_rate_hz = _to_float(features.get("peak_rate_hz"))
-    lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
-    z_peak_ratio = _to_float(features.get("z_peak_ratio"))
-
-    run_a_ratio = a_rms_ac / max(a_mean, EPS)
-    run_g_ratio = g_std / max(g_mean, EPS)
-    run_state_score = (
-        0.45 * ratio_to_100(run_a_ratio, 0.0015, 0.020)
-        + 0.35 * ratio_to_100(run_g_ratio, 0.015, 0.320)
-        + 0.20 * ratio_to_100(max(lat_peak_ratio, z_peak_ratio), 0.10, 0.50)
-    )
-
     sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     baseline_payload = features.get("baseline") if isinstance(features.get("baseline"), dict) else None
     baseline_match = baseline_mapping_match(features, baseline_payload)
@@ -343,23 +292,68 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
     robust = _branch_robust_components(features, baseline_stats) if baseline_stats else {key: 0.0 for key in fallback.keys()}
     mixed = _mix_components(baseline_weight, robust, fallback)
 
-    loose_score = (mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"]) / 3.0
-    tight_score = mixed["rope_coupling"]
+    # run_state_score 只回答“这一窗是否确实处于可解释的运行状态”。
+    # 它不直接代表 rope，但能把静止、弱运动、偶发小抖动先压住。
+    run_state_score = (
+        0.40 * mixed["rope_rms"]
+        + 0.25 * mixed["rope_lowband"]
+        + 0.20 * mixed["rope_band_ratio"]
+        + 0.15 * mixed["rope_directional"]
+    )
+    # regularity_score 更强调“像不像连续摆动”。
+    # 对 rope 来说，低 ZCR + 小 peak_std 往往比单纯高能量更关键。
+    regularity_score = 0.55 * mixed["rope_zcr"] + 0.45 * mixed["rope_peak_regular"]
+    # loose_score 是钢丝绳主链正证据：
+    # 低频集中、低高频比增大、节奏变慢、方向性变强。
+    loose_score = (
+        mixed["rope_lowband"]
+        + mixed["rope_band_ratio"]
+        + mixed["rope_zcr"]
+        + mixed["rope_directional"]
+    ) / 4.0
+    # tight_score 在这里更像反证据画像：
+    # 高频能量偏大、过零率偏快、方向性不明显时，更接近非 rope 摆动。
+    tight_score = (
+        mixed["rope_highband"]
+        + (100.0 - mixed["rope_zcr"])
+        + (100.0 - mixed["rope_directional"])
+    ) / 3.0
     dominant_branch = "loose_like" if loose_score >= tight_score else "tight_like"
-    rope_specific_score = (mixed["rope_lateral"] + mixed["rope_domfreq"] + mixed["rope_lowband"]) / 3.0
-    baseline_deviation_score = float(mixed["shared_abnormal"])
+    rope_specific_score = float(loose_score)
+    baseline_deviation_score = float(
+        (
+            mixed["rope_rms"]
+            + mixed["rope_lowband"]
+            + mixed["rope_band_ratio"]
+            + mixed["rope_zcr"]
+            + mixed["rope_directional"]
+            + mixed["rope_peak_regular"]
+        )
+        / 6.0
+    )
+    # core_values 保留少量强相关证据做 hit-count，
+    # 避免重新退回复杂加权总分堆叠。
     core_values = [
-        mixed["rope_lateral"],
-        mixed["rope_domfreq"],
+        mixed["rope_rms"],
         mixed["rope_lowband"],
+        mixed["rope_band_ratio"],
+        mixed["rope_zcr"],
+        mixed["rope_directional"],
     ]
+    core_feature_total = len(core_values)
     core_hits = _count_hits(core_values, rule_cfg["feature_hit_min"])
     core_strong_hits = _count_hits(core_values, rule_cfg["feature_strong_min"])
     candidate_signal = 0.0
     watch_signal = 0.0
 
-    gate_rescue_score = rope_specific_score
-    effective_run_score = max(run_state_score, gate_rescue_score)
+    # gate_rescue_score 用于避免“整体运行强度一般，但 rope 画像非常明显”的窗口被过早压掉。
+    gate_rescue_score = (
+        0.45 * mixed["rope_lowband"]
+        + 0.30 * mixed["rope_band_ratio"]
+        + 0.15 * mixed["rope_directional"]
+        + 0.10 * mixed["rope_rms"]
+    )
+    effective_run_score = max(run_state_score, gate_rescue_score, regularity_score)
     gate_mode = "running"
     if not sampling_ok:
         gate_mode = "sampling_low_quality"
@@ -369,6 +363,11 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         gate_mode = "weak_running_suppressed"
 
     candidate_allowed = sampling_ok and baseline_weight > 0.0 and baseline_match is not False
+    # candidate 要求更严格：
+    # 1) 采样质量够
+    # 2) 基线可用
+    # 3) 多个核心证据同时命中
+    # 4) 不能太像高频冲击/噪声
     candidate_ready = (
         candidate_allowed
         and
@@ -376,12 +375,14 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         and core_strong_hits >= rule_cfg["candidate_strong_min"]
         and effective_run_score >= rule_cfg["candidate_run_min"]
         and mixed["spiky_penalty"] <= rule_cfg["spiky_penalty_max"]
+        and mixed["rope_peak_regular"] >= 35.0
     )
     watch_ready = (
         sampling_ok
         and
         core_hits >= rule_cfg["watch_hit_min"]
         and effective_run_score >= rule_cfg["watch_run_min"]
+        and loose_score >= 45.0
     )
 
     if not sampling_ok:
@@ -433,16 +434,23 @@ def _analyze_rope_signature(features: dict[str, Any]) -> dict[str, Any]:
         "tight_score": float(tight_score),
         "core_hits": int(core_hits),
         "core_strong_hits": int(core_strong_hits),
+        "core_feature_total": int(core_feature_total),
         "dominant_branch": dominant_branch,
         "rule_score": float(rule_score),
         "candidate_allowed": bool(candidate_allowed),
         "spectral_snapshot": {
-            "lat_dom_freq_hz": round(mixed["lat_dom_freq_hz"], 4),
-            "lat_peak_ratio": round(mixed["lat_peak_ratio"], 4),
-            "lat_low_band_ratio": round(mixed["lat_low_band_ratio"], 4),
-            "z_dom_freq_hz": round(mixed["z_dom_freq_hz"], 4),
-            "z_peak_ratio": round(mixed["z_peak_ratio"], 4),
-            "z_low_band_ratio": round(mixed["z_low_band_ratio"], 4),
+            "lat_dom_freq_hz": round(_to_float(features.get("lat_dom_freq_hz")), 4),
+            "lat_peak_ratio": round(_to_float(features.get("lat_peak_ratio")), 4),
+            "lat_low_band_ratio": round(_to_float(features.get("lat_low_band_ratio")), 4),
+            "z_dom_freq_hz": round(_to_float(features.get("z_dom_freq_hz")), 4),
+            "z_peak_ratio": round(_to_float(features.get("z_peak_ratio")), 4),
+            "z_low_band_ratio": round(_to_float(features.get("z_low_band_ratio")), 4),
+            "a_band_0_5_energy": round(mixed["a_band_0_5_energy"], 6),
+            "a_band_5_20_energy": round(mixed["a_band_5_20_energy"], 6),
+            "a_band_log_ratio_0_5_over_5_20": round(mixed["a_band_log_ratio"], 6),
+            "a_zcr_hz": round(mixed["a_zcr_hz"], 4),
+            "a_peak_std": round(mixed["a_peak_std"], 6),
+            "a_pca_primary_ratio": round(mixed["a_pca_primary_ratio"], 4),
         },
     }
 
@@ -464,6 +472,7 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
         f"rope_branch={analysis['dominant_branch']}",
         f"core_hits={analysis['core_hits']}",
         f"core_strong_hits={analysis['core_strong_hits']}",
+        f"core_feature_total={analysis['core_feature_total']}",
         f"rope_rule_score={analysis['rule_score']:.2f}",
         f"baseline_deviation_score={analysis['baseline_deviation_score']:.2f}",
         f"rope_specific_score={analysis['rope_specific_score']:.2f}",
@@ -475,19 +484,22 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
         f"effective_run_score={analysis['effective_run_score']:.2f}",
         f"gate_rescue_score={analysis['gate_rescue_score']:.2f}",
         f"candidate_allowed={'true' if analysis['candidate_allowed'] else 'false'}",
-        f"component_rope_lateral={analysis['mixed']['rope_lateral']:.2f}",
-        f"component_rope_domfreq={analysis['mixed']['rope_domfreq']:.2f}",
+        f"component_rope_rms={analysis['mixed']['rope_rms']:.2f}",
         f"component_rope_lowband={analysis['mixed']['rope_lowband']:.2f}",
-        f"component_rope_coupling={analysis['mixed']['rope_coupling']:.2f}",
+        f"component_rope_highband={analysis['mixed']['rope_highband']:.2f}",
+        f"component_rope_band_ratio={analysis['mixed']['rope_band_ratio']:.2f}",
+        f"component_rope_zcr={analysis['mixed']['rope_zcr']:.2f}",
+        f"component_rope_peak_regular={analysis['mixed']['rope_peak_regular']:.2f}",
+        f"component_rope_directional={analysis['mixed']['rope_directional']:.2f}",
         f"component_shared_abnormal={analysis['mixed']['shared_abnormal']:.2f}",
         f"component_confounding={analysis['mixed']['confounding_score']:.2f}",
         f"spiky_penalty={analysis['mixed']['spiky_penalty']:.2f}",
-        f"lat_dom_freq_hz={analysis['mixed']['lat_dom_freq_hz']:.4f}",
-        f"lat_peak_ratio={analysis['mixed']['lat_peak_ratio']:.4f}",
-        f"lat_low_band_ratio={analysis['mixed']['lat_low_band_ratio']:.4f}",
-        f"z_dom_freq_hz={analysis['mixed']['z_dom_freq_hz']:.4f}",
-        f"z_peak_ratio={analysis['mixed']['z_peak_ratio']:.4f}",
-        f"z_low_band_ratio={analysis['mixed']['z_low_band_ratio']:.4f}",
+        f"a_band_0_5_energy={analysis['mixed']['a_band_0_5_energy']:.6f}",
+        f"a_band_5_20_energy={analysis['mixed']['a_band_5_20_energy']:.6f}",
+        f"a_band_log_ratio_0_5_over_5_20={analysis['mixed']['a_band_log_ratio']:.6f}",
+        f"a_zcr_hz={analysis['mixed']['a_zcr_hz']:.4f}",
+        f"a_peak_std={analysis['mixed']['a_peak_std']:.6f}",
+        f"a_pca_primary_ratio={analysis['mixed']['a_pca_primary_ratio']:.4f}",
     ]
     reasons.extend(feature_context_reasons(features, baseline_match=analysis["baseline_match"]))
 
@@ -517,6 +529,7 @@ def detect(features: dict[str, Any]) -> dict[str, Any]:
     result["axis_mapping_signature"] = str(features.get("axis_mapping_signature", ""))
     result["core_hits"] = int(analysis["core_hits"])
     result["core_strong_hits"] = int(analysis["core_strong_hits"])
+    result["core_feature_total"] = int(analysis["core_feature_total"])
     result["specialized_ready"] = str(analysis["confirm_mode"]) == "candidate_hits_pass"
     result["type_watch_ready"] = str(analysis["confirm_mode"]) in {"candidate_hits_pass", "watch_hits_pass"}
     return result

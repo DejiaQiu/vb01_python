@@ -409,6 +409,107 @@ def spectral_features(
     }
 
 
+def _sum_band_power(
+    bins: list[tuple[float, float]],
+    *,
+    lo_hz: float,
+    hi_hz: float,
+    include_lo: bool = True,
+    include_hi: bool = True,
+) -> float:
+    if not bins:
+        return 0.0
+    total = 0.0
+    for freq, power in bins:
+        if include_lo:
+            lo_ok = freq >= float(lo_hz)
+        else:
+            lo_ok = freq > float(lo_hz)
+        if include_hi:
+            hi_ok = freq <= float(hi_hz)
+        else:
+            hi_ok = freq < float(hi_hz)
+        if lo_ok and hi_ok:
+            total += float(power)
+    return float(max(0.0, total))
+
+
+def local_peak_std(xs: list[float]) -> float:
+    """统计局部峰值幅度的离散度，用于区分规则摆动和尖峰噪声。"""
+    if len(xs) < 3:
+        return 0.0
+    centered = [float(x) - safe_mean(xs) for x in xs]
+    amp_std = safe_std(centered)
+    threshold = max(0.0, 0.5 * amp_std)
+    peaks: list[float] = []
+    for idx in range(1, len(centered) - 1):
+        cur = centered[idx]
+        if cur <= threshold:
+            continue
+        if cur > centered[idx - 1] and cur >= centered[idx + 1]:
+            peaks.append(cur)
+    if len(peaks) < 2:
+        return 0.0
+    return float(statistics.pstdev(peaks))
+
+
+def pca_primary_energy_ratio(
+    x1: list[float],
+    x2: list[float],
+    x3: list[float],
+    *,
+    iters: int = 12,
+) -> float:
+    """三轴中心化后，主方向特征值占总能量比例。"""
+    n = min(len(x1), len(x2), len(x3))
+    if n < 3:
+        return 0.0
+    xs1 = [float(v) for v in x1[:n]]
+    xs2 = [float(v) for v in x2[:n]]
+    xs3 = [float(v) for v in x3[:n]]
+    m1 = safe_mean(xs1)
+    m2 = safe_mean(xs2)
+    m3 = safe_mean(xs3)
+    centered = [(xs1[i] - m1, xs2[i] - m2, xs3[i] - m3) for i in range(n)]
+    cov = [[0.0, 0.0, 0.0] for _ in range(3)]
+    for c1, c2, c3 in centered:
+        cov[0][0] += c1 * c1
+        cov[0][1] += c1 * c2
+        cov[0][2] += c1 * c3
+        cov[1][0] += c2 * c1
+        cov[1][1] += c2 * c2
+        cov[1][2] += c2 * c3
+        cov[2][0] += c3 * c1
+        cov[2][1] += c3 * c2
+        cov[2][2] += c3 * c3
+    scale = 1.0 / max(1.0, float(n))
+    for i in range(3):
+        for j in range(3):
+            cov[i][j] *= scale
+    trace = cov[0][0] + cov[1][1] + cov[2][2]
+    if trace <= EPS:
+        return 0.0
+
+    vec = [1.0, 1.0, 1.0]
+    for _ in range(max(4, int(iters))):
+        nxt = [
+            cov[0][0] * vec[0] + cov[0][1] * vec[1] + cov[0][2] * vec[2],
+            cov[1][0] * vec[0] + cov[1][1] * vec[1] + cov[1][2] * vec[2],
+            cov[2][0] * vec[0] + cov[2][1] * vec[1] + cov[2][2] * vec[2],
+        ]
+        norm = math.sqrt(sum(item * item for item in nxt))
+        if norm <= EPS:
+            return 0.0
+        vec = [item / norm for item in nxt]
+
+    eig_max = (
+        vec[0] * (cov[0][0] * vec[0] + cov[0][1] * vec[1] + cov[0][2] * vec[2])
+        + vec[1] * (cov[1][0] * vec[0] + cov[1][1] * vec[1] + cov[1][2] * vec[2])
+        + vec[2] * (cov[2][0] * vec[0] + cov[2][1] * vec[1] + cov[2][2] * vec[2])
+    )
+    return float(clamp(eig_max / max(trace, EPS), 0.0, 1.0))
+
+
 def rms_ac(xs: list[float]) -> float:
     """去均值后的 RMS，强调动态波动而不是静态偏置。"""
     if not xs:
@@ -659,6 +760,13 @@ def build_feature_pack(rows: list[dict[str, str]], axis_mapping: dict[str, Any] 
 
     zc_rate = zero_cross_rate([v - safe_mean(az) for v in az], duration_s=duration_s)
     jerk_rms = diff_rms(a_mag, fs_hz=fs_hz)
+    # A_mag 上再补 3 个“整体运动形态”特征：
+    # - a_zcr_hz: 节奏快慢的低成本代理量，慢摆通常更低
+    # - a_peak_std: 局部峰离散度，规则摆动更小，尖峰/冲击更大
+    # - a_pca_primary_ratio: 三轴能量是否集中在单一主方向，松绳型摆动通常更有方向性
+    a_zcr_hz = zero_cross_rate([v - a_mean for v in a_mag], duration_s=duration_s)
+    a_peak_std = local_peak_std(a_mag)
+    a_pca_primary_ratio = pca_primary_energy_ratio(ax, ay, az)
 
     # 单轴特征包用于保留“具体是哪个方向在变化”，
     # 上层 rope / rubber 规则会重点使用 az_*、ax/ay_* 等前缀特征。
@@ -697,6 +805,18 @@ def build_feature_pack(rows: list[dict[str, str]], axis_mapping: dict[str, Any] 
     # 当前实现里：
     # - lateral 频域更偏向钢丝绳相关的横向摆动/低频画像
     # - vertical 频域更偏向橡胶圈或支撑刚度变化的竖向画像
+    # 钢丝绳当前主链更关心整体振动 A_mag 的频带重分配：
+    # - 0~5Hz 更像低频摆动/慢晃动
+    # - 5~20Hz 更像高频抖动、冲击或其他机械噪声
+    # band ratio 不直接用原始比值做主判，而是同时保留 log ratio，避免高频极小时数值爆掉。
+    a_mag_bins = _scan_spectrum(a_mag, fs_hz=fs_hz, freq_min_hz=0.1, freq_max_hz=20.0, step_hz=0.25)
+    a_band_0_5_energy = _sum_band_power(a_mag_bins, lo_hz=0.1, hi_hz=5.0, include_lo=True, include_hi=True)
+    a_band_5_20_energy = _sum_band_power(a_mag_bins, lo_hz=5.0, hi_hz=20.0, include_lo=False, include_hi=True)
+    a_spectrum_total_energy = max(EPS, a_band_0_5_energy + a_band_5_20_energy)
+    a_band_0_5_share = float(a_band_0_5_energy / a_spectrum_total_energy)
+    a_band_5_20_share = float(a_band_5_20_energy / a_spectrum_total_energy)
+    a_band_0_5_over_5_20_ratio = float(a_band_0_5_energy / max(a_band_5_20_energy, EPS))
+    a_band_log_ratio_0_5_over_5_20 = float(math.log1p(a_band_0_5_over_5_20_ratio))
     lateral_spectrum = spectral_features(lateral_signal, fs_hz=fs_hz)
     vertical_spectrum = spectral_features(vertical_signal, fs_hz=fs_hz)
 
@@ -730,6 +850,9 @@ def build_feature_pack(rows: list[dict[str, str]], axis_mapping: dict[str, Any] 
         "jerk_rms": float(jerk_rms),
         "peak_rate_hz": float(peak_rate_hz),
         "zc_rate_hz": float(zc_rate),
+        "a_zcr_hz": float(a_zcr_hz),
+        "a_peak_std": float(a_peak_std),
+        "a_pca_primary_ratio": float(a_pca_primary_ratio),
         "lateral_ratio": float(lateral_ratio),
         "ag_corr": float(ag_corr),
         "gx_ax_corr": float(gx_ax_corr),
@@ -739,6 +862,12 @@ def build_feature_pack(rows: list[dict[str, str]], axis_mapping: dict[str, Any] 
         "corr_yz": float(corr_yz),
         "energy_x_over_y": float(energy_x_over_y),
         "energy_z_over_xy": float(energy_z_over_xy),
+        "a_band_0_5_energy": float(a_band_0_5_energy),
+        "a_band_5_20_energy": float(a_band_5_20_energy),
+        "a_band_0_5_share": float(a_band_0_5_share),
+        "a_band_5_20_share": float(a_band_5_20_share),
+        "a_band_0_5_over_5_20_ratio": float(a_band_0_5_over_5_20_ratio),
+        "a_band_log_ratio_0_5_over_5_20": float(a_band_log_ratio_0_5_over_5_20),
         "lat_dom_freq_hz": float(lateral_spectrum["dom_freq_hz"]),
         "lat_peak_ratio": float(lateral_spectrum["peak_ratio"]),
         "lat_low_band_ratio": float(lateral_spectrum["low_band_ratio"]),

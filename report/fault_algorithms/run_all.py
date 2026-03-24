@@ -4,36 +4,48 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 try:
     from ._base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
-    from .detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
 except ImportError:  # pragma: no cover
     from _base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
-    from detect_rope_looseness import ROPE_BASELINE_KEYS, detect as detect_rope_looseness
 
 
 _PATTERN = re.compile(r"vibration_30s_\d{8}_(\d{6})\.csv$")
 
 HIGH_CONFIDENCE_SCORE = 60.0
 WATCH_SCORE = 45.0
-HIGH_CONFIDENCE_QUALITY = 0.80
-WATCH_QUALITY = 0.60
 MIN_EFFECTIVE_SAMPLES = int(SAMPLING_QUALITY_CONFIG["min_samples"])
-BASELINE_KEYS = tuple(dict.fromkeys(ROPE_BASELINE_KEYS))
-PRIMARY_DETECTOR: Callable[[dict[str, Any]], dict[str, Any]] = detect_rope_looseness
-AUXILIARY_DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
-DETECTORS: list[Callable[[dict[str, Any]], dict[str, Any]]] = [PRIMARY_DETECTOR]
 EPS = 1e-9
+
+# 通用异常门只回答“相对健康基线是否偏离”，不直接给故障类型。
+# 这里混合少量整体振动特征和方向/频域特征，目的是在 rope/rubber 主判之前，
+# 先筛出“确实不像健康状态”的窗口。
+SYSTEM_BASELINE_FEATURES: tuple[dict[str, float | str], ...] = (
+    {"key": "a_rms_ac", "weight": 1.0, "softness": 2.8, "floor_abs": 0.003, "floor_ratio": 0.15},
+    {"key": "a_p2p", "weight": 1.0, "softness": 2.8, "floor_abs": 0.05, "floor_ratio": 0.18},
+    {"key": "g_std", "weight": 1.0, "softness": 2.5, "floor_abs": 0.02, "floor_ratio": 0.12},
+    {"key": "a_peak_std", "weight": 0.9, "softness": 2.5, "floor_abs": 0.005, "floor_ratio": 0.20},
+    {"key": "a_pca_primary_ratio", "weight": 0.8, "softness": 2.5, "floor_abs": 0.05, "floor_ratio": 0.12},
+    {"key": "a_band_log_ratio_0_5_over_5_20", "weight": 0.8, "softness": 2.5, "floor_abs": 0.04, "floor_ratio": 0.18},
+    {"key": "lateral_ratio", "weight": 1.1, "softness": 2.2, "floor_abs": 0.10, "floor_ratio": 0.12},
+    {"key": "lat_dom_freq_hz", "weight": 1.0, "softness": 2.0, "floor_abs": 0.35, "floor_ratio": 0.18},
+    {"key": "lat_low_band_ratio", "weight": 1.1, "softness": 2.0, "floor_abs": 0.04, "floor_ratio": 0.15},
+    {"key": "z_peak_ratio", "weight": 0.9, "softness": 2.0, "floor_abs": 0.02, "floor_ratio": 0.20},
+)
+BASELINE_KEYS = tuple(str(item["key"]) for item in SYSTEM_BASELINE_FEATURES)
 SYSTEM_GATE_CONFIG = {
     "watch_score": WATCH_SCORE,
     "candidate_score": HIGH_CONFIDENCE_SCORE,
-    "watch_quality": WATCH_QUALITY,
-    "candidate_quality": HIGH_CONFIDENCE_QUALITY,
     "min_effective_samples": MIN_EFFECTIVE_SAMPLES,
     "feature_hit_min": 45.0,
     "feature_strong_min": 60.0,
+    "shared_watch_min": 35.0,
+    "shared_candidate_min": 48.0,
+    "watch_hit_min": 3,
+    "candidate_hit_min": 5,
+    "candidate_strong_min": 2,
     "run_watch_min": 30.0,
     "run_candidate_min": 35.0,
     "run_weak_min": 45.0,
@@ -51,8 +63,12 @@ def _in_range(hhmmss: str, start_hhmm: str, end_hhmm: str) -> bool:
 
 
 def _select_files(input_dir: Path, start_hhmm: str, end_hhmm: str) -> list[Path]:
-    files = sorted(input_dir.glob("vibration_30s_*.csv"), key=lambda p: _hhmmss(p))
-    return [path for path in files if _in_range(_hhmmss(path), start_hhmm, end_hhmm)]
+    files = sorted(input_dir.glob("*.csv"))
+    timed_files = [path for path in files if _PATTERN.match(path.name)]
+    if timed_files:
+        return sorted([path for path in timed_files if _in_range(_hhmmss(path), start_hhmm, end_hhmm)], key=lambda p: _hhmmss(p))
+    # 兼容离线切窗后的 segment_*.csv 基线目录；这类文件没有时刻信息，直接全量纳入。
+    return files
 
 
 def _load_baseline_json(path: Path) -> dict | None:
@@ -72,25 +88,11 @@ def _build_baseline_from_dir(input_dir: Path, start_hhmm: str, end_hhmm: str) ->
     return baseline
 
 
-def _quality(result: dict[str, Any]) -> float:
-    return float(result.get("quality_factor", 0.0))
-
-
-def _score(result: dict[str, Any]) -> float:
-    return float(result.get("score", 0.0))
-
-
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def _copy_result(result: dict[str, Any], *, screening: str) -> dict[str, Any]:
-    payload = dict(result)
-    payload["screening"] = screening
-    return payload
 
 
 def _level_from_score(score: float) -> str:
@@ -119,11 +121,18 @@ def _baseline_stats(baseline: dict[str, Any] | None) -> dict[str, tuple[float, f
     return stats
 
 
-def _positive_z(value: float, stat: tuple[float, float] | None) -> float:
+def _deviation_z(
+    value: float,
+    stat: tuple[float, float] | None,
+    *,
+    floor_abs: float = 0.0,
+    floor_ratio: float = 0.0,
+) -> tuple[float, float]:
     if stat is None:
-        return 0.0
+        return 0.0, max(1e-6, float(floor_abs))
     median, scale = stat
-    return max(0.0, (float(value) - median) / max(scale, 1e-6))
+    effective_scale = max(float(scale), float(floor_abs), abs(float(median)) * float(floor_ratio), 1e-6)
+    return abs(float(value) - float(median)) / effective_scale, effective_scale
 
 
 def _z_to_100(z_value: float, softness: float = 2.0) -> float:
@@ -149,6 +158,38 @@ def _to_float(value: Any, default: float = 0.0) -> float:
     return float(parsed if parsed is not None else default)
 
 
+def _system_baseline_components(
+    features: dict[str, Any],
+    baseline_stats: dict[str, tuple[float, float]],
+) -> list[dict[str, Any]]:
+    components: list[dict[str, Any]] = []
+    for spec in SYSTEM_BASELINE_FEATURES:
+        key = str(spec["key"])
+        stat = baseline_stats.get(key)
+        if stat is None:
+            continue
+        value = _to_float(features.get(key))
+        deviation_z, effective_scale = _deviation_z(
+            value,
+            stat,
+            floor_abs=_safe_float(spec.get("floor_abs"), 0.0),
+            floor_ratio=_safe_float(spec.get("floor_ratio"), 0.0),
+        )
+        score = _safe_float(spec.get("weight"), 1.0) * _z_to_100(deviation_z, _safe_float(spec.get("softness"), 2.0))
+        components.append(
+            {
+                "key": key,
+                "value": round(float(value), 6),
+                "median": round(float(stat[0]), 6),
+                "scale": round(float(stat[1]), 6),
+                "effective_scale": round(float(effective_scale), 6),
+                "z": round(float(deviation_z), 3),
+                "score": round(float(score), 2),
+            }
+        )
+    return components
+
+
 def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | None) -> dict[str, Any]:
     gate_cfg = SYSTEM_GATE_CONFIG
     sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
@@ -166,16 +207,17 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     fallback_g_std = ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
     baseline_match = baseline_mapping_match(features, baseline)
     baseline_stats = _baseline_stats(baseline) if baseline_match is not False else {}
-    baseline_count = len([key for key in ("a_rms_ac", "a_p2p", "g_std") if key in baseline_stats])
-    baseline_weight = _normalize_weight(baseline_count, 3) if baseline_match is not False else 0.0
-    robust_a_rms = _z_to_100(_positive_z(a_rms_ac, baseline_stats.get("a_rms_ac")))
-    robust_a_p2p = _z_to_100(_positive_z(a_p2p, baseline_stats.get("a_p2p")))
-    robust_g_std = _z_to_100(_positive_z(g_std, baseline_stats.get("g_std")))
-    shared_components = [
-        baseline_weight * robust_a_rms + (1.0 - baseline_weight) * fallback_a_rms,
-        baseline_weight * robust_a_p2p + (1.0 - baseline_weight) * fallback_a_p2p,
-        baseline_weight * robust_g_std + (1.0 - baseline_weight) * fallback_g_std,
+    baseline_components = _system_baseline_components(features, baseline_stats) if baseline_stats else []
+    baseline_count = len(baseline_components)
+    baseline_weight = _normalize_weight(baseline_count, len(SYSTEM_BASELINE_FEATURES)) if baseline_match is not False else 0.0
+    fallback_components = [
+        {"key": "a_rms_ac", "score": round(float(fallback_a_rms), 2)},
+        {"key": "a_p2p", "score": round(float(fallback_a_p2p), 2)},
+        {"key": "g_std", "score": round(float(fallback_g_std), 2)},
     ]
+    # 有健康基线时优先看“相对基线偏离”；没有基线再退回自归一化兜底。
+    shared_component_payload = baseline_components if baseline_components else fallback_components
+    shared_components = [float(item.get("score", 0.0)) for item in shared_component_payload]
     shared_score = sum(shared_components) / len(shared_components)
     shared_hits = _count_hits(shared_components, gate_cfg["feature_hit_min"])
     shared_strong_hits = _count_hits(shared_components, gate_cfg["feature_strong_min"])
@@ -194,15 +236,20 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
         gate_mode = "non_running_suppressed"
         status = "normal"
         score = 0.0
-    elif shared_hits >= 3 and shared_strong_hits >= 2 and run_state_score >= gate_cfg["run_candidate_min"]:
+    elif (
+        shared_score >= gate_cfg["shared_candidate_min"]
+        and shared_hits >= gate_cfg["candidate_hit_min"]
+        and shared_strong_hits >= gate_cfg["candidate_strong_min"]
+        and run_state_score >= gate_cfg["run_candidate_min"]
+    ):
         status = "candidate_faults"
-        score = min(100.0, 72.0 + 4.0 * max(0, shared_strong_hits - 2))
-    elif shared_hits >= 2 and run_state_score >= gate_cfg["run_watch_min"]:
+        score = min(100.0, shared_score)
+    elif shared_score >= gate_cfg["shared_watch_min"] and shared_hits >= gate_cfg["watch_hit_min"] and run_state_score >= gate_cfg["run_watch_min"]:
         status = "watch_only"
-        score = min(59.0, 52.0 + 3.0 * max(0, shared_hits - 2) + 2.0 * max(0, shared_strong_hits - 1))
+        score = min(gate_cfg["candidate_score"] - 1.0, max(gate_cfg["watch_score"], shared_score))
     else:
         status = "normal"
-        score = max(0.0, min(44.0, 18.0 + 8.0 * shared_hits + 4.0 * shared_strong_hits))
+        score = max(0.0, min(gate_cfg["watch_score"] - 1.0, shared_score))
         if run_state_score < gate_cfg["run_weak_min"]:
             gate_mode = "weak_running_suppressed"
     return {
@@ -211,68 +258,33 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
         "shared_abnormal_score": round(float(shared_score), 2),
         "baseline_mode": "mapping_mismatch_fallback"
         if baseline_match is False and baseline is not None
-        else ("robust_baseline" if baseline_weight > 0.0 else "self_normalized_fallback"),
+        else ("robust_baseline" if baseline_components else "self_normalized_fallback"),
         "baseline_weight": round(float(baseline_weight), 3),
         "baseline_features": baseline_count,
         "baseline_match": baseline_match,
         "run_state_score": round(float(run_state_score), 2),
         "gate_mode": gate_mode,
+        "shared_hits": int(shared_hits),
+        "shared_strong_hits": int(shared_strong_hits),
+        "shared_feature_total": int(len(shared_components)),
+        "top_deviations": sorted(shared_component_payload, key=lambda item: _safe_float(item.get("score"), 0.0), reverse=True)[:4],
         "sampling_ok": sampling_ok,
         "sampling_ok_40hz": sampling_ok,
         "sampling_condition": sampling_condition,
     }
 
 
-def _family_for_fault_type(fault_type: str) -> str:
-    key = str(fault_type or "").strip().lower()
-    if key in {"rope_looseness", "rope_tension_abnormal"}:
-        return "rope"
-    if key == "rubber_hardening":
-        return "rubber"
-    return key or "unknown"
-
-
-def _specialized_score(result: dict[str, Any]) -> float:
-    family = _family_for_fault_type(str(result.get("fault_type", "")))
-    if family == "rope":
-        return _safe_float(result.get("rope_specific_score"), _score(result))
-    if family == "rubber":
-        return _safe_float(result.get("rubber_specific_score"), _score(result))
-    return _score(result)
-
-
-def _type_watch_ready(result: dict[str, Any]) -> bool:
-    raw = result.get("type_watch_ready")
-    if raw is not None:
-        return bool(raw)
-    return str(result.get("level", "")).strip().lower() in {"watch", "warning", "alarm"}
-
-
-def _decision_score(result: dict[str, Any], system_abnormality: dict[str, Any]) -> float:
-    specific = _specialized_score(result)
-    system_score = _safe_float(system_abnormality.get("score"), 0.0)
-    return round(0.72 * specific + 0.28 * system_score, 2)
-
-
-def _same_issue(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    return (
-        str(left.get("fault_type", "")) == str(right.get("fault_type", ""))
-        and abs(_score(left) - _score(right)) < 1e-6
-        and str(left.get("level", "")) == str(right.get("level", ""))
-    )
-
-
-def _rope_only(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [item for item in items if _family_for_fault_type(item.get("fault_type", "")) == "rope"]
-
-
-def _unknown_watch_issue(system_abnormality: dict[str, Any]) -> dict[str, Any]:
-    score = max(_safe_float(system_abnormality.get("score"), 0.0), WATCH_SCORE)
+def _generic_abnormal_issue(system_abnormality: dict[str, Any], *, screening: str) -> dict[str, Any]:
+    score = _safe_float(system_abnormality.get("score"), 0.0)
+    if screening == "high_confidence":
+        score = max(score, HIGH_CONFIDENCE_SCORE)
+    else:
+        score = max(score, WATCH_SCORE)
     return {
         "fault_type": "unknown",
         "score": round(score, 2),
         "level": _level_from_score(score),
-        "triggered": False,
+        "triggered": screening == "high_confidence",
         "quality_factor": 1.0,
         "reasons": [
             "mode=shared_abnormality_gate",
@@ -280,51 +292,8 @@ def _unknown_watch_issue(system_abnormality: dict[str, Any]) -> dict[str, Any]:
             f"gate={system_abnormality.get('gate_mode', 'running')}",
         ],
         "feature_snapshot": {},
+        "screening": screening,
     }
-
-
-def _screen_detectors(
-    results: list[dict[str, Any]],
-    *,
-    system_abnormality: dict[str, Any],
-    quality_ok: bool,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    gate_cfg = SYSTEM_GATE_CONFIG
-    candidates: list[dict[str, Any]] = []
-    watch_faults: list[dict[str, Any]] = []
-    for result in results:
-        if _family_for_fault_type(result.get("fault_type", "")) != "rope":
-            continue
-        score = _score(result)
-        quality = _quality(result)
-        specialized_ready = bool(result.get("specialized_ready", bool(result.get("triggered", False))))
-        type_watch_ready = _type_watch_ready(result)
-        candidate_ready = (
-            quality_ok
-            and system_abnormality.get("status") == "candidate_faults"
-            and specialized_ready
-            and bool(result.get("triggered", False))
-            and score >= gate_cfg["candidate_score"]
-            and quality >= gate_cfg["candidate_quality"]
-        )
-        watch_ready = (
-            quality_ok
-            and system_abnormality.get("status") in {"candidate_faults", "watch_only"}
-            and type_watch_ready
-            and score >= gate_cfg["watch_score"]
-            and quality >= gate_cfg["watch_quality"]
-        )
-        if candidate_ready:
-            payload = _copy_result(result, screening="high_confidence")
-            payload["decision_score"] = _decision_score(result, system_abnormality)
-            candidates.append(payload)
-        elif watch_ready:
-            payload = _copy_result(result, screening="watch")
-            payload["decision_score"] = _decision_score(result, system_abnormality)
-            watch_faults.append(payload)
-    candidates.sort(key=lambda item: (_safe_float(item.get("decision_score"), 0.0), _score(item)), reverse=True)
-    watch_faults.sort(key=lambda item: (_safe_float(item.get("decision_score"), 0.0), _score(item)), reverse=True)
-    return candidates, watch_faults
 
 
 def run_all_rows(
@@ -336,25 +305,9 @@ def run_all_rows(
     axis_mapping: dict[str, Any] | None = None,
 ) -> dict:
     features = build_feature_pack(rows, axis_mapping=axis_mapping)
-    detector_features = dict(features)
-    if baseline is not None:
-        detector_features["baseline"] = baseline
+    system_abnormality = _system_abnormality(features, baseline)
 
-    detectors = DETECTORS if DETECTORS else [PRIMARY_DETECTOR]
-    detector_results = [detector(detector_features) for detector in detectors]
-    detector_results = sorted(detector_results, key=_score, reverse=True)
-    rope_primary = next((item for item in detector_results if _family_for_fault_type(item.get("fault_type", "")) == "rope"), {})
-    rubber_primary = next((item for item in detector_results if _family_for_fault_type(item.get("fault_type", "")) == "rubber"), {})
-    system_abnormality = _system_abnormality(detector_features, baseline)
-
-    n_effective = int(features.get("n", 0))
     quality_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
-    candidate_faults, watch_faults = _screen_detectors(
-        detector_results,
-        system_abnormality=system_abnormality,
-        quality_ok=quality_ok,
-    )
-    top_candidate = candidate_faults[0] if candidate_faults else {}
     baseline_match = baseline_mapping_match(features, baseline)
 
     baseline_payload = dict(baseline_summary or {"mode": "disabled", "count": 0, "stats": 0})
@@ -367,26 +320,28 @@ def run_all_rows(
 
     if not quality_ok:
         screening_status = "low_quality"
-        top_fault = detector_results[0] if detector_results else {}
+        top_fault = {}
         watch_faults = []
         candidate_faults = []
-    elif candidate_faults:
+        top_candidate = {}
+    elif system_abnormality.get("status") == "candidate_faults":
         screening_status = "candidate_faults"
-        top_fault = top_candidate
-    elif watch_faults:
+        top_fault = _generic_abnormal_issue(system_abnormality, screening="high_confidence")
+        top_candidate = dict(top_fault)
+        candidate_faults = [dict(top_fault)]
+        watch_faults = []
+    elif system_abnormality.get("status") == "watch_only":
         screening_status = "watch_only"
-        top_fault = watch_faults[0]
-    elif system_abnormality.get("status") in {"candidate_faults", "watch_only"} or candidate_faults or watch_faults:
-        screening_status = "watch_only"
-        top_fault = _copy_result(_unknown_watch_issue(system_abnormality), screening="watch")
-        top_fault["decision_score"] = _safe_float(system_abnormality.get("score"), 0.0)
-        watch_faults = [top_fault]
+        top_fault = _generic_abnormal_issue(system_abnormality, screening="watch")
+        top_candidate = {}
         candidate_faults = []
+        watch_faults = [dict(top_fault)]
     else:
         screening_status = "normal"
-        top_fault = detector_results[0] if detector_results else {}
-
-    auxiliary_results = [dict(item) for item in detector_results if not _same_issue(item, top_fault)] if top_fault else detector_results
+        top_fault = {}
+        top_candidate = {}
+        candidate_faults = []
+        watch_faults = []
 
     return {
         "input": str(source),
@@ -413,28 +368,15 @@ def run_all_rows(
             "sampling_condition": str(features.get("sampling_condition", "unknown")),
         },
         "system_abnormality": system_abnormality,
-        "rope_primary": {
-            "fault_type": str(rope_primary.get("fault_type", "")),
-            "score": _score(rope_primary),
-            "level": str(rope_primary.get("level", "normal")),
-            "triggered": bool(rope_primary.get("triggered", False)),
-            "rope_rule_score": float(rope_primary.get("rope_rule_score", 0.0)),
-            "rope_branch": str(rope_primary.get("rope_branch", "")),
-            "rope_spectral_snapshot": dict(rope_primary.get("rope_spectral_snapshot", {}))
-            if isinstance(rope_primary.get("rope_spectral_snapshot"), dict)
-            else {},
-            "sampling_condition": str(rope_primary.get("sampling_condition", features.get("sampling_condition", "unknown"))),
-            "axis_mapping_signature": str(rope_primary.get("axis_mapping_signature", features.get("axis_mapping_signature", ""))),
-            "baseline_match": rope_primary.get("baseline_match"),
-        },
-        "rubber_primary": dict(rubber_primary) if rubber_primary else {},
+        "rope_primary": {},
+        "rubber_primary": {},
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,
         "watch_faults": watch_faults,
         "primary_issue": dict(top_fault) if screening_status in {"candidate_faults", "watch_only"} else {},
-        "auxiliary_results": auxiliary_results,
-        "results": [top_fault, *auxiliary_results] if top_fault else auxiliary_results,
+        "auxiliary_results": [],
+        "results": [top_fault] if top_fault else [],
     }
 
 
