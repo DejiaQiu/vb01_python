@@ -346,8 +346,9 @@ def _build_low_frequency_spectrum(
     vertical_bins = _scan_spectrum(vertical_signal, fs_hz=fs_hz, freq_min_hz=0.3, freq_max_hz=4.0, step_hz=0.1)
     x_lat, y_lat = _normalized_spectrum_values(lateral_bins)
     x_vert, y_vert = _normalized_spectrum_values(vertical_bins)
+    spectrum_title = "低频频谱图：横向/竖向能量对比"
     plot = _plot_block(
-        "横向/竖向低频能量对比",
+        spectrum_title,
         [
             {"label": "横向摆动", "color": "#E4572E", "xs": x_lat, "ys": y_lat},
             {"label": "竖向传递", "color": "#4C78A8", "xs": x_vert, "ys": y_vert},
@@ -356,7 +357,7 @@ def _build_low_frequency_spectrum(
         height=height,
     )
     chart = _echarts_block(
-        "横向/竖向低频能量对比",
+        spectrum_title,
         [
             {"label": "横向摆动", "color": "#E4572E", "xs": x_lat, "ys": y_lat},
             {"label": "竖向传递", "color": "#4C78A8", "xs": x_vert, "ys": y_vert},
@@ -365,14 +366,14 @@ def _build_low_frequency_spectrum(
     if isinstance(chart.get("option"), dict):
         chart["option"]["xAxis"]["name"] = "频率 (Hz)"
         chart["option"]["yAxis"]["name"] = "相对能量"
-        chart["option"]["title"]["text"] = "横向/竖向低频能量对比"
+        chart["option"]["title"]["text"] = spectrum_title
         chart["option"]["legend"]["data"] = ["横向摆动", "竖向传递"]
         for series, label in zip(chart["option"]["series"], ["横向摆动", "竖向传递"]):
             series["name"] = label
         chart["option_json"] = json.dumps(chart["option"], ensure_ascii=False)
         chart["markdown"] = f"```echarts\n{chart['option_json']}\n```"
-    plot["title"] = "横向/竖向低频能量对比"
-    plot["markdown"] = f"![横向/竖向低频能量对比]({plot['data_uri']})"
+    plot["title"] = spectrum_title
+    plot["markdown"] = f"![{spectrum_title}]({plot['data_uri']})"
     return plot, chart
 
 
@@ -438,10 +439,12 @@ def _build_insight_markdown(
         ]
         for item in system_abnormality.get("top_deviations", [])
         if isinstance(item, dict)
+        and str(system_abnormality.get("baseline_mode", "")).strip() == "robust_baseline"
+        and all(key in item for key in ("value", "median", "z"))
     ]
 
     lines = [
-        "## 怎么读这些图",
+        "## 怎么读频谱图和波形图",
         "",
         "### 传感器安装方向说明",
         f"- {axis_short}。",
@@ -460,6 +463,14 @@ def _build_insight_markdown(
                 "",
                 "### 偏离最明显的特征",
                 _markdown_table(["特征", "当前值", "基线中位数", "偏离 z", "异常分"], top_deviation_rows),
+            ]
+        )
+    elif str(system_abnormality.get("baseline_mode", "")).strip() != "robust_baseline":
+        lines.extend(
+            [
+                "",
+                "### 健康基线说明",
+                "- 当前没有可直接对比的健康基线统计量，因此这里只保留异常分，不展示偏离 z 表。",
             ]
         )
     return "\n".join(lines).strip()
@@ -582,7 +593,7 @@ def build_waveform_payload(
 
     markdown = "\n".join(
         [
-            "## 波形图",
+            "## 波形图与低频频谱图",
             "",
             low_frequency_spectrum["markdown"],
             "",
@@ -595,7 +606,7 @@ def build_waveform_payload(
     )
     markdown_echarts = "\n".join(
         [
-            "## 波形图",
+            "## 波形图与低频频谱图",
             "",
             low_frequency_spectrum_chart["markdown"],
             "",

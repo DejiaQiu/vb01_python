@@ -68,7 +68,7 @@ workflow:
         - local_file
         - remote_url
       number_limits: 3
-    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；可在问题里写“查看 002 号梯状态”。上传电梯振动 CSV 后，会自动执行规则诊断、绘制波形图并输出综合报告。
+    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；可在问题里写“查看 002 号梯状态”。上传电梯振动 CSV 后，可只传文件、不输入文字，系统会自动执行规则诊断、绘制低频频谱图与三轴波形，并输出综合报告。
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:
@@ -530,12 +530,13 @@ workflow:
           \ top_candidate)\n    display_conclusion = _display_conclusion(status, fault_type)\n\
           \    fault_score = primary_issue.get(\"score\", preferred.get(\"score\"\
           , top_candidate.get(\"score\", 0)))\n    abnormal_score = system_abnormality.get(\"score\",\
-          \ 0)\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"))\n \
+          \ 0)\n    baseline_mode = str(system_abnormality.get(\"baseline_mode\", \"unknown\"\
+          ))\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"))\n \
           \   risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    compact_payload\
           \ = _compact_latest_payload(payload)\n\
           \    report_markdown_for_llm = _trim_report_for_llm(report_markdown_draft)\n\
           \    summary = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
-          \ 分数={fault_score}; 异常分={abnormal_score}; 当前风险={risk_now}; 24h风险={risk_24h};\
+          \ 分数={fault_score}; 异常分={abnormal_score}; 基线模式={baseline_mode}; 当前风险={risk_now}; 24h风险={risk_24h};\
           \ 目标电梯={requested_elevator_id or 'default'}; 最新文件={latest_file}; 后端报告={'已生成'\
           \ if report_markdown_draft else '未生成'}\"\n    )\n    return {\n        \"\
           status_json\": json.dumps(compact_payload, ensure_ascii=False),\n      \
@@ -643,7 +644,7 @@ workflow:
             6. 如果状态是 normal，明确写“当前未见明确异常证据”。\n7. 如果状态是 watch_only，明确写“检测到异常变化，但建议继续观察或尽快复测”。\n\
             8. 如果状态是 watch_only 且主结论为 unknown，必须直接写“已检测到异常，但类型待确认”，不要写成“没有异常”或“无法判断”。\n\
             9. 如果状态是 candidate_faults，明确写“存在高置信异常，建议安排现场复核”。\n10. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n\
-            11. 用自然中文，不要输出 JSON，不要夸大结论。\n"
+            11. 只有当输入里明确出现 robust_baseline 且后端草稿真的给出了“基线中位数 / 偏离 z”时，才可以引用这些统计量。\n12. 如果输入里是 self_normalized_fallback 或 mapping_mismatch_fallback，只能说“异常分来自兜底评分/自归一化评分”，不要编造基线中位数、z 值，也不要把缺失值说成 0。\n13. 用自然中文，不要输出 JSON，不要夸大结论。\n"
         selected: false
         title: 在线状态回答
         type: llm
@@ -680,8 +681,6 @@ workflow:
           ```text
           {{#status_parse.report_tables_text#}}
           ```
-
-          ## 怎么读这些图
 
           {{#status_parse.waveform_insights#}}
 
@@ -1015,13 +1014,14 @@ workflow:
           \    status = str(screening.get(\"status\", \"unknown\"))\n    primary_issue\
           \ = _as_dict(payload.get(\"primary_issue\"))\n    system_abnormality = _as_dict(payload.get(\"\
           system_abnormality\"))\n    top_candidate = _as_dict(payload.get(\"top_candidate\"\
+          ))\n    baseline_mode = str(system_abnormality.get(\"baseline_mode\", \"unknown\"\
           ))\n    if primary_issue.get(\"fault_type\") or top_candidate.get(\"fault_type\"\
           ):\n        summary = (\n            f\"筛查状态：{status}；主结论：{_fault_text(primary_issue,\
           \ top_candidate)}；\"\n            f\"分数：{primary_issue.get('score', top_candidate.get('score',\
-          \ 0))}；异常分：{system_abnormality.get('score', 0)}。\"\n        )\n    else:\n\
-          \        summary = f\"筛查状态：{status}；异常分：{system_abnormality.get('score', 0)}。\"\
-          \n    return {\n        \"diagnosis_json\": json.dumps(payload, ensure_ascii=False),\n\
-          \        \"diagnosis_summary\": summary,\n    }\n"
+          \ 0))}；异常分：{system_abnormality.get('score', 0)}；基线模式：{baseline_mode}。\"\n\
+          \        )\n    else:\n        summary = f\"筛查状态：{status}；异常分：{system_abnormality.get('score',\
+          \ 0)}；基线模式：{baseline_mode}。\"\n    return {\n        \"diagnosis_json\": json.dumps(payload,\
+          \ ensure_ascii=False),\n        \"diagnosis_summary\": summary,\n    }\n"
         code_language: python3
         desc: ''
         outputs:
@@ -1272,7 +1272,7 @@ workflow:
             \n下面是图表说明卡片：\n{{#report_parse.waveform_insights#}}\n\n输出要求：\n1. 面向普通人，优先说“看到了什么、代表什么、要不要处理”。\n\
             2. 结构固定为：\n   ## 1. 一句话结论\n   ## 2. 给非专业人员的解释\n   ## 3. 建议怎么做\n   ## 4.\
             \ 本次判断依据\n   ## 5. 给维保人员的补充参考\n3. 不要重复一级标题，答案节点会单独拼接标题。\n4. 不要输出 JSON，不要生成波形图代码块，答案节点会自动拼接。\n\
-            5. 尽量使用自然中文，不要过多直接暴露英文技术字段名。\n"
+            5. 只有当输入里明确是 robust_baseline 且后端草稿真的给出了“基线中位数 / 偏离 z”时，才可以引用这些统计量。\n6. 如果输入里是 self_normalized_fallback 或 mapping_mismatch_fallback，只能写“异常分来自兜底评分/自归一化评分”，不要自行补写基线中位数、z 值，也不要把缺失值说成 0。\n7. 尽量使用自然中文，不要过多直接暴露英文技术字段名。\n"
         selected: true
         title: LLM综合润色
         type: llm
@@ -1297,8 +1297,6 @@ workflow:
           # {{#report_parse.report_title#}}
 
           {{#report_llm.text#}}
-
-          ## 怎么读这些图
 
           {{#report_parse.waveform_insights#}}
 

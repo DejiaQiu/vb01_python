@@ -355,6 +355,8 @@ def _build_system_deviation_rows(diag: dict[str, Any]) -> list[list[Any]]:
     system_abnormality = diag.get("system_abnormality", {})
     if not isinstance(system_abnormality, dict):
         return []
+    if str(system_abnormality.get("baseline_mode", "")).strip() != "robust_baseline":
+        return []
     top_deviations = system_abnormality.get("top_deviations", [])
     if not isinstance(top_deviations, list):
         return []
@@ -373,6 +375,8 @@ def _build_system_deviation_rows(diag: dict[str, Any]) -> list[list[Any]]:
     rows: list[list[Any]] = []
     for item in top_deviations:
         if not isinstance(item, dict):
+            continue
+        if any(key not in item for key in ("value", "median", "z", "effective_scale")):
             continue
         rows.append(
             [
@@ -672,6 +676,14 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
     if system_deviation_rows:
         lines.extend(["", "### 4.1 相对健康基线偏离最明显的特征"])
         lines.extend(_markdown_table(["特征", "当前值", "基线中位数", "偏离 z", "异常分", "基线尺度"], system_deviation_rows))
+    elif str(system_abnormality.get("baseline_mode", "")).strip() != "robust_baseline":
+        lines.extend(
+            [
+                "",
+                "### 4.1 健康基线说明",
+                "- 当前没有可直接对比的健康基线统计量，这一窗的异常分来自兜底评分，不展示“偏离 z / 基线中位数”表，避免把缺失值误读成 0。",
+            ]
+        )
     lines.extend(["", "## 5. 给维保人员的补充参考"])
     lines.extend(_markdown_table(["项目", "内容"], maintenance_rows))
     if system_abnormality:

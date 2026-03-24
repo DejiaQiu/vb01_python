@@ -38,6 +38,9 @@ Branch rule:
 
 - `sys.files` is empty: go to online status query branch
 - `sys.files` has uploaded CSV: go to offline diagnosis report branch
+- CSV branch does not depend on `sys.query`; when the Dify client allows empty text submission, users can upload a file and send directly without typing a question
+- Only when `system_abnormality.baseline_mode == robust_baseline` and `top_deviations` contains real `value / median / z / effective_scale` may Dify render or describe a "baseline median / deviation z" table
+- If `baseline_mode` is `self_normalized_fallback` or `mapping_mismatch_fallback`, Dify should only present the anomaly score and explain that no directly comparable health-baseline statistics are available; do not render missing stats as `0`
 
 ### Branch A: No CSV uploaded
 
@@ -87,7 +90,7 @@ Typical answer style:
 - abnormal conclusion
 - abnormal clues when present
 - whether to continue observation or arrange inspection
-- then fixed charts in this order: acceleration, gyroscope, acceleration magnitude
+- then fixed charts in this order: low-frequency spectrum, acceleration, gyroscope, acceleration magnitude
 
 ### Branch B: CSV uploaded
 
@@ -95,8 +98,9 @@ Purpose:
 
 - Upload a CSV
 - run the candidate-fault screening chain
-- draw waveform charts in Dify
+- draw a low-frequency spectrum chart plus waveform charts in Dify
 - generate a readable report
+- this branch should tolerate empty user text and rely on the uploaded file as the primary input
 
 Current recommended node flow:
 
@@ -116,6 +120,7 @@ Notes:
 - Waveforms are now rendered on the Dify side with `echarts` code blocks.
 - The backend `waveform-plot` API is still available for other clients, but the current Dify report workflow does not need to depend on it.
 - Dify has a per-variable size limit. For uploaded CSV, the workflow should compact and sample the extracted text before storing it in `csv_text`; do not pass the full extracted file text through workflow variables.
+- For explanation cards and report tables, treat `system_abnormality.top_deviations` as displayable only in `robust_baseline` mode. Fallback mode may still have a score, but it does not mean backend has a real baseline median or z-statistic for each feature.
 
 ## Scheduled Batch Diagnosis
 
@@ -256,6 +261,8 @@ Output:
 Important Dify mapping rule:
 
 - Prefer `primary_issue` as the main diagnosis source
+- Use `system_abnormality.score` for generic abnormal-vs-normal language
+- Only mention `top_deviations[*].median` or `top_deviations[*].z` when `system_abnormality.baseline_mode == robust_baseline`
 - Treat `preferred_issue` and `top_candidate` as compatibility fallbacks only
 - Prefer `system_abnormality` when you only need to answer "abnormal or not"
 - When `status=watch_only` and `primary_issue.fault_type=unknown`, render the main conclusion as `已检测到异常，但类型待确认`
