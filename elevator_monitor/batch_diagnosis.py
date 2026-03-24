@@ -151,7 +151,18 @@ def _compact_fault(payload: dict[str, Any]) -> dict[str, Any]:
         "quality_factor": round(_safe_float(payload.get("quality_factor"), 0.0), 3),
         "screening": str(payload.get("screening", "")),
     }
-    for key in ("sampling_condition", "axis_mapping_signature", "baseline_mode", "baseline_match"):
+    for key in (
+        "sampling_condition",
+        "axis_mapping_signature",
+        "baseline_mode",
+        "baseline_match",
+        "type_watch_ready",
+        "type_candidate_ready",
+        "attribution_margin",
+        "detector_family",
+        "feature_hits",
+        "feature_strong_hits",
+    ):
         if key in payload:
             compacted[key] = payload.get(key)
     return compacted
@@ -190,6 +201,7 @@ def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:
         "top_candidate": _compact_fault(result.get("top_candidate", {})),
         "preferred_issue": _compact_fault(preferred),
         "rope_primary": _compact_fault(result.get("rope_primary", {})),
+        "rubber_primary": _compact_fault(result.get("rubber_primary", {})),
         "candidate_faults": [_compact_fault(item) for item in candidate_faults if isinstance(item, dict)],
         "watch_faults": [_compact_fault(item) for item in watch_faults if isinstance(item, dict)],
     }
@@ -208,6 +220,41 @@ def _history_summary_issue(history: list[dict[str, Any]]) -> dict[str, Any]:
     abnormal_rows = [row for row in history if _screening_rank(str(row.get("screening_status", ""))) > 0]
     if not abnormal_rows:
         return {}
+    # 批量汇总时优先看“重复出现的同类型归因”，而不是只看单窗最高分。
+    typed_votes: dict[str, list[dict[str, Any]]] = {}
+    for row in abnormal_rows:
+        preferred = row.get("preferred_issue", {}) if isinstance(row.get("preferred_issue"), dict) else {}
+        preferred_type = str(preferred.get("fault_type", "unknown")).strip() or "unknown"
+        if preferred and preferred_type not in {"unknown", "normal"}:
+            typed_votes.setdefault(preferred_type, []).append(dict(preferred))
+            continue
+        rope_primary = row.get("rope_primary", {}) if isinstance(row.get("rope_primary"), dict) else {}
+        rubber_primary = row.get("rubber_primary", {}) if isinstance(row.get("rubber_primary"), dict) else {}
+        rope_ready = bool(rope_primary.get("type_candidate_ready") or rope_primary.get("type_watch_ready"))
+        rubber_ready = bool(rubber_primary.get("type_candidate_ready") or rubber_primary.get("type_watch_ready"))
+        if rope_ready and not rubber_ready:
+            typed_votes.setdefault("rope_looseness", []).append(dict(rope_primary))
+        elif rubber_ready and not rope_ready:
+            typed_votes.setdefault("rubber_hardening", []).append(dict(rubber_primary))
+    if typed_votes:
+        typed_counts = sorted(
+            ((fault_type, len(items), max(_safe_float(item.get("score"), 0.0) for item in items)) for fault_type, items in typed_votes.items()),
+            key=lambda item: (item[1], item[2]),
+            reverse=True,
+        )
+        top_type, top_count, _ = typed_counts[0]
+        second_count = typed_counts[1][1] if len(typed_counts) > 1 else 0
+        if top_count >= 2 and top_count > second_count:
+            strongest = max(typed_votes[top_type], key=lambda item: _safe_float(item.get("score"), 0.0))
+            issue = {
+                "fault_type": str(strongest.get("fault_type", top_type) or top_type),
+                "score": round(max(45.0, min(59.0, _safe_float(strongest.get("score"), 0.0))), 2),
+                "level": "watch",
+                "triggered": False,
+                "quality_factor": round(_safe_float(strongest.get("quality_factor"), 1.0), 3),
+                "screening": "watch",
+            }
+            return issue
     strongest = max(
         abnormal_rows,
         key=lambda row: (

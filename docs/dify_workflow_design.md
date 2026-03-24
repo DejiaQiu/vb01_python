@@ -71,6 +71,8 @@ Expected status payload:
 
 - `status`
 - `primary_issue`
+- `rope_primary`
+- `rubber_primary`
 - `system_abnormality`
 - `preferred_issue` as a compatibility field
 - `top_candidate` as a compatibility field
@@ -98,6 +100,7 @@ Purpose:
 
 - Upload a CSV
 - run the candidate-fault screening chain
+- if the anomaly gate is hit, run a conservative `rope_vs_rubber` attribution step
 - draw full-frequency and low-frequency spectrum charts plus waveform charts in Dify
 - generate a readable report
 - this branch should tolerate empty user text and rely on the uploaded file as the primary input
@@ -241,6 +244,8 @@ Output:
 - `summary`
 - `screening`
 - `primary_issue`
+- `rope_primary`
+- `rubber_primary`
 - `system_abnormality`
 - `top_fault`
 - `top_candidate`
@@ -263,6 +268,7 @@ Important Dify mapping rule:
 - Prefer `primary_issue` as the main diagnosis source
 - Use `system_abnormality.score` for generic abnormal-vs-normal language
 - Only mention `top_deviations[*].median` or `top_deviations[*].z` when `system_abnormality.baseline_mode == robust_baseline`
+- When `primary_issue.fault_type` is `unknown`, keep the wording at the “abnormal but type pending” level; do not force it into rope or rubber
 - Treat `preferred_issue` and `top_candidate` as compatibility fallbacks only
 - Prefer `system_abnormality` when you only need to answer "abnormal or not"
 - When `status=watch_only` and `primary_issue.fault_type=unknown`, render the main conclusion as `已检测到异常，但类型待确认`

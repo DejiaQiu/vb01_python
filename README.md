@@ -136,7 +136,7 @@ alerts.csv]  alerts.csv]
 - Manifest 版本清单
 
 ### 专项诊断
-- `report/fault_algorithms` 当前总控默认只做“相对健康基线的异常筛查”
+- `report/fault_algorithms` 当前总控默认先做“相对健康基线的异常筛查”，异常后再做保守的 `rope_vs_rubber` 归因
 - 可对单个 CSV 或批量 CSV 进行离线诊断
 - 输出保持保守，只给 `normal`、`watch_only`、`candidate_faults`
 
@@ -151,7 +151,7 @@ alerts.csv]  alerts.csv]
 │   ├── realtime_monitor.py      # 在线监控入口（兼容入口）
 │   └── realtime_vibration.py    # 实时振动读取 SDK + CLI
 ├── report/
-│   ├── fault_algorithms/        # 健康基线 + 通用异常筛查
+│   ├── fault_algorithms/        # 健康基线异常门 + 保守 rope/rubber 归因
 │   ├── wire_looseness_index.py  # 保留的历史松绳实验工具（可选）
 │   └── *.md                     # 诊断报告
 ├── deploy/

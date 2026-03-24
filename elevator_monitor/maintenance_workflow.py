@@ -49,6 +49,14 @@ _FAULT_LIBRARY = {
         ],
         "parts": ["rope tension gauge", "rope clamp"],
     },
+    "rubber_hardening": {
+        "actions": [
+            "Inspect the traction machine rubber mounts for hardening, cracks, or compression set.",
+            "Check whether vertical transmission into the frame has increased versus recent healthy runs.",
+            "Retest after replacing or tightening the support path.",
+        ],
+        "parts": ["rubber mount", "vibration pad"],
+    },
     "rail_wear": {
         "actions": [
             "Inspect guide rail and shoe wear marks.",

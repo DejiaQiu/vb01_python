@@ -116,6 +116,10 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "sampling_ok_40hz": True,
                 "sampling_condition": "sampling_ok",
             },
+        ), patch.object(
+            run_all_module,
+            "attribute_rope_vs_rubber",
+            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
@@ -149,6 +153,10 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "sampling_ok_40hz": True,
                 "sampling_condition": "sampling_ok",
             },
+        ), patch.object(
+            run_all_module,
+            "attribute_rope_vs_rubber",
+            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
@@ -180,6 +188,10 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "sampling_ok_40hz": True,
                 "sampling_condition": "sampling_ok",
             },
+        ), patch.object(
+            run_all_module,
+            "attribute_rope_vs_rubber",
+            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
@@ -210,6 +222,10 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
                 "sampling_ok_40hz": True,
                 "sampling_condition": "sampling_ok",
             },
+        ), patch.object(
+            run_all_module,
+            "attribute_rope_vs_rubber",
+            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(count=100), source="inline_rows")
 
@@ -249,6 +265,84 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertGreaterEqual(result["shared_hits"], run_all_module.SYSTEM_GATE_CONFIG["candidate_hit_min"])
         self.assertGreaterEqual(result["shared_strong_hits"], run_all_module.SYSTEM_GATE_CONFIG["candidate_strong_min"])
         self.assertEqual(result["top_deviations"][0]["key"], "lat_dom_freq_hz")
+
+    def test_watch_window_uses_typed_issue_when_attribution_is_clear(self):
+        with patch.object(
+            run_all_module,
+            "_system_abnormality",
+            return_value={
+                "status": "watch_only",
+                "score": 48.0,
+                "shared_abnormal_score": 51.0,
+                "baseline_mode": "robust_baseline",
+                "baseline_weight": 0.85,
+                "baseline_features": 10,
+                "baseline_match": True,
+                "run_state_score": 58.0,
+                "gate_mode": "running",
+                "shared_hits": 4,
+                "shared_strong_hits": 1,
+                "shared_feature_total": 10,
+                "top_deviations": [],
+                "sampling_ok": True,
+                "sampling_ok_40hz": True,
+                "sampling_condition": "sampling_ok",
+            },
+        ), patch.object(
+            run_all_module,
+            "attribute_rope_vs_rubber",
+            return_value={
+                "rope_primary": {"fault_type": "rope_looseness", "score": 71.0, "type_watch_ready": True},
+                "rubber_primary": {"fault_type": "rubber_hardening", "score": 20.0, "type_watch_ready": False},
+                "selected_issue": {"fault_type": "rope_looseness", "score": 45.0, "level": "watch", "triggered": False, "screening": "watch"},
+                "auxiliary_results": [],
+            },
+        ):
+            payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
+
+        self.assertEqual(payload["screening"]["status"], "watch_only")
+        self.assertEqual(payload["primary_issue"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["watch_faults"][0]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
+
+    def test_candidate_window_uses_typed_issue_when_attribution_is_clear(self):
+        with patch.object(
+            run_all_module,
+            "_system_abnormality",
+            return_value={
+                "status": "candidate_faults",
+                "score": 72.0,
+                "shared_abnormal_score": 74.0,
+                "baseline_mode": "robust_baseline",
+                "baseline_weight": 0.85,
+                "baseline_features": 10,
+                "baseline_match": True,
+                "run_state_score": 63.0,
+                "gate_mode": "running",
+                "shared_hits": 6,
+                "shared_strong_hits": 3,
+                "shared_feature_total": 10,
+                "top_deviations": [],
+                "sampling_ok": True,
+                "sampling_ok_40hz": True,
+                "sampling_condition": "sampling_ok",
+            },
+        ), patch.object(
+            run_all_module,
+            "attribute_rope_vs_rubber",
+            return_value={
+                "rope_primary": {"fault_type": "rope_looseness", "score": 18.0, "type_candidate_ready": False},
+                "rubber_primary": {"fault_type": "rubber_hardening", "score": 79.0, "type_candidate_ready": True},
+                "selected_issue": {"fault_type": "rubber_hardening", "score": 60.0, "level": "warning", "triggered": True, "screening": "high_confidence"},
+                "auxiliary_results": [],
+            },
+        ):
+            payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
+
+        self.assertEqual(payload["screening"]["status"], "candidate_faults")
+        self.assertEqual(payload["primary_issue"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["candidate_faults"][0]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
 
     def test_baseline_keys_match_shared_anomaly_features(self):
         self.assertEqual(

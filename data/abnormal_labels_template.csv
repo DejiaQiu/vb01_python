@@ -1,2 +1,0 @@
-elevator_id,start_ts_ms,end_ts_ms,fault_type,confirmed,note
-elevator-6,1770089555480,1770089562509,replace_with_fault_type,1,请按实际故障类型修改

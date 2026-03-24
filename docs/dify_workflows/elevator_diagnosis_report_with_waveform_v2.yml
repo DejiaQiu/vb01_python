@@ -507,7 +507,7 @@ workflow:
           \ + \"\\n\\n[后续内容已截断]\"\n\n\ndef _compact_latest_payload(payload):\n   \
           \ keep_keys = [\n        \"workflow_type\",\n        \"generated_at_ms\"\
           ,\n        \"status\",\n        \"baseline\",\n        \"primary_issue\"\
-          ,\n        \"preferred_issue\",\n        \"top_candidate\",\n        \"\
+          ,\n        \"preferred_issue\",\n        \"rope_primary\",\n        \"rubber_primary\",\n        \"top_candidate\",\n        \"\
           watch_faults\",\n        \"auxiliary_results\",\n        \"risk\",\n   \
           \     \"recommendation\",\n        \"latest_file\",\n        \"latest_file_name\"\
           ,\n        \"requested_elevator_id\",\n        \"system_abnormality\",\n\

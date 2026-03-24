@@ -49,9 +49,19 @@ def _compact_fault(fault_type: str, score: float, *, triggered: bool = False, sc
     return payload
 
 
-def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, watch_faults: list[dict] | None = None) -> dict:
+def _result(
+    status: str,
+    *,
+    top_fault: dict,
+    top_candidate: dict | None = None,
+    watch_faults: list[dict] | None = None,
+    rope_primary: dict | None = None,
+    rubber_primary: dict | None = None,
+) -> dict:
     top_candidate = top_candidate or {}
     watch_faults = watch_faults or []
+    rope_primary = rope_primary or {}
+    rubber_primary = rubber_primary or {}
     candidate_faults = [top_candidate] if top_candidate else []
     return {
         "summary": {
@@ -76,15 +86,8 @@ def _result(status: str, *, top_fault: dict, top_candidate: dict | None = None, 
             "watch_count": len(watch_faults),
             "sampling_condition": "sampling_ok",
         },
-        "rope_primary": {
-            "fault_type": top_fault.get("fault_type", ""),
-            "score": top_fault.get("score", 0.0),
-            "level": top_fault.get("level", "normal"),
-            "triggered": bool(top_fault.get("triggered", False)),
-            "rope_rule_score": top_fault.get("score", 0.0),
-            "rope_branch": "",
-            "rope_spectral_snapshot": {},
-        },
+        "rope_primary": rope_primary,
+        "rubber_primary": rubber_primary,
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,
@@ -115,7 +118,7 @@ class TestBatchDiagnosis(unittest.TestCase):
         self.assertEqual(payload["status"], "normal")
         self.assertEqual(payload["preferred_issue"], {})
         self.assertEqual(payload["latest_result"]["top_fault"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["latest_result"]["rope_primary"], {})
 
     def test_run_batch_diagnosis_writes_latest_status_and_history(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -140,11 +143,13 @@ class TestBatchDiagnosis(unittest.TestCase):
                     "watch_only",
                     top_fault=_compact_fault("rope_looseness", 52.0),
                     watch_faults=[_compact_fault("rope_looseness", 52.0, screening="watch")],
+                    rope_primary={"fault_type": "rope_looseness", "score": 58.0, "level": "watch"},
                 ),
                 _result(
                     "candidate_faults",
                     top_fault=_compact_fault("rope_looseness", 72.0, triggered=True),
                     top_candidate=_compact_fault("rope_looseness", 72.0, triggered=True, screening="high_confidence"),
+                    rope_primary={"fault_type": "rope_looseness", "score": 76.0, "level": "warning", "type_candidate_ready": True},
                 ),
             ]
 
@@ -263,6 +268,61 @@ class TestBatchDiagnosis(unittest.TestCase):
         self.assertEqual(payload["status"], "watch_only")
         self.assertEqual(payload["preferred_issue"]["fault_type"], "unknown")
         self.assertEqual(payload["latest_result"]["screening"]["status"], "watch_only")
+
+    def test_batch_prefers_repeated_typed_attribution_over_single_unknown_peak(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            paths = [
+                root / "vibration_30s_20260303_101500.csv",
+                root / "vibration_30s_20260303_103800.csv",
+                root / "vibration_30s_20260303_104600.csv",
+            ]
+            for path in paths:
+                _write_csv(path)
+
+            fake_results = [
+                _result(
+                    "candidate_faults",
+                    top_fault=_compact_fault("unknown", 60.0, triggered=True, screening="high_confidence"),
+                    top_candidate=_compact_fault("unknown", 60.0, triggered=True, screening="high_confidence"),
+                    rope_primary={
+                        "fault_type": "rope_looseness",
+                        "score": 74.0,
+                        "level": "warning",
+                        "triggered": True,
+                        "quality_factor": 1.0,
+                        "type_candidate_ready": True,
+                        "type_watch_ready": True,
+                    },
+                ),
+                _result(
+                    "watch_only",
+                    top_fault=_compact_fault("unknown", 45.0, screening="watch"),
+                    watch_faults=[_compact_fault("unknown", 45.0, screening="watch")],
+                    rope_primary={
+                        "fault_type": "rope_looseness",
+                        "score": 58.0,
+                        "level": "watch",
+                        "triggered": False,
+                        "quality_factor": 1.0,
+                        "type_watch_ready": True,
+                    },
+                ),
+                _result(
+                    "normal",
+                    top_fault=_compact_fault("unknown", 22.0),
+                ),
+            ]
+
+            with patch("elevator_monitor.batch_diagnosis.run_all_rows", side_effect=fake_results):
+                payload = run_batch_diagnosis(
+                    input_dir=str(root),
+                    max_files=3,
+                    write_outputs=False,
+                )
+
+        self.assertEqual(payload["status"], "watch_only")
+        self.assertEqual(payload["preferred_issue"]["fault_type"], "rope_looseness")
 
 
 if __name__ == "__main__":
