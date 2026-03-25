@@ -548,7 +548,8 @@ workflow:
           \        \"waveform_markdown\": str(waveforms.get(\"markdown_echarts\")\
           \ or waveforms.get(\"markdown\", \"\")).strip(),\n        \"waveform_insights\"\
           : str(waveforms.get(\"insight_markdown\", \"\")).strip(),\n        \"display_conclusion\"\
-          : display_conclusion,\n        \"spectrum_chart\": _option_json(waveforms,\
+          : display_conclusion,\n        \"full_spectrum_chart\": _option_json(waveforms,\
+          \ \"full_frequency_spectrum\"),\n        \"spectrum_chart\": _option_json(waveforms,\
           \ \"low_frequency_spectrum\"),\n        \"acc_chart\": _option_json(waveforms,\
           \ \"acceleration\"),\n        \"gyro_chart\": _option_json(waveforms, \"\
           gyroscope\"),\n        \"mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"\
@@ -563,6 +564,9 @@ workflow:
             children: null
             type: string
           display_conclusion:
+            children: null
+            type: string
+          full_spectrum_chart:
             children: null
             type: string
           gyro_chart:
@@ -670,12 +674,6 @@ workflow:
           # {{#env.site_name#}} 在线状态
 
           {{#status_llm.text#}}
-
-          ## 后端报告草稿
-
-          {{#status_parse.report_markdown_draft#}}
-
-          {{#status_parse.report_tables_html#}}
 
           ## 关键对比数据
 

@@ -291,6 +291,45 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("markdown_echarts", payload["waveform_payload"])
         self.assertIn("rubber_hardening", json.dumps(payload["detector_results"], ensure_ascii=False))
 
+    def test_diagnosis_report_latest_plot_returns_svg_from_latest_csv(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            csv_path = root / "elevator_002" / "latest_capture.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            rows = ["ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame"]
+            for i in range(48):
+                rows.append(f"{1_000_000 + i * 250},0.01,0.02,{-0.98 + i * 0.001},0.1,0.2,0.3,1")
+            csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            status_path = csv_path.parent / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "generated_at_ms": 1_700_000_000_000,
+                        "status": "watch_only",
+                        "latest_file": str(csv_path),
+                        "latest_file_name": csv_path.name,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/workflows/diagnosis-report-latest/plot",
+                params={
+                    "elevator_id": "002",
+                    "latest_root": str(root),
+                    "kind": "acceleration_magnitude",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/svg+xml")
+        self.assertIn("<svg", response.text)
+        self.assertIn("合成加速度幅值", response.text)
+
     def test_diagnosis_report_latest_accepts_post_json(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -584,6 +623,7 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("report_parse.waveform_markdown", workflow_text)
         self.assertIn("answer: |", workflow_text)
         self.assertIn("{{#status_parse.waveform_markdown#}}", workflow_text)
+        self.assertNotIn("/api/v1/workflows/diagnosis-report-latest/plot", workflow_text)
         self.assertIn("{{#report_parse.waveform_markdown#}}", workflow_text)
 
     def test_ingest_heartbeat_updates_edge_latest_status(self):
@@ -706,6 +746,103 @@ class TestAPIService(unittest.TestCase):
             self.assertIn("report_markdown_draft", report_payload)
             self.assertIn("波形图", report_payload["report_markdown_draft"])
             self.assertIn("waveform_payload", report_payload)
+
+    def test_diagnosis_report_latest_uses_edge_context_waveforms_after_heartbeat(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"ELEVATOR_CLOUD_STORE_DIR": tmp_dir}):
+            event_id = "elevator-102-1000000-rope"
+            alert_response = self.client.post(
+                "/api/v1/ingest/alert",
+                json={
+                    "event_id": event_id,
+                    "device_id": "edge-102",
+                    "elevator_id": "elevator-102",
+                    "site_name": "Tower F",
+                    "ts_ms": 1_000_000,
+                    "alert_payload": {
+                        "elevator_id": "elevator-102",
+                        "ts_ms": 1_000_000,
+                        "level": "warning",
+                        "predictive_only": 0,
+                        "fault_type": "rope_looseness",
+                        "fault_confidence": 0.81,
+                        "risk_score": 0.63,
+                        "risk_level_now": "watch",
+                        "risk_24h": 0.84,
+                        "risk_level_24h": "high",
+                    },
+                    "health_payload": {
+                        "status": "running",
+                        "connected": True,
+                        "baseline_ready": True,
+                    },
+                },
+            )
+            self.assertEqual(alert_response.status_code, 200)
+
+            csv_text = "\n".join(
+                [
+                    "ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame",
+                    "1000000,0.01,0.02,-0.98,0.1,0.2,0.3,1",
+                    "1000250,0.02,0.03,-0.97,0.1,0.2,0.3,1",
+                    "1000500,0.03,0.03,-0.96,0.1,0.2,0.3,1",
+                    "1000750,0.04,0.03,-0.95,0.1,0.2,0.3,1",
+                    "1001000,0.05,0.03,-0.94,0.1,0.2,0.3,1",
+                    "1001250,0.04,0.03,-0.95,0.1,0.2,0.3,1",
+                    "1001500,0.03,0.03,-0.96,0.1,0.2,0.3,1",
+                    "1001750,0.02,0.03,-0.97,0.1,0.2,0.3,1",
+                    "1002000,0.01,0.03,-0.98,0.1,0.2,0.3,1",
+                ]
+            )
+            context_response = self.client.post(
+                "/api/v1/ingest/context",
+                json={
+                    "event_id": event_id,
+                    "device_id": "edge-102",
+                    "elevator_id": "elevator-102",
+                    "site_name": "Tower F",
+                    "ts_ms": 1_000_000,
+                    "file_name": "alert_context.csv.gz",
+                    "content_type": "text/csv",
+                    "compression": "gzip",
+                    "content_b64": b64encode(compress(csv_text.encode("utf-8"))).decode("ascii"),
+                },
+            )
+            self.assertEqual(context_response.status_code, 200)
+
+            heartbeat_response = self.client.post(
+                "/api/v1/ingest/heartbeat",
+                json={
+                    "device_id": "edge-102",
+                    "elevator_id": "elevator-102",
+                    "site_name": "Tower F",
+                    "health_payload": {
+                        "status": "running",
+                        "connected": True,
+                        "updated_at_ms": 1_000_500,
+                    },
+                },
+            )
+            self.assertEqual(heartbeat_response.status_code, 200)
+
+            response = self.client.post(
+                "/api/v1/workflows/diagnosis-report-latest",
+                json={
+                    "elevator_id": "elevator-102",
+                    "latest_root": str(Path(tmp_dir) / "elevators"),
+                    "site_name": "Tower F",
+                    "include_waveforms": True,
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+            payload = response.json()
+            self.assertEqual(payload["status"], "candidate_faults")
+            self.assertIn("waveform_payload", payload)
+            self.assertIn("markdown_echarts", payload["waveform_payload"])
+            self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
+            self.assertTrue(payload["latest_file"].endswith("alert_context.csv.gz"))
+            self.assertEqual(payload["latest_file_name"], "alert_context.csv.gz")
+            self.assertIn("波形图与频谱图", payload["report_markdown_draft"])
 
 
 if __name__ == "__main__":

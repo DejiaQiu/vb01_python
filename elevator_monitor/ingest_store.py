@@ -87,6 +87,7 @@ class CloudIngestStore:
     ) -> dict[str, Any]:
         health_payload = dict(payload.get("health_payload", {})) if isinstance(payload.get("health_payload"), dict) else {}
         alert = dict(existing.get("latest_alert", {})) if isinstance(existing.get("latest_alert"), dict) else {}
+        context = dict(existing.get("context", {})) if isinstance(existing.get("context"), dict) else {}
         risk = self._risk_payload(alert, health_payload)
         preferred_issue = {}
         fault_type = str(alert.get("fault_type", "") or health_payload.get("last_fault_type", "")).strip()
@@ -123,6 +124,7 @@ class CloudIngestStore:
             "health": health_payload,
             "latest_alert": alert,
             "last_event_id": str(existing.get("last_event_id", "")),
+            "context": context,
         }
 
     def _build_latest_status_from_alert(

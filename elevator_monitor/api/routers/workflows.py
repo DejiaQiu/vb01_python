@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from ...batch_diagnosis import load_latest_status
 from ...ingest_store import get_ingest_store
@@ -103,24 +103,8 @@ def diagnosis_report(request: DiagnosisReportRequest) -> dict[str, Any]:
 
 
 def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[str, Any]:
-    resolved_latest = resolve_latest_status_path(request.latest_json, request.elevator_id, request.latest_root)
-    try:
-        latest_payload = load_latest_status(str(resolved_latest))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    latest_payload = dict(latest_payload)
-    latest_payload["latest_json"] = str(resolved_latest)
-    latest_payload["requested_elevator_id"] = str(request.elevator_id or "").strip()
-    if request.include_waveforms:
-        latest_payload = attach_latest_waveforms(
-            latest_payload,
-            width=request.waveform_width,
-            height=request.waveform_height,
-            max_points=request.waveform_max_points,
-        )
+    latest_payload = _load_latest_payload(request, include_waveforms=request.include_waveforms)
+    resolved_latest = str(latest_payload.get("latest_json", request.latest_json))
 
     report_ctx = build_report_context_from_latest_status(
         latest_status_payload=latest_payload,
@@ -163,10 +147,36 @@ def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[
     report_ctx["recommendation"] = str(latest_payload.get("recommendation", "")).strip()
     report_ctx["latest_file"] = str(latest_payload.get("latest_file", "")).strip()
     report_ctx["latest_file_name"] = str(latest_payload.get("latest_file_name", "")).strip()
-    report_ctx["latest_json"] = str(resolved_latest)
+    report_ctx["latest_json"] = resolved_latest
     report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
     return report_ctx
+
+
+def _load_latest_payload(
+    request: DiagnosisReportLatestRequest,
+    *,
+    include_waveforms: bool,
+) -> dict[str, Any]:
+    resolved_latest = resolve_latest_status_path(request.latest_json, request.elevator_id, request.latest_root)
+    try:
+        latest_payload = load_latest_status(str(resolved_latest))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    latest_payload = dict(latest_payload)
+    latest_payload["latest_json"] = str(resolved_latest)
+    latest_payload["requested_elevator_id"] = str(request.elevator_id or "").strip()
+    if include_waveforms:
+        latest_payload = attach_latest_waveforms(
+            latest_payload,
+            width=request.waveform_width,
+            height=request.waveform_height,
+            max_points=request.waveform_max_points,
+        )
+    return latest_payload
 
 
 @router.get("/diagnosis-report-latest")
@@ -243,6 +253,49 @@ async def diagnosis_report_latest_post(request: Request) -> dict[str, Any]:
         query_params=dict(request.query_params),
     )
     return _build_latest_report_context(model)
+
+
+@router.get("/diagnosis-report-latest/plot")
+def diagnosis_report_latest_plot(
+    kind: str,
+    elevator_id: str = "",
+    latest_json: str = "data/diagnosis/latest_status.json",
+    latest_root: str = "data/diagnosis",
+    waveform_width: int = 920,
+    waveform_height: int = 320,
+    waveform_max_points: int = 240,
+) -> Response:
+    supported_kinds = {
+        "full_frequency_spectrum",
+        "low_frequency_spectrum",
+        "acceleration",
+        "gyroscope",
+        "acceleration_magnitude",
+    }
+    kind_text = str(kind or "").strip()
+    if kind_text not in supported_kinds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported plot kind: {kind_text or 'empty'}",
+        )
+
+    request_model = DiagnosisReportLatestRequest(
+        elevator_id=elevator_id,
+        latest_json=latest_json,
+        latest_root=latest_root,
+        include_waveforms=True,
+        waveform_width=waveform_width,
+        waveform_height=waveform_height,
+        waveform_max_points=waveform_max_points,
+    )
+    latest_payload = _load_latest_payload(request_model, include_waveforms=True)
+    waveform_payload = latest_payload.get("waveform_payload", {})
+    plots = waveform_payload.get("plots", {}) if isinstance(waveform_payload, dict) else {}
+    plot = plots.get(kind_text, {}) if isinstance(plots, dict) else {}
+    svg = str(plot.get("svg", "")).strip() if isinstance(plot, dict) else ""
+    if not svg:
+        raise HTTPException(status_code=404, detail=f"plot not available: {kind_text}")
+    return Response(content=svg, media_type="image/svg+xml")
 
 
 @router.post("/diagnosis-report-by-event")
