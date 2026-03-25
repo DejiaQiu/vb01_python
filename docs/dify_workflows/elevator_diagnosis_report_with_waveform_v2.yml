@@ -683,7 +683,35 @@ workflow:
 
           {{#status_parse.waveform_insights#}}
 
-          {{#status_parse.waveform_markdown#}}
+          ## 全频频谱图
+
+          ```echarts
+          {{#status_parse.full_spectrum_chart#}}
+          ```
+
+          ## 低频频谱图
+
+          ```echarts
+          {{#status_parse.spectrum_chart#}}
+          ```
+
+          ## 加速度波形
+
+          ```echarts
+          {{#status_parse.acc_chart#}}
+          ```
+
+          ## 角速度波形
+
+          ```echarts
+          {{#status_parse.gyro_chart#}}
+          ```
+
+          ## 加速度合量波形
+
+          ```echarts
+          {{#status_parse.mag_chart#}}
+          ```
         desc: ''
         selected: false
         title: 在线诊断报告输出
