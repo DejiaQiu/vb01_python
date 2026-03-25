@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from ...batch_diagnosis import load_latest_status
 from ...ingest_store import get_ingest_store
@@ -196,9 +197,52 @@ def diagnosis_report_latest(
     return _build_latest_report_context(request)
 
 
+def _build_latest_request_from_raw(
+    *,
+    payload: dict[str, Any] | None = None,
+    query_params: dict[str, Any] | None = None,
+) -> DiagnosisReportLatestRequest:
+    body = dict(payload or {})
+    query = dict(query_params or {})
+    merged: dict[str, Any] = {}
+    for key in (
+        "elevator_id",
+        "site_name",
+        "latest_json",
+        "latest_root",
+        "language",
+        "report_style",
+        "include_waveforms",
+        "waveform_width",
+        "waveform_height",
+        "waveform_max_points",
+    ):
+        if key in body and body.get(key) not in (None, ""):
+            merged[key] = body.get(key)
+        elif key in query and query.get(key) not in (None, ""):
+            merged[key] = query.get(key)
+    return DiagnosisReportLatestRequest(**merged)
+
+
 @router.post("/diagnosis-report-latest")
-def diagnosis_report_latest_post(request: DiagnosisReportLatestRequest) -> dict[str, Any]:
-    return _build_latest_report_context(request)
+async def diagnosis_report_latest_post(request: Request) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    raw_body = await request.body()
+    if raw_body.strip():
+        try:
+            parsed = await request.json()
+        except Exception:
+            try:
+                parsed = json.loads(raw_body.decode("utf-8", errors="replace"))
+            except Exception:
+                parsed = {}
+        if isinstance(parsed, dict):
+            payload = dict(parsed)
+    model = _build_latest_request_from_raw(
+        payload=payload,
+        query_params=dict(request.query_params),
+    )
+    return _build_latest_report_context(model)
 
 
 @router.post("/diagnosis-report-by-event")
