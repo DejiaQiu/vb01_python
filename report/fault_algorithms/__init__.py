@@ -1,1 +1,1 @@
-"""Rule-based 8-fault vibration detectors for elevator signals."""
+"""Rule-based anomaly screening and fault detector registry for elevator signals."""

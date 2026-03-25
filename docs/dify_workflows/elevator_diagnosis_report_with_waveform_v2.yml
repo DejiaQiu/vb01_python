@@ -1,5 +1,5 @@
 app:
-  description: 项目版 Dify 工作流。未上传文件时读取最近一次批诊断状态；上传 CSV 后，Dify 端直接生成 echarts 波形图并输出综合报告。
+  description: 项目版 Dify 工作流。默认直接按电梯读取最新诊断报告并回答；CSV 上传仅保留为调试入口。
   icon: 🤖
   icon_background: '#E8F7E8'
   mode: advanced-chat
@@ -60,7 +60,7 @@ workflow:
       allowed_file_upload_methods:
       - local_file
       - remote_url
-      enabled: true
+      enabled: false
       image:
         enabled: false
         number_limits: 3
@@ -68,7 +68,7 @@ workflow:
         - local_file
         - remote_url
       number_limits: 3
-    opening_statement: 不上传文件时可直接查询最近一次批诊断状态；可在问题里写“查看 002 号梯状态”。上传电梯振动 CSV 后，可只传文件、不输入文字，系统会自动执行规则诊断、绘制全频/低频频谱图与三轴波形，并输出综合报告。
+    opening_statement: 直接提问即可，例如“查看 002 号梯状态”“现在有没有异常”“给我最新诊断报告”。系统会自动读取该电梯最近一次批诊断结果，生成文字结论并附上全频/低频频谱图与波形图。
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:
@@ -424,9 +424,9 @@ workflow:
           max_connect_timeout: 0
           max_read_timeout: 0
           max_write_timeout: 0
-        title: 读取最新状态
+        title: 读取最新报告
         type: http-request
-        url: '{{#env.ip#}}/api/v1/diagnostics/latest-status?latest_json={{#env.latest_json#}}&latest_root={{#env.latest_root#}}&elevator_id={{#status_target.elevator_id#}}&include_waveforms=true'
+        url: '{{#env.ip#}}/api/v1/workflows/diagnosis-report-latest?latest_json={{#env.latest_json#}}&latest_root={{#env.latest_root#}}&elevator_id={{#status_target.elevator_id#}}&site_name={{#env.site_name#}}&include_waveforms=true&language=zh-CN&report_style=standard'
         variables: []
       height: 161
       id: status_http
@@ -507,7 +507,7 @@ workflow:
           \ + \"\\n\\n[后续内容已截断]\"\n\n\ndef _compact_latest_payload(payload):\n   \
           \ keep_keys = [\n        \"workflow_type\",\n        \"generated_at_ms\"\
           ,\n        \"status\",\n        \"baseline\",\n        \"primary_issue\"\
-          ,\n        \"preferred_issue\",\n        \"rope_primary\",\n        \"rubber_primary\",\n        \"top_candidate\",\n        \"\
+          ,\n        \"preferred_issue\",\n        \"detector_results\",\n        \"top_candidate\",\n        \"\
           watch_faults\",\n        \"auxiliary_results\",\n        \"risk\",\n   \
           \     \"recommendation\",\n        \"latest_file\",\n        \"latest_file_name\"\
           ,\n        \"requested_elevator_id\",\n        \"system_abnormality\",\n\
@@ -635,8 +635,8 @@ workflow:
         prompt_template:
         - id: 6bc4515a-764e-42d2-bf70-6c1a26e71179
           role: system
-          text: "你是电梯在线状态回复助手。你只能依据下面这份“最近一次定时批诊断结果”回答，不能编造不存在的故障、风险或历史。\n\n站点名：{{#env.site_name#}}\n\
-            用户问题：{{#sys.query#}}\n最新状态摘要：{{#status_parse.status_summary#}}\n最新状态 JSON：\n\
+          text: "你是电梯在线状态回复助手。你只能依据下面这份“后端直接生成的最新诊断报告”回答，不能编造不存在的故障、风险或历史。\n\n站点名：{{#env.site_name#}}\n\
+            用户问题：{{#sys.query#}}\n最新状态摘要：{{#status_parse.status_summary#}}\n最新报告 JSON：\n\
             {{#status_parse.status_json#}}\n\n后端报告草稿（如有）：\n{{#status_parse.report_markdown_for_llm#}}\n\
             \n输出要求：\n1. 先直接回答用户问题。\n2. 然后固定输出五行：\n   检测日期：\n   当前状态：\n   主结论：\n  \
             \ 当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的 generated_at_ms，对用户明确展示具体日期时间。\n\
@@ -687,7 +687,7 @@ workflow:
           {{#status_parse.waveform_markdown#}}
         desc: ''
         selected: false
-        title: 在线状态输出
+        title: 在线诊断报告输出
         type: answer
         variables: []
       height: 266

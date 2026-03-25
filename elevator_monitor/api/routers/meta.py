@@ -25,6 +25,7 @@ def meta() -> dict[str, Any]:
             "waveform_plot",
             "maintenance_package",
             "diagnosis_report",
+            "diagnosis_report_latest",
             "diagnosis_report_by_event",
             "monitor_health",
         ],

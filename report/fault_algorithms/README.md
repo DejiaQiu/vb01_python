@@ -7,7 +7,7 @@
 当前总控 `run_all.py` 采用两阶段规则：
 
 1. 先做“相对健康基线的异常筛查”
-2. 只有异常门命中后，才进入保守的 `rope_vs_rubber` 归因层
+2. 只有异常门命中后，才进入保守的 `fault_detectors` 归因层
 
 ## 当前主链
 
@@ -65,24 +65,15 @@
 ## 文件清单
 
 - `run_all.py`（当前主入口）
-- `rope_vs_rubber.py`（异常后的保守归因层）
+- `fault_detectors.py`（异常后的通用 detector 归因层）
 - `run_all.py` 主要输出：
   - 通用异常门结果 `system_abnormality`
-  - 归因层结果 `rope_primary` / `rubber_primary`
+  - 归因层结果 `detector_results`
   - 高置信异常 `candidate_faults`
   - 观察级异常 `watch_faults`
   - 筛查状态 `screening`
 
-目录中其余 `detect_*.py` 仍可单独执行，但已不再参与默认总控决策。
-
 ## 使用示例
-
-单个算法：
-
-```bash
-python3 report/fault_algorithms/detect_impact_shock.py \
-  --input report/vibration_30s_20260303_110622.csv --pretty
-```
 
 一次跑当前异常筛查主链：
 

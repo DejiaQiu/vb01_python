@@ -8,10 +8,10 @@ from typing import Any
 
 try:
     from ._base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
-    from .rope_vs_rubber import ATTRIBUTION_BASELINE_KEYS, attribute as attribute_rope_vs_rubber
+    from .fault_detectors import DETECTOR_BASELINE_KEYS, run_fault_detectors
 except ImportError:  # pragma: no cover
     from _base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
-    from rope_vs_rubber import ATTRIBUTION_BASELINE_KEYS, attribute as attribute_rope_vs_rubber
+    from fault_detectors import DETECTOR_BASELINE_KEYS, run_fault_detectors
 
 
 _PATTERN = re.compile(r"vibration_30s_\d{8}_(\d{6})\.csv$")
@@ -42,7 +42,7 @@ RUN_ACTIVITY_BASELINE_KEYS = (
     "g_activity_ratio",
     "activity_peak_ratio",
 )
-ALL_BASELINE_KEYS = tuple(dict.fromkeys(BASELINE_KEYS + ATTRIBUTION_BASELINE_KEYS + RUN_ACTIVITY_BASELINE_KEYS))
+ALL_BASELINE_KEYS = tuple(dict.fromkeys(BASELINE_KEYS + DETECTOR_BASELINE_KEYS + RUN_ACTIVITY_BASELINE_KEYS))
 SYSTEM_GATE_CONFIG = {
     "watch_score": WATCH_SCORE,
     "candidate_score": HIGH_CONFIDENCE_SCORE,
@@ -389,7 +389,8 @@ def run_all_rows(
 ) -> dict:
     features = build_feature_pack(rows, axis_mapping=axis_mapping)
     system_abnormality = _system_abnormality(features, baseline)
-    attribution = attribute_rope_vs_rubber(features, system_abnormality=system_abnormality, baseline=baseline)
+    attribution = run_fault_detectors(features, system_abnormality=system_abnormality, baseline=baseline)
+    detector_results = list(attribution.get("detector_results", [])) if isinstance(attribution.get("detector_results"), list) else []
 
     quality_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     baseline_match = baseline_mapping_match(features, baseline)
@@ -408,8 +409,7 @@ def run_all_rows(
         watch_faults = []
         candidate_faults = []
         top_candidate = {}
-        rope_primary = {}
-        rubber_primary = {}
+        detector_results = []
         auxiliary_results = []
     elif system_abnormality.get("status") == "candidate_faults":
         screening_status = "candidate_faults"
@@ -417,8 +417,6 @@ def run_all_rows(
         top_candidate = dict(top_fault)
         candidate_faults = [dict(top_fault)]
         watch_faults = []
-        rope_primary = dict(attribution.get("rope_primary", {})) if isinstance(attribution.get("rope_primary"), dict) else {}
-        rubber_primary = dict(attribution.get("rubber_primary", {})) if isinstance(attribution.get("rubber_primary"), dict) else {}
         auxiliary_results = list(attribution.get("auxiliary_results", [])) if isinstance(attribution.get("auxiliary_results"), list) else []
     elif system_abnormality.get("status") == "watch_only":
         screening_status = "watch_only"
@@ -426,8 +424,6 @@ def run_all_rows(
         top_candidate = {}
         candidate_faults = []
         watch_faults = [dict(top_fault)]
-        rope_primary = dict(attribution.get("rope_primary", {})) if isinstance(attribution.get("rope_primary"), dict) else {}
-        rubber_primary = dict(attribution.get("rubber_primary", {})) if isinstance(attribution.get("rubber_primary"), dict) else {}
         auxiliary_results = list(attribution.get("auxiliary_results", [])) if isinstance(attribution.get("auxiliary_results"), list) else []
     else:
         screening_status = "normal"
@@ -435,8 +431,7 @@ def run_all_rows(
         top_candidate = {}
         candidate_faults = []
         watch_faults = []
-        rope_primary = {}
-        rubber_primary = {}
+        detector_results = []
         auxiliary_results = []
 
     return {
@@ -465,8 +460,7 @@ def run_all_rows(
         },
         "system_abnormality": system_abnormality,
         # 第二阶段归因只在异常门之后生效；归因不够集中时继续保持 unknown。
-        "rope_primary": rope_primary,
-        "rubber_primary": rubber_primary,
+        "detector_results": detector_results,
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,

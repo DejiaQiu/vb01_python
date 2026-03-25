@@ -191,6 +191,7 @@ def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:
     screening = result.get("screening", {}) if isinstance(result.get("screening"), dict) else {}
     candidate_faults = result.get("candidate_faults", []) if isinstance(result.get("candidate_faults"), list) else []
     watch_faults = result.get("watch_faults", []) if isinstance(result.get("watch_faults"), list) else []
+    detector_results = result.get("detector_results", []) if isinstance(result.get("detector_results"), list) else []
     preferred = _preferred_issue(result)
     return {
         "path": str(path),
@@ -200,8 +201,7 @@ def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:
         "top_fault": _compact_fault(result.get("top_fault", {})),
         "top_candidate": _compact_fault(result.get("top_candidate", {})),
         "preferred_issue": _compact_fault(preferred),
-        "rope_primary": _compact_fault(result.get("rope_primary", {})),
-        "rubber_primary": _compact_fault(result.get("rubber_primary", {})),
+        "detector_results": [_compact_fault(item) for item in detector_results if isinstance(item, dict)],
         "candidate_faults": [_compact_fault(item) for item in candidate_faults if isinstance(item, dict)],
         "watch_faults": [_compact_fault(item) for item in watch_faults if isinstance(item, dict)],
     }
@@ -228,14 +228,22 @@ def _history_summary_issue(history: list[dict[str, Any]]) -> dict[str, Any]:
         if preferred and preferred_type not in {"unknown", "normal"}:
             typed_votes.setdefault(preferred_type, []).append(dict(preferred))
             continue
-        rope_primary = row.get("rope_primary", {}) if isinstance(row.get("rope_primary"), dict) else {}
-        rubber_primary = row.get("rubber_primary", {}) if isinstance(row.get("rubber_primary"), dict) else {}
-        rope_ready = bool(rope_primary.get("type_candidate_ready") or rope_primary.get("type_watch_ready"))
-        rubber_ready = bool(rubber_primary.get("type_candidate_ready") or rubber_primary.get("type_watch_ready"))
-        if rope_ready and not rubber_ready:
-            typed_votes.setdefault("rope_looseness", []).append(dict(rope_primary))
-        elif rubber_ready and not rope_ready:
-            typed_votes.setdefault("rubber_hardening", []).append(dict(rubber_primary))
+        detector_results = row.get("detector_results", []) if isinstance(row.get("detector_results"), list) else []
+        ready_detectors = [
+            dict(item)
+            for item in detector_results
+            if isinstance(item, dict)
+            and str(item.get("fault_type", "unknown")).strip() not in {"", "unknown", "normal"}
+            and bool(item.get("type_candidate_ready") or item.get("type_watch_ready"))
+        ]
+        if ready_detectors:
+            ready_detectors.sort(key=lambda item: _safe_float(item.get("score"), 0.0), reverse=True)
+            top_ready = ready_detectors[0]
+            second_ready_score = _safe_float(ready_detectors[1].get("score"), 0.0) if len(ready_detectors) > 1 else -1.0
+            top_ready_score = _safe_float(top_ready.get("score"), 0.0)
+            if len(ready_detectors) == 1 or top_ready_score > second_ready_score:
+                typed_votes.setdefault(str(top_ready.get("fault_type", "unknown")), []).append(top_ready)
+                continue
     if typed_votes:
         typed_counts = sorted(
             ((fault_type, len(items), max(_safe_float(item.get("score"), 0.0) for item in items)) for fault_type, items in typed_votes.items()),
@@ -554,6 +562,8 @@ def run_batch_diagnosis(
             latest_result["top_candidate"] = {}
             latest_result["candidate_faults"] = []
             latest_result["watch_faults"] = [dict(summary_issue)]
+            if not isinstance(latest_result.get("detector_results"), list) or not latest_result.get("detector_results"):
+                latest_result["detector_results"] = [dict(summary_issue)]
 
     latest_issue = _preferred_issue(latest_result)
     latest_status = str((latest_result.get("screening") or {}).get("status", "normal"))
@@ -580,8 +590,7 @@ def run_batch_diagnosis(
         "baseline": dict(latest_result.get("baseline", {})) if isinstance(latest_result.get("baseline"), dict) else baseline_summary,
         "primary_issue": _compact_fault(latest_result.get("primary_issue", {}) or latest_issue),
         "preferred_issue": _compact_fault(latest_issue),
-        "rope_primary": _compact_fault(latest_result.get("rope_primary", {})),
-        "rubber_primary": _compact_fault(latest_result.get("rubber_primary", {})),
+        "detector_results": [_compact_fault(item) for item in latest_result.get("detector_results", []) if isinstance(item, dict)],
         "system_abnormality": dict(latest_result.get("system_abnormality", {})) if isinstance(latest_result.get("system_abnormality"), dict) else {},
         "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
         "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
@@ -596,8 +605,7 @@ def run_batch_diagnosis(
             "summary": dict(latest_result.get("summary", {})) if isinstance(latest_result.get("summary"), dict) else {},
             "baseline": dict(latest_result.get("baseline", {})) if isinstance(latest_result.get("baseline"), dict) else {},
             "screening": dict(latest_result.get("screening", {})) if isinstance(latest_result.get("screening"), dict) else {},
-            "rope_primary": dict(latest_result.get("rope_primary", {})) if isinstance(latest_result.get("rope_primary"), dict) else {},
-            "rubber_primary": dict(latest_result.get("rubber_primary", {})) if isinstance(latest_result.get("rubber_primary"), dict) else {},
+            "detector_results": [dict(item) for item in latest_result.get("detector_results", []) if isinstance(item, dict)],
             "system_abnormality": dict(latest_result.get("system_abnormality", {})) if isinstance(latest_result.get("system_abnormality"), dict) else {},
             "top_fault": _compact_fault(latest_result.get("top_fault", {})),
             "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),

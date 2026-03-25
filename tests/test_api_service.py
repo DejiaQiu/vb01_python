@@ -24,6 +24,7 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("waveform_plot", payload.get("capabilities", []))
         self.assertIn("batch_diagnosis", payload.get("capabilities", []))
         self.assertIn("latest_status", payload.get("capabilities", []))
+        self.assertIn("diagnosis_report_latest", payload.get("capabilities", []))
 
     def test_rule_engine_accepts_inline_rows(self):
         rows = []
@@ -48,7 +49,7 @@ class TestAPIService(unittest.TestCase):
 
         payload = response.json()
         self.assertIn("top_fault", payload)
-        self.assertIn("rope_primary", payload)
+        self.assertIn("detector_results", payload)
         self.assertIn("auxiliary_results", payload)
         self.assertIn("results", payload)
         self.assertEqual(payload["input"], "inline_rows")
@@ -229,6 +230,67 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
         self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
 
+    def test_diagnosis_report_latest_builds_report_from_saved_latest_status(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            csv_path = root / "elevator_002" / "latest_capture.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            rows = ["ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame"]
+            for i in range(24):
+                rows.append(f"{1_000_000 + i * 1000},0.01,0.02,{-0.98 + i * 0.001},0.1,0.2,0.3,1")
+            csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            status_path = csv_path.parent / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "generated_at_ms": 1_700_000_000_000,
+                        "status": "watch_only",
+                        "baseline": {"mode": "dir"},
+                        "latest_file": str(csv_path),
+                        "latest_file_name": csv_path.name,
+                        "primary_issue": {"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"},
+                        "preferred_issue": {"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"},
+                        "detector_results": [{"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"}],
+                        "system_abnormality": {"status": "watch_only", "score": 52.3, "baseline_mode": "robust_baseline"},
+                        "risk": {"risk_score": 0.56, "risk_24h": 0.71, "risk_level_now": "watch", "risk_level_24h": "high"},
+                        "latest_result": {
+                            "summary": {"n_raw": 24, "n_effective": 24, "fs_hz": 1.0},
+                            "screening": {"status": "watch_only"},
+                            "baseline": {"mode": "dir"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/workflows/diagnosis-report-latest",
+                params={
+                    "elevator_id": "002",
+                    "latest_root": str(root),
+                    "site_name": "Tower B",
+                    "include_waveforms": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "watch_only")
+        self.assertEqual(payload["screening"]["status"], "watch_only")
+        self.assertEqual(payload["elevator_id"], "elevator-002")
+        self.assertEqual(payload["site_name"], "Tower B")
+        self.assertEqual(payload["latest_json"], str(status_path.resolve()))
+        self.assertEqual(payload["requested_elevator_id"], "002")
+        self.assertIn("report_markdown_draft", payload)
+        self.assertIn("Tower B / elevator-002", payload["report_title"])
+        self.assertIn("dify_report_inputs", payload)
+        self.assertIn("waveform_payload", payload)
+        self.assertIn("markdown_echarts", payload["waveform_payload"])
+        self.assertIn("rubber_hardening", json.dumps(payload["detector_results"], ensure_ascii=False))
+
     def test_batch_run_endpoint_returns_payload(self):
         fake_payload = {
             "workflow_type": "scheduled_batch_diagnosis_v1",
@@ -387,6 +449,7 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("generated_at_ms", workflow_text)
         self.assertIn("检测日期：", workflow_text)
         self.assertIn("固定输出五行", workflow_text)
+        self.assertIn("diagnosis-report-latest", workflow_text)
         self.assertIn("include_waveforms=true", workflow_text)
         self.assertIn("怎么读这些图", workflow_text)
         self.assertIn("status_parse.waveform_insights", workflow_text)

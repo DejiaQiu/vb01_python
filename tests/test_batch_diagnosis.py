@@ -55,13 +55,11 @@ def _result(
     top_fault: dict,
     top_candidate: dict | None = None,
     watch_faults: list[dict] | None = None,
-    rope_primary: dict | None = None,
-    rubber_primary: dict | None = None,
+    detector_results: list[dict] | None = None,
 ) -> dict:
     top_candidate = top_candidate or {}
     watch_faults = watch_faults or []
-    rope_primary = rope_primary or {}
-    rubber_primary = rubber_primary or {}
+    detector_results = detector_results or []
     candidate_faults = [top_candidate] if top_candidate else []
     return {
         "summary": {
@@ -86,8 +84,7 @@ def _result(
             "watch_count": len(watch_faults),
             "sampling_condition": "sampling_ok",
         },
-        "rope_primary": rope_primary,
-        "rubber_primary": rubber_primary,
+        "detector_results": detector_results,
         "top_fault": top_fault,
         "top_candidate": top_candidate,
         "candidate_faults": candidate_faults,
@@ -118,7 +115,7 @@ class TestBatchDiagnosis(unittest.TestCase):
         self.assertEqual(payload["status"], "normal")
         self.assertEqual(payload["preferred_issue"], {})
         self.assertEqual(payload["latest_result"]["top_fault"]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["latest_result"]["rope_primary"], {})
+        self.assertEqual(payload["latest_result"]["detector_results"], [])
 
     def test_run_batch_diagnosis_writes_latest_status_and_history(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -143,13 +140,13 @@ class TestBatchDiagnosis(unittest.TestCase):
                     "watch_only",
                     top_fault=_compact_fault("rope_looseness", 52.0),
                     watch_faults=[_compact_fault("rope_looseness", 52.0, screening="watch")],
-                    rope_primary={"fault_type": "rope_looseness", "score": 58.0, "level": "watch"},
+                    detector_results=[{"fault_type": "rope_looseness", "score": 58.0, "level": "watch"}],
                 ),
                 _result(
                     "candidate_faults",
                     top_fault=_compact_fault("rope_looseness", 72.0, triggered=True),
                     top_candidate=_compact_fault("rope_looseness", 72.0, triggered=True, screening="high_confidence"),
-                    rope_primary={"fault_type": "rope_looseness", "score": 76.0, "level": "warning", "type_candidate_ready": True},
+                    detector_results=[{"fault_type": "rope_looseness", "score": 76.0, "level": "warning", "type_candidate_ready": True}],
                 ),
             ]
 
@@ -175,7 +172,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertIn("insight_markdown", payload["waveform_payload"])
             self.assertIn("full_frequency_spectrum", payload["waveform_payload"]["echarts"])
             self.assertIn("low_frequency_spectrum", payload["waveform_payload"]["echarts"])
-            self.assertEqual(payload["latest_result"]["rope_primary"]["fault_type"], "rope_looseness")
+            self.assertEqual(payload["latest_result"]["detector_results"][0]["fault_type"], "rope_looseness")
             self.assertTrue(latest_json.exists())
             self.assertTrue(history_jsonl.exists())
 
@@ -285,7 +282,7 @@ class TestBatchDiagnosis(unittest.TestCase):
                     "candidate_faults",
                     top_fault=_compact_fault("unknown", 60.0, triggered=True, screening="high_confidence"),
                     top_candidate=_compact_fault("unknown", 60.0, triggered=True, screening="high_confidence"),
-                    rope_primary={
+                    detector_results=[{
                         "fault_type": "rope_looseness",
                         "score": 74.0,
                         "level": "warning",
@@ -293,20 +290,20 @@ class TestBatchDiagnosis(unittest.TestCase):
                         "quality_factor": 1.0,
                         "type_candidate_ready": True,
                         "type_watch_ready": True,
-                    },
+                    }],
                 ),
                 _result(
                     "watch_only",
                     top_fault=_compact_fault("unknown", 45.0, screening="watch"),
                     watch_faults=[_compact_fault("unknown", 45.0, screening="watch")],
-                    rope_primary={
+                    detector_results=[{
                         "fault_type": "rope_looseness",
                         "score": 58.0,
                         "level": "watch",
                         "triggered": False,
                         "quality_factor": 1.0,
                         "type_watch_ready": True,
-                    },
+                    }],
                 ),
                 _result(
                     "normal",

@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover
 
 ROPE_FAULT_TYPE = "rope_looseness"
 RUBBER_FAULT_TYPE = "rubber_hardening"
-ATTRIBUTION_BASELINE_KEYS: tuple[str, ...] = (
+DETECTOR_BASELINE_KEYS: tuple[str, ...] = (
     "corr_xy_abs",
     "corr_xz_abs",
     "energy_x_over_y",
@@ -18,9 +18,8 @@ ATTRIBUTION_BASELINE_KEYS: tuple[str, ...] = (
     "az_jerk_rms",
 )
 
-# 这层不是“异常门”，而是异常后的保守归因。
-# 规则只回答：当前异常窗更像 rope 还是 rubber；如果两边证据都不够集中，就保持 unknown。
-ROPE_VS_RUBBER_CONFIG = {
+# 第二阶段只负责“异常后的保守归因”，默认要求领先分支既有命中数，也要和次优分支拉开 margin。
+FAULT_DETECTOR_CONFIG = {
     "watch_score": 58.0,
     "candidate_score": 72.0,
     "feature_hit_min": 55.0,
@@ -51,9 +50,23 @@ RUBBER_FEATURE_SPECS: tuple[dict[str, Any], ...] = (
     {"key": "lat_dom_freq_hz", "label": "横向主频", "direction": "high", "lo": 2.30, "hi": 4.80, "weight": 0.9},
     {"key": "z_peak_ratio", "label": "竖向谱峰集中度", "direction": "low", "lo": 0.085, "hi": 0.110, "weight": 0.8},
 )
-BRANCH_BASELINE_RELATIVE_WEIGHT = 0.65
-BRANCH_TEMPLATE_WEIGHT = 0.35
-BRANCH_BASELINE_SOFTNESS = 2.0
+
+FAULT_DETECTORS: tuple[dict[str, Any], ...] = (
+    {
+        "fault_type": ROPE_FAULT_TYPE,
+        "detector_family": "rope",
+        "feature_specs": ROPE_FEATURE_SPECS,
+    },
+    {
+        "fault_type": RUBBER_FAULT_TYPE,
+        "detector_family": "rubber",
+        "feature_specs": RUBBER_FEATURE_SPECS,
+    },
+)
+
+DETECTOR_BASELINE_RELATIVE_WEIGHT = 0.65
+DETECTOR_TEMPLATE_WEIGHT = 0.35
+DETECTOR_BASELINE_SOFTNESS = 2.0
 EPS = 1e-9
 
 
@@ -102,10 +115,10 @@ def _relative_score(value: float, *, median: float, scale: float, direction: str
     else:
         delta = max(0.0, float(value) - float(median))
     z_value = delta / effective_scale
-    return 100.0 * (1.0 - pow(2.718281828459045, -z_value / max(0.35, BRANCH_BASELINE_SOFTNESS)))
+    return 100.0 * (1.0 - pow(2.718281828459045, -z_value / max(0.35, DETECTOR_BASELINE_SOFTNESS)))
 
 
-def _branch_components(
+def _detector_components(
     features: dict[str, Any],
     specs: tuple[dict[str, Any], ...],
     *,
@@ -136,8 +149,8 @@ def _branch_components(
             )
             # 归因优先参考“相对本梯健康基线的偏移”，模板区间只保留为弱先验，减少跨梯失灵。
             score = (
-                BRANCH_BASELINE_RELATIVE_WEIGHT * float(relative_score)
-                + BRANCH_TEMPLATE_WEIGHT * float(template_score)
+                DETECTOR_BASELINE_RELATIVE_WEIGHT * float(relative_score)
+                + DETECTOR_TEMPLATE_WEIGHT * float(template_score)
             )
         components.append(
             {
@@ -153,7 +166,7 @@ def _branch_components(
     return components
 
 
-def _branch_score(components: list[dict[str, Any]]) -> tuple[float, int, int]:
+def _detector_score(components: list[dict[str, Any]], *, config: dict[str, Any]) -> tuple[float, int, int]:
     if not components:
         return 0.0, 0, 0
     total_weight = sum(max(0.0, float(item.get("weight", 1.0))) for item in components)
@@ -161,46 +174,47 @@ def _branch_score(components: list[dict[str, Any]]) -> tuple[float, int, int]:
         total_weight = float(len(components))
     weighted = sum(float(item.get("score", 0.0)) * max(0.0, float(item.get("weight", 1.0))) for item in components)
     score = float(weighted / max(total_weight, 1e-6))
-    hit_min = float(ROPE_VS_RUBBER_CONFIG["feature_hit_min"])
-    strong_min = float(ROPE_VS_RUBBER_CONFIG["feature_strong_min"])
+    hit_min = float(config["feature_hit_min"])
+    strong_min = float(config["feature_strong_min"])
     hits = sum(1 for item in components if float(item.get("score", 0.0)) >= hit_min)
     strong_hits = sum(1 for item in components if float(item.get("score", 0.0)) >= strong_min)
     return score, hits, strong_hits
 
 
-def _decision_ready(score: float, hits: int, strong_hits: int, margin: float) -> tuple[bool, bool]:
-    cfg = ROPE_VS_RUBBER_CONFIG
+def _decision_ready(score: float, hits: int, strong_hits: int, margin: float, *, config: dict[str, Any]) -> tuple[bool, bool]:
     watch_ready = (
-        hits >= int(cfg["watch_hit_min"])
-        and score >= float(cfg["watch_score"])
-        and margin >= float(cfg["watch_margin_min"])
+        hits >= int(config["watch_hit_min"])
+        and score >= float(config["watch_score"])
+        and margin >= float(config["watch_margin_min"])
     )
     candidate_ready = (
-        hits >= int(cfg["candidate_hit_min"])
-        and strong_hits >= int(cfg["candidate_strong_min"])
-        and score >= float(cfg["candidate_score"])
-        and margin >= float(cfg["candidate_margin_min"])
+        hits >= int(config["candidate_hit_min"])
+        and strong_hits >= int(config["candidate_strong_min"])
+        and score >= float(config["candidate_score"])
+        and margin >= float(config["candidate_margin_min"])
     )
     return bool(watch_ready), bool(candidate_ready)
 
 
-def _branch_payload(
+def _detector_payload(
     *,
-    fault_type: str,
-    detector_family: str,
+    detector: dict[str, Any],
     features: dict[str, Any],
     components: list[dict[str, Any]],
     score: float,
-    other_score: float,
+    competitor_score: float,
     watch_ready: bool,
     candidate_ready: bool,
+    config: dict[str, Any],
 ) -> dict[str, Any]:
+    fault_type = str(detector["fault_type"])
+    detector_family = str(detector.get("detector_family", fault_type))
     reasons = [
-        "mode=rope_vs_rubber_v1",
+        "mode=fault_detectors_v1",
         f"branch={detector_family}",
         f"branch_score={score:.2f}",
-        f"other_score={other_score:.2f}",
-        f"margin={score - other_score:.2f}",
+        f"other_score={competitor_score:.2f}",
+        f"margin={score - competitor_score:.2f}",
         f"type_watch_ready={'true' if watch_ready else 'false'}",
         f"type_candidate_ready={'true' if candidate_ready else 'false'}",
     ]
@@ -216,13 +230,13 @@ def _branch_payload(
     )
     payload["detector_family"] = detector_family
     payload["branch_score"] = round(float(score), 2)
-    payload["other_branch_score"] = round(float(other_score), 2)
-    payload["attribution_margin"] = round(float(score - other_score), 2)
+    payload["other_branch_score"] = round(float(competitor_score), 2)
+    payload["attribution_margin"] = round(float(score - competitor_score), 2)
     payload["feature_hits"] = sum(
-        1 for item in components if float(item.get("score", 0.0)) >= float(ROPE_VS_RUBBER_CONFIG["feature_hit_min"])
+        1 for item in components if float(item.get("score", 0.0)) >= float(config["feature_hit_min"])
     )
     payload["feature_strong_hits"] = sum(
-        1 for item in components if float(item.get("score", 0.0)) >= float(ROPE_VS_RUBBER_CONFIG["feature_strong_min"])
+        1 for item in components if float(item.get("score", 0.0)) >= float(config["feature_strong_min"])
     )
     payload["type_watch_ready"] = bool(watch_ready)
     payload["type_candidate_ready"] = bool(candidate_ready)
@@ -235,98 +249,140 @@ def _branch_payload(
 
 def _selected_issue(
     *,
-    branch_payload: dict[str, Any],
+    detector_payload: dict[str, Any],
     system_abnormality: dict[str, Any],
     abnormal_status: str,
 ) -> dict[str, Any]:
     floor = 60.0 if abnormal_status == "candidate_faults" else 45.0
     cap = 100.0 if abnormal_status == "candidate_faults" else 59.0
     system_score = max(floor, _to_float(system_abnormality.get("score"), 0.0))
-    branch_score = max(floor, _to_float(branch_payload.get("score"), 0.0))
-    score = min(cap, min(system_score, branch_score))
+    detector_score = max(floor, _to_float(detector_payload.get("score"), 0.0))
+    score = min(cap, min(system_score, detector_score))
     return {
-        "fault_type": str(branch_payload.get("fault_type", "unknown")),
+        "fault_type": str(detector_payload.get("fault_type", "unknown")),
         "score": round(float(score), 2),
         "level": "warning" if abnormal_status == "candidate_faults" else "watch",
         "triggered": abnormal_status == "candidate_faults",
-        "quality_factor": round(_to_float(branch_payload.get("quality_factor"), 1.0), 3),
-        "reasons": list(branch_payload.get("reasons", [])) if isinstance(branch_payload.get("reasons"), list) else [],
-        "feature_snapshot": dict(branch_payload.get("feature_snapshot", {})) if isinstance(branch_payload.get("feature_snapshot"), dict) else {},
+        "quality_factor": round(_to_float(detector_payload.get("quality_factor"), 1.0), 3),
+        "reasons": list(detector_payload.get("reasons", [])) if isinstance(detector_payload.get("reasons"), list) else [],
+        "feature_snapshot": dict(detector_payload.get("feature_snapshot", {})) if isinstance(detector_payload.get("feature_snapshot"), dict) else {},
         "screening": "high_confidence" if abnormal_status == "candidate_faults" else "watch",
-        "attribution_margin": round(_to_float(branch_payload.get("attribution_margin"), 0.0), 2),
+        "attribution_margin": round(_to_float(detector_payload.get("attribution_margin"), 0.0), 2),
+        "detector_family": str(detector_payload.get("detector_family", "")),
     }
 
 
-def attribute(
+def detector_result_by_fault_type(detector_results: list[dict[str, Any]], fault_type: str) -> dict[str, Any]:
+    target = str(fault_type or "").strip()
+    for item in detector_results:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("fault_type", "")).strip() == target:
+            return dict(item)
+    return {}
+
+
+def _top_ready_result(detector_results: list[dict[str, Any]]) -> dict[str, Any]:
+    ready = [
+        item for item in detector_results
+        if isinstance(item, dict) and bool(item.get("type_candidate_ready") or item.get("type_watch_ready"))
+    ]
+    if not ready:
+        return {}
+    return dict(max(ready, key=lambda item: _to_float(item.get("score"), 0.0)))
+
+
+def run_fault_detectors(
     features: dict[str, Any],
     *,
     system_abnormality: dict[str, Any] | None = None,
     baseline: dict[str, Any] | None = None,
+    detectors: tuple[dict[str, Any], ...] = FAULT_DETECTORS,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     abnormality = system_abnormality if isinstance(system_abnormality, dict) else {}
     abnormal_status = str(abnormality.get("status", "normal")).strip().lower()
     sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
-    if abnormal_status not in {"watch_only", "candidate_faults"} or not sampling_ok:
+    if abnormal_status not in {"watch_only", "candidate_faults"} or not sampling_ok or not detectors:
         return {
-            "rope_primary": {},
-            "rubber_primary": {},
+            "detector_results": [],
             "selected_issue": {},
             "auxiliary_results": [],
         }
 
-    rope_components = _branch_components(features, ROPE_FEATURE_SPECS, baseline=baseline)
-    rubber_components = _branch_components(features, RUBBER_FEATURE_SPECS, baseline=baseline)
-    rope_score, rope_hits, rope_strong_hits = _branch_score(rope_components)
-    rubber_score, rubber_hits, rubber_strong_hits = _branch_score(rubber_components)
-    rope_margin = float(rope_score - rubber_score)
-    rubber_margin = float(rubber_score - rope_score)
-    rope_watch_ready, rope_candidate_ready = _decision_ready(rope_score, rope_hits, rope_strong_hits, rope_margin)
-    rubber_watch_ready, rubber_candidate_ready = _decision_ready(rubber_score, rubber_hits, rubber_strong_hits, rubber_margin)
+    detector_cfg = dict(FAULT_DETECTOR_CONFIG)
+    if isinstance(config, dict):
+        detector_cfg.update(config)
 
-    rope_primary = _branch_payload(
-        fault_type=ROPE_FAULT_TYPE,
-        detector_family="rope",
-        features=features,
-        components=rope_components,
-        score=rope_score,
-        other_score=rubber_score,
-        watch_ready=rope_watch_ready,
-        candidate_ready=rope_candidate_ready,
-    )
-    rubber_primary = _branch_payload(
-        fault_type=RUBBER_FAULT_TYPE,
-        detector_family="rubber",
-        features=features,
-        components=rubber_components,
-        score=rubber_score,
-        other_score=rope_score,
-        watch_ready=rubber_watch_ready,
-        candidate_ready=rubber_candidate_ready,
-    )
+    scored_rows: list[dict[str, Any]] = []
+    for detector in detectors:
+        components = _detector_components(
+            features,
+            tuple(detector.get("feature_specs", ())),
+            baseline=baseline,
+        )
+        score, hits, strong_hits = _detector_score(components, config=detector_cfg)
+        scored_rows.append(
+            {
+                "detector": dict(detector),
+                "components": components,
+                "score": float(score),
+                "hits": int(hits),
+                "strong_hits": int(strong_hits),
+            }
+        )
 
+    detector_results: list[dict[str, Any]] = []
+    for idx, item in enumerate(scored_rows):
+        other_scores = [row["score"] for j, row in enumerate(scored_rows) if j != idx]
+        competitor_score = max(other_scores) if other_scores else 0.0
+        margin = float(item["score"] - competitor_score)
+        watch_ready, candidate_ready = _decision_ready(
+            float(item["score"]),
+            int(item["hits"]),
+            int(item["strong_hits"]),
+            margin,
+            config=detector_cfg,
+        )
+        detector_results.append(
+            _detector_payload(
+                detector=item["detector"],
+                features=features,
+                components=item["components"],
+                score=float(item["score"]),
+                competitor_score=float(competitor_score),
+                watch_ready=watch_ready,
+                candidate_ready=candidate_ready,
+                config=detector_cfg,
+            )
+        )
+
+    detector_results.sort(key=lambda row: _to_float(row.get("score"), 0.0), reverse=True)
     selected_issue: dict[str, Any] = {}
+    top = detector_results[0] if detector_results else {}
+    runner_up = detector_results[1] if len(detector_results) > 1 else {}
+    top_ready = bool(top.get("type_candidate_ready") or top.get("type_watch_ready"))
+    runner_ready = bool(runner_up.get("type_candidate_ready") or runner_up.get("type_watch_ready"))
+    top_candidate_ready = bool(top.get("type_candidate_ready"))
+    runner_candidate_ready = bool(runner_up.get("type_candidate_ready"))
+    top_margin = _to_float(top.get("attribution_margin"), 0.0)
+
     if abnormal_status == "candidate_faults":
-        rope_ready = rope_candidate_ready or rope_watch_ready
-        rubber_ready = rubber_candidate_ready or rubber_watch_ready
-        if rope_candidate_ready and not rubber_candidate_ready:
-            selected_issue = _selected_issue(branch_payload=rope_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
-        elif rubber_candidate_ready and not rope_candidate_ready:
-            selected_issue = _selected_issue(branch_payload=rubber_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
-        elif rope_ready and not rubber_ready and rope_margin >= float(ROPE_VS_RUBBER_CONFIG["candidate_margin_min"]):
-            selected_issue = _selected_issue(branch_payload=rope_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
-        elif rubber_ready and not rope_ready and rubber_margin >= float(ROPE_VS_RUBBER_CONFIG["candidate_margin_min"]):
-            selected_issue = _selected_issue(branch_payload=rubber_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
+        if top_candidate_ready and not runner_candidate_ready:
+            selected_issue = _selected_issue(detector_payload=top, system_abnormality=abnormality, abnormal_status=abnormal_status)
+        elif top_ready and not runner_ready and top_margin >= float(detector_cfg["candidate_margin_min"]):
+            selected_issue = _selected_issue(detector_payload=top, system_abnormality=abnormality, abnormal_status=abnormal_status)
     else:
-        rope_ready = rope_candidate_ready or rope_watch_ready
-        rubber_ready = rubber_candidate_ready or rubber_watch_ready
-        if rope_ready and not rubber_ready:
-            selected_issue = _selected_issue(branch_payload=rope_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
-        elif rubber_ready and not rope_ready:
-            selected_issue = _selected_issue(branch_payload=rubber_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
+        if top_ready and not runner_ready:
+            selected_issue = _selected_issue(detector_payload=top, system_abnormality=abnormality, abnormal_status=abnormal_status)
+
+    if not selected_issue:
+        fallback = _top_ready_result(detector_results)
+        if fallback and len(detector_results) == 1:
+            selected_issue = _selected_issue(detector_payload=fallback, system_abnormality=abnormality, abnormal_status=abnormal_status)
 
     return {
-        "rope_primary": rope_primary,
-        "rubber_primary": rubber_primary,
+        "detector_results": detector_results,
         "selected_issue": selected_issue,
         "auxiliary_results": [],
     }

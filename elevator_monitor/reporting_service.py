@@ -4,6 +4,7 @@ import csv
 import gzip
 import io
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -114,6 +115,8 @@ _PART_TRANSLATIONS = {
     "rope tension gauge": "钢丝绳张力计",
     "vibration pad": "减振垫",
 }
+
+_ELEVATOR_ID_PATTERN = re.compile(r"elevator[_-]?([A-Za-z0-9]+)", re.IGNORECASE)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -405,8 +408,7 @@ def build_report_context(
     package = maintenance_package if isinstance(maintenance_package, dict) else {}
     waveforms = waveform_payload if isinstance(waveform_payload, dict) else {}
     top_fault = dict(diag.get("top_fault", {})) if isinstance(diag.get("top_fault"), dict) else {}
-    rope_primary = dict(diag.get("rope_primary", {})) if isinstance(diag.get("rope_primary"), dict) else {}
-    rubber_primary = dict(diag.get("rubber_primary", {})) if isinstance(diag.get("rubber_primary"), dict) else {}
+    detector_results = list(diag.get("detector_results", [])) if isinstance(diag.get("detector_results"), list) else []
     system_abnormality = dict(diag.get("system_abnormality", {})) if isinstance(diag.get("system_abnormality"), dict) else {}
     summary = dict(diag.get("summary", {})) if isinstance(diag.get("summary"), dict) else {}
     screening = dict(diag.get("screening", {})) if isinstance(diag.get("screening"), dict) else {}
@@ -445,8 +447,7 @@ def build_report_context(
         "preferred_fault_type": preferred_fault_type,
         "preferred_fault_label": _fault_label(preferred_fault_type),
         "preferred_fault_score": preferred_fault_score,
-        "rope_branch": str(rope_primary.get("rope_branch", "")),
-        "rope_rule_score": _safe_float(rope_primary.get("rope_rule_score"), 0.0),
+        "detector_results": detector_results,
         "system_abnormality_status": str(system_abnormality.get("status", "normal")),
         "system_abnormality_score": _safe_float(system_abnormality.get("score"), 0.0),
         "risk_score_now": risk_now,
@@ -485,8 +486,7 @@ def build_report_context(
             "level": str(top_fault.get("level", "normal")),
             "reasons": list(top_fault.get("reasons", [])) if isinstance(top_fault.get("reasons"), list) else [],
         },
-        "rope_primary": rope_primary,
-        "rubber_primary": rubber_primary,
+        "detector_results": detector_results,
         "system_abnormality": system_abnormality,
         "preferred_issue": {
             "fault_type": preferred_fault_type,
@@ -507,6 +507,181 @@ def build_report_context(
         "dify_prompt_template": prompt,
         "dify_report_inputs": dify_report_inputs,
     }
+
+
+def _infer_elevator_id(*candidates: Any) -> str:
+    for value in candidates:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        match = _ELEVATOR_ID_PATTERN.search(text)
+        if match:
+            return f"elevator-{match.group(1)}"
+
+    for value in candidates:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        parts = [part for part in Path(text).parts if part]
+        for part in reversed(parts):
+            if re.fullmatch(r"\d{2,4}", part):
+                return f"elevator-{part}"
+
+    return "elevator-unknown"
+
+
+def _diagnosis_result_from_latest_status(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = dict(payload or {})
+    latest_result = dict(raw.get("latest_result", {})) if isinstance(raw.get("latest_result"), dict) else {}
+    latest_screening = latest_result.get("screening", {}) if isinstance(latest_result.get("screening"), dict) else {}
+    screening_status = str(raw.get("status") or latest_screening.get("status") or "normal").strip() or "normal"
+    baseline = dict(latest_result.get("baseline", {})) if isinstance(latest_result.get("baseline"), dict) else {}
+    if not baseline and isinstance(raw.get("baseline"), dict):
+        baseline = dict(raw.get("baseline", {}))
+    summary = dict(latest_result.get("summary", {})) if isinstance(latest_result.get("summary"), dict) else {}
+    primary_issue = dict(raw.get("primary_issue", {})) if isinstance(raw.get("primary_issue"), dict) else {}
+    preferred_issue = dict(raw.get("preferred_issue", {})) if isinstance(raw.get("preferred_issue"), dict) else {}
+    top_candidate = dict(raw.get("top_candidate", {})) if isinstance(raw.get("top_candidate"), dict) else {}
+    top_fault = dict(latest_result.get("top_fault", {})) if isinstance(latest_result.get("top_fault"), dict) else {}
+    if not top_fault:
+        top_fault = dict(primary_issue or preferred_issue or top_candidate)
+
+    diag = dict(latest_result)
+    diag["input"] = str(diag.get("input") or raw.get("latest_file") or raw.get("latest_json") or "latest_status")
+    diag["summary"] = summary
+    diag["baseline"] = baseline
+    diag["screening"] = {
+        **latest_screening,
+        "status": screening_status,
+    }
+    diag["top_fault"] = top_fault
+    diag["primary_issue"] = dict(primary_issue or preferred_issue or top_candidate)
+    diag["preferred_issue"] = dict(preferred_issue or primary_issue or top_candidate)
+    diag["top_candidate"] = top_candidate
+    diag["candidate_faults"] = [
+        dict(item)
+        for item in latest_result.get("candidate_faults", [])
+        if isinstance(item, dict)
+    ] if isinstance(latest_result.get("candidate_faults"), list) else []
+    diag["watch_faults"] = [
+        dict(item)
+        for item in (raw.get("watch_faults", latest_result.get("watch_faults", [])) or [])
+        if isinstance(item, dict)
+    ]
+    diag["detector_results"] = [
+        dict(item)
+        for item in (raw.get("detector_results", latest_result.get("detector_results", [])) or [])
+        if isinstance(item, dict)
+    ]
+    diag["system_abnormality"] = (
+        dict(raw.get("system_abnormality", latest_result.get("system_abnormality", {})))
+        if isinstance(raw.get("system_abnormality", latest_result.get("system_abnormality", {})), dict)
+        else {}
+    )
+    diag["auxiliary_results"] = [
+        dict(item)
+        for item in (raw.get("auxiliary_results", latest_result.get("auxiliary_results", [])) or [])
+        if isinstance(item, dict)
+    ]
+    return diag
+
+
+def _maintenance_package_from_latest_status(
+    payload: dict[str, Any],
+    *,
+    elevator_id: str,
+    site_name: str,
+    diagnosis_result: dict[str, Any],
+) -> dict[str, Any]:
+    raw = dict(payload or {})
+    screening = diagnosis_result.get("screening", {}) if isinstance(diagnosis_result.get("screening"), dict) else {}
+    screening_status = str(screening.get("status", raw.get("status", "normal"))).strip() or "normal"
+    preferred_issue = _preferred_issue(diagnosis_result)
+    fault_type = str(preferred_issue.get("fault_type", "unknown")).strip() or "unknown"
+    score = _safe_float(preferred_issue.get("score"), 0.0)
+    risk = dict(raw.get("risk", {})) if isinstance(raw.get("risk"), dict) else {}
+    baseline = dict(diagnosis_result.get("baseline", {})) if isinstance(diagnosis_result.get("baseline"), dict) else {}
+    generated_at_ms = _safe_int(raw.get("generated_at_ms"), int(time.time() * 1000))
+
+    level = "normal"
+    if screening_status == "candidate_faults":
+        level = "anomaly"
+    elif screening_status == "watch_only":
+        level = "warning"
+
+    alert_row = {
+        "elevator_id": elevator_id,
+        "ts_ms": str(generated_at_ms),
+        "level": level,
+        "predictive_only": "0",
+        "fault_type": fault_type,
+        "fault_confidence": f"{max(0.0, min(1.0, score / 100.0)):.4f}",
+        "risk_score": f"{_safe_float(risk.get('risk_score'), 0.0):.4f}",
+        "risk_level_now": str(risk.get("risk_level_now", "normal")),
+        "risk_24h": f"{_safe_float(risk.get('risk_24h'), 0.0):.4f}",
+        "risk_level_24h": str(risk.get("risk_level_24h", "normal")),
+        "alert_context_csv": str(raw.get("latest_file", "")),
+    }
+    health_payload = {
+        "status": "scheduled_batch_diagnosis",
+        "connected": True,
+        "baseline_ready": str(baseline.get("mode", "disabled")) != "disabled",
+        "elevator_id": elevator_id,
+        "last_fault_type": fault_type,
+        "last_fault_confidence": round(max(0.0, min(1.0, score / 100.0)), 4),
+        "last_risk_score": round(_safe_float(risk.get("risk_score"), 0.0), 4),
+        "last_risk_level_now": str(risk.get("risk_level_now", "normal")),
+        "last_risk_24h": round(_safe_float(risk.get("risk_24h"), 0.0), 4),
+        "last_risk_level_24h": str(risk.get("risk_level_24h", "normal")),
+    }
+    return build_maintenance_package(
+        alert_rows=[alert_row],
+        health_payload=health_payload,
+        site_name=site_name,
+        alert_csv_path="",
+        health_json_path="",
+        manifest_payload={},
+        manifest_path="",
+    )
+
+
+def build_report_context_from_latest_status(
+    *,
+    latest_status_payload: dict[str, Any],
+    elevator_id: str = "",
+    site_name: str = "",
+    language: str = "zh-CN",
+    report_style: str = "standard",
+    waveform_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(latest_status_payload or {})
+    diagnosis_result = _diagnosis_result_from_latest_status(payload)
+    resolved_elevator_id = _infer_elevator_id(
+        str(elevator_id or "").strip(),
+        str(payload.get("elevator_id", "")).strip(),
+        str(payload.get("requested_elevator_id", "")).strip(),
+        payload.get("latest_file", ""),
+        payload.get("latest_json", ""),
+    )
+    resolved_site_name = str(site_name or payload.get("site_name", "")).strip()
+    waveforms = waveform_payload if isinstance(waveform_payload, dict) else {}
+    if not waveforms and isinstance(payload.get("waveform_payload"), dict):
+        waveforms = dict(payload.get("waveform_payload", {}))
+    maintenance_package = _maintenance_package_from_latest_status(
+        payload,
+        elevator_id=resolved_elevator_id,
+        site_name=resolved_site_name,
+        diagnosis_result=diagnosis_result,
+    )
+    report_ctx = build_report_context(
+        diagnosis_result=diagnosis_result,
+        maintenance_package=maintenance_package,
+        language=language,
+        report_style=report_style,
+        waveform_payload=waveforms,
+    )
+    report_ctx["latest_status_payload"] = payload
+    return report_ctx
 
 
 def _screening_status_from_event(event: dict[str, Any]) -> str:

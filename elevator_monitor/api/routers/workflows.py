@@ -4,13 +4,21 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from ...batch_diagnosis import load_latest_status
 from ...ingest_store import get_ingest_store
+from ...latest_status_service import attach_latest_waveforms, resolve_latest_status_path
 from ...maintenance_workflow import build_maintenance_package, load_optional_json, load_recent_alerts
-from ...reporting_service import build_report_context, build_report_context_from_edge_event, render_report_markdown
+from ...reporting_service import (
+    build_report_context,
+    build_report_context_from_edge_event,
+    build_report_context_from_latest_status,
+    render_report_markdown,
+)
 from ...waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms.run_all import run_all, run_all_rows
 from ..schemas import (
     DiagnosisReportByEventRequest,
+    DiagnosisReportLatestRequest,
     DiagnosisReportRequest,
     MaintenancePackageRequest,
     normalize_row_values,
@@ -89,6 +97,97 @@ def diagnosis_report(request: DiagnosisReportRequest) -> dict[str, Any]:
         report_style=request.report_style,
         waveform_payload=waveform_payload,
     )
+    report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
+    return report_ctx
+
+
+@router.get("/diagnosis-report-latest")
+def diagnosis_report_latest(
+    elevator_id: str = "",
+    site_name: str = "",
+    latest_json: str = "data/diagnosis/latest_status.json",
+    latest_root: str = "data/diagnosis",
+    language: str = "zh-CN",
+    report_style: str = "standard",
+    include_waveforms: bool = True,
+    waveform_width: int = 920,
+    waveform_height: int = 320,
+    waveform_max_points: int = 240,
+) -> dict[str, Any]:
+    request = DiagnosisReportLatestRequest(
+        elevator_id=elevator_id,
+        site_name=site_name,
+        latest_json=latest_json,
+        latest_root=latest_root,
+        language=language,
+        report_style=report_style,
+        include_waveforms=include_waveforms,
+        waveform_width=waveform_width,
+        waveform_height=waveform_height,
+        waveform_max_points=waveform_max_points,
+    )
+    resolved_latest = resolve_latest_status_path(request.latest_json, request.elevator_id, request.latest_root)
+    try:
+        latest_payload = load_latest_status(str(resolved_latest))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    latest_payload = dict(latest_payload)
+    latest_payload["latest_json"] = str(resolved_latest)
+    latest_payload["requested_elevator_id"] = str(request.elevator_id or "").strip()
+    if request.include_waveforms:
+        latest_payload = attach_latest_waveforms(
+            latest_payload,
+            width=request.waveform_width,
+            height=request.waveform_height,
+            max_points=request.waveform_max_points,
+        )
+
+    report_ctx = build_report_context_from_latest_status(
+        latest_status_payload=latest_payload,
+        elevator_id=request.elevator_id,
+        site_name=request.site_name,
+        language=request.language,
+        report_style=request.report_style,
+        waveform_payload=dict(latest_payload.get("waveform_payload", {}))
+        if isinstance(latest_payload.get("waveform_payload"), dict)
+        else {},
+    )
+    report_ctx["workflow_type"] = str(latest_payload.get("workflow_type", "scheduled_batch_diagnosis_v1"))
+    report_ctx["generated_at_ms"] = int(
+        latest_payload.get("generated_at_ms", report_ctx.get("generated_at_ms", 0))
+        or report_ctx.get("generated_at_ms", 0)
+    )
+    report_ctx["status"] = str(
+        (report_ctx.get("screening", {}) if isinstance(report_ctx.get("screening"), dict) else {}).get(
+            "status", latest_payload.get("status", "normal")
+        )
+    )
+    report_ctx["primary_issue"] = dict(latest_payload.get("primary_issue", {})) if isinstance(
+        latest_payload.get("primary_issue"), dict
+    ) else {}
+    if not report_ctx["primary_issue"] and isinstance(report_ctx.get("preferred_issue"), dict):
+        report_ctx["primary_issue"] = {
+            "fault_type": str(report_ctx["preferred_issue"].get("fault_type", "unknown")),
+            "score": report_ctx["preferred_issue"].get("score", 0.0),
+            "level": str(report_ctx["preferred_issue"].get("level", "normal")),
+        }
+    report_ctx["top_candidate"] = dict(latest_payload.get("top_candidate", {})) if isinstance(
+        latest_payload.get("top_candidate"), dict
+    ) else {}
+    report_ctx["watch_faults"] = [
+        dict(item) for item in latest_payload.get("watch_faults", []) if isinstance(item, dict)
+    ]
+    report_ctx["auxiliary_results"] = [
+        dict(item) for item in latest_payload.get("auxiliary_results", []) if isinstance(item, dict)
+    ]
+    report_ctx["recommendation"] = str(latest_payload.get("recommendation", "")).strip()
+    report_ctx["latest_file"] = str(latest_payload.get("latest_file", "")).strip()
+    report_ctx["latest_file_name"] = str(latest_payload.get("latest_file_name", "")).strip()
+    report_ctx["latest_json"] = str(resolved_latest)
+    report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
     return report_ctx
 

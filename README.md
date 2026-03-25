@@ -136,8 +136,8 @@ alerts.csv]  alerts.csv]
 - Manifest 版本清单
 
 ### 专项诊断
-- `report/fault_algorithms` 当前总控默认先做“相对健康基线的异常筛查”，异常后再做保守的 `rope_vs_rubber` 归因
-- `rope_vs_rubber` 里的“经验模板”不是训练模型，而是一组人工设定的特征方向/区间弱先验；当前归因更依赖“相对本梯健康基线的偏移”
+- `report/fault_algorithms` 当前总控默认先做“相对健康基线的异常筛查”，异常后再做保守的 `fault_detectors` 归因
+- `fault_detectors` 里的“经验模板”不是训练模型，而是一组人工设定的特征方向/区间弱先验；当前归因更依赖“相对本梯健康基线的偏移”
 - 可对单个 CSV 或批量 CSV 进行离线诊断
 - 输出保持保守，只给 `normal`、`watch_only`、`candidate_faults`
 
@@ -384,12 +384,14 @@ export MONITOR_INGEST_SHARED_TOKEN=change-me
 - `POST /api/v1/diagnostics/rule-engine`：执行 8 类规则诊断，支持 `rows`、`csv_text` 或 `csv_path`
 - `POST /api/v1/workflows/maintenance-package`：生成维保工单包，返回 `dify_inputs`
 - `POST /api/v1/workflows/diagnosis-report`：聚合“诊断结果 + 维保包”并输出 `dify_report_inputs`（供 Dify 生成报告）
+- `GET /api/v1/workflows/diagnosis-report-latest`：按电梯直接读取最新批诊断并返回完整报告上下文（推荐给 Dify 在线问答使用）
 - `POST /api/v1/workflows/diagnosis-report-by-event`：按边缘同步事件生成报告上下文与 Dify 输入
 
 Dify 接法：
 - 直接用 HTTP Request 节点调用上述接口即可，不要求每个算法单独做一个脚本入口
 - 更合理的方式是“算法服务统一对外暴露 JSON API”，由 Dify 只负责编排、通知、知识库和工单流转
-- 在线主链路建议优先读取 `latest-status` / `alerts` / `diagnosis-report-by-event`，上传 CSV 仅保留为调试和离线验证入口
+- 在线主链路建议优先读取 `diagnosis-report-latest`，直接按电梯生成最新报告；`latest-status` / `alerts` / `diagnosis-report-by-event` 作为补充接口保留
+- 上传 CSV 更适合保留为调试和离线验证入口，不建议继续作为默认 Dify 交互方式
 - 如果要由监控服务主动触发 Dify，再去调用 Dify 的 Workflow API；这时可以是“主动调用 API”，不要求你一定做 webhook
 - 标准节点输入输出设计见 `docs/dify_workflow_design.md`
 

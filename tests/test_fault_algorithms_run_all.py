@@ -106,6 +106,23 @@ def _system_features(**overrides: float | str | bool) -> dict:
     return payload
 
 
+def _detector_result(fault_type: str, score: float, **overrides):
+    payload = {
+        "fault_type": fault_type,
+        "score": score,
+        "level": "warning" if score >= 60.0 else "watch",
+        "triggered": score >= 60.0,
+        "quality_factor": 1.0,
+        "screening": "high_confidence" if score >= 60.0 else "watch",
+        "detector_family": fault_type.replace("_hardening", "").replace("_looseness", ""),
+        "type_watch_ready": score >= 58.0,
+        "type_candidate_ready": score >= 72.0,
+        "attribution_margin": 20.0,
+    }
+    payload.update(overrides)
+    return payload
+
+
 class TestFaultAlgorithmsRunAll(unittest.TestCase):
     def test_normal_sample_returns_no_issue(self):
         with patch.object(
@@ -131,8 +148,8 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             },
         ), patch.object(
             run_all_module,
-            "attribute_rope_vs_rubber",
-            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
+            "run_fault_detectors",
+            return_value={"detector_results": [], "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
@@ -141,8 +158,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["candidate_faults"], [])
         self.assertEqual(payload["watch_faults"], [])
         self.assertEqual(payload["primary_issue"], {})
-        self.assertEqual(payload["rope_primary"], {})
-        self.assertEqual(payload["rubber_primary"], {})
+        self.assertEqual(payload["detector_results"], [])
 
     def test_system_watch_returns_unknown_watch_issue(self):
         with patch.object(
@@ -168,8 +184,8 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             },
         ), patch.object(
             run_all_module,
-            "attribute_rope_vs_rubber",
-            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
+            "run_fault_detectors",
+            return_value={"detector_results": [], "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
@@ -203,8 +219,8 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             },
         ), patch.object(
             run_all_module,
-            "attribute_rope_vs_rubber",
-            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
+            "run_fault_detectors",
+            return_value={"detector_results": [], "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
 
@@ -237,8 +253,8 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             },
         ), patch.object(
             run_all_module,
-            "attribute_rope_vs_rubber",
-            return_value={"rope_primary": {}, "rubber_primary": {}, "selected_issue": {}, "auxiliary_results": []},
+            "run_fault_detectors",
+            return_value={"detector_results": [], "selected_issue": {}, "auxiliary_results": []},
         ):
             payload = run_all_module.run_all_rows(_rows(count=100), source="inline_rows")
 
@@ -303,10 +319,12 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             },
         ), patch.object(
             run_all_module,
-            "attribute_rope_vs_rubber",
+            "run_fault_detectors",
             return_value={
-                "rope_primary": {"fault_type": "rope_looseness", "score": 71.0, "type_watch_ready": True},
-                "rubber_primary": {"fault_type": "rubber_hardening", "score": 20.0, "type_watch_ready": False},
+                "detector_results": [
+                    _detector_result("rope_looseness", 71.0, type_watch_ready=True, type_candidate_ready=False),
+                    _detector_result("rubber_hardening", 20.0, type_watch_ready=False, type_candidate_ready=False),
+                ],
                 "selected_issue": {"fault_type": "rope_looseness", "score": 45.0, "level": "watch", "triggered": False, "screening": "watch"},
                 "auxiliary_results": [],
             },
@@ -316,7 +334,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["screening"]["status"], "watch_only")
         self.assertEqual(payload["primary_issue"]["fault_type"], "rope_looseness")
         self.assertEqual(payload["watch_faults"][0]["fault_type"], "rope_looseness")
-        self.assertEqual(payload["rope_primary"]["fault_type"], "rope_looseness")
+        self.assertEqual(payload["detector_results"][0]["fault_type"], "rope_looseness")
 
     def test_candidate_window_uses_typed_issue_when_attribution_is_clear(self):
         with patch.object(
@@ -342,10 +360,12 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
             },
         ), patch.object(
             run_all_module,
-            "attribute_rope_vs_rubber",
+            "run_fault_detectors",
             return_value={
-                "rope_primary": {"fault_type": "rope_looseness", "score": 18.0, "type_candidate_ready": False},
-                "rubber_primary": {"fault_type": "rubber_hardening", "score": 79.0, "type_candidate_ready": True},
+                "detector_results": [
+                    _detector_result("rubber_hardening", 79.0, type_candidate_ready=True, type_watch_ready=True),
+                    _detector_result("rope_looseness", 18.0, type_candidate_ready=False, type_watch_ready=False),
+                ],
                 "selected_issue": {"fault_type": "rubber_hardening", "score": 60.0, "level": "warning", "triggered": True, "screening": "high_confidence"},
                 "auxiliary_results": [],
             },
@@ -355,7 +375,7 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["screening"]["status"], "candidate_faults")
         self.assertEqual(payload["primary_issue"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["candidate_faults"][0]["fault_type"], "rubber_hardening")
-        self.assertEqual(payload["rubber_primary"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["detector_results"][0]["fault_type"], "rubber_hardening")
 
     def test_baseline_keys_match_shared_anomaly_features(self):
         self.assertEqual(

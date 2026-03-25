@@ -1,9 +1,9 @@
 # Dify Workflow Design (Scheduled Diagnosis + Offline Report)
 
-This project now uses one main Dify workflow with two branches:
+This project now uses one main Dify workflow centered on direct text queries.
 
-1. No CSV uploaded: query the latest scheduled batch diagnosis result.
-2. CSV uploaded: generate a detailed offline diagnosis report.
+1. Default production path: users ask directly, and Dify reads the latest report for the target elevator.
+2. CSV upload is no longer the default interaction mode; keep it only for debug or offline validation when needed.
 
 The old realtime rule engine under `elevator_monitor/monitor/` is no longer the primary path for user-facing status replies. It can still be kept for acquisition health or compatibility, but the main diagnosis source is the newer candidate-fault screening logic under `report/fault_algorithms/`.
 
@@ -21,6 +21,7 @@ The old realtime rule engine under `elevator_monitor/monitor/` is no longer the 
 - `POST /api/v1/diagnostics/waveform-plot`
 - `POST /api/v1/workflows/maintenance-package`
 - `POST /api/v1/workflows/diagnosis-report`
+- `GET /api/v1/workflows/diagnosis-report-latest`
 - `POST /api/v1/workflows/diagnosis-report-by-event`
 - `GET /api/v1/health/monitor`
 
@@ -36,9 +37,9 @@ Recommended Dify DSL file:
 
 Branch rule:
 
-- `sys.files` is empty: go to online status query branch
-- `sys.files` has uploaded CSV: go to offline diagnosis report branch
-- CSV branch does not depend on `sys.query`; when the Dify client allows empty text submission, users can upload a file and send directly without typing a question
+- Default production workflow should rely on `sys.query` and call `diagnosis-report-latest`
+- File upload can be disabled in the default app so the workflow always enters the direct-query branch
+- If a separate debug workflow keeps CSV upload enabled, the CSV branch still does not depend on `sys.query`
 - Only when `system_abnormality.baseline_mode == robust_baseline` and `top_deviations` contains real `value / median / z / effective_scale` may Dify render or describe a "baseline median / deviation z" table
 - If `baseline_mode` is `self_normalized_fallback` or `mapping_mismatch_fallback`, Dify should only present the anomaly score and explain that no directly comparable health-baseline statistics are available; do not render missing stats as `0`
 
@@ -47,18 +48,17 @@ Branch rule:
 Purpose:
 
 - Answer questions like "current status", "whether abnormal", "should maintenance be arranged now"
-- In the edge/cloud path, read the latest synchronized elevator status and recent alert event
-- Keep the old scheduled-batch `latest_status.json` query path only as a compatibility fallback
+- Use one backend call to return the latest report context for the requested elevator
+- Keep `latest-status` and `diagnosis-report-by-event` only as compatibility or sidecar APIs
 
 Node flow:
 
 1. `Start`
-2. `If/Else`
-3. `HTTP Request` -> `GET /api/v1/elevators/{elevator_id}/latest-status`
-4. `Code` -> parse the latest status JSON and build a concise summary
-5. `LLM` -> answer in natural Chinese using the structured status
-6. If latest status contains `last_event_id`, optionally call `POST /api/v1/workflows/diagnosis-report-by-event`
-7. `Answer` -> render the text conclusion first, then render waveform charts when the event report contains them
+2. `Code` -> parse `sys.query` and extract elevator id
+3. `HTTP Request` -> `GET /api/v1/workflows/diagnosis-report-latest`
+4. `Code` -> compact the report JSON and extract chart markdown / tables
+5. `LLM` -> answer in natural Chinese using the structured report
+6. `Answer` -> render the text conclusion first, then render waveform charts from the returned report context
 
 Suggested environment variables:
 
@@ -67,12 +67,11 @@ Suggested environment variables:
 - `elevator_id`: current elevator identifier for the status query branch
 - `latest_json`: status file path, default `data/diagnosis/latest_status.json`
 
-Expected status payload:
+Expected report payload:
 
 - `status`
 - `primary_issue`
-- `rope_primary`
-- `rubber_primary`
+- `detector_results`
 - `system_abnormality`
 - `preferred_issue` as a compatibility field
 - `top_candidate` as a compatibility field
@@ -82,6 +81,8 @@ Expected status payload:
 - `latest_file_name`
 - `generated_at_ms`
 - `waveform_payload` when `include_waveforms=true`
+- `report_markdown_draft`
+- `dify_report_inputs`
 
 Typical answer style:
 
@@ -98,9 +99,10 @@ Typical answer style:
 
 Purpose:
 
+- Optional debug path only
 - Upload a CSV
 - run the candidate-fault screening chain
-- if the anomaly gate is hit, run a conservative `rope_vs_rubber` attribution step
+- if the anomaly gate is hit, run a conservative detector attribution step
 - draw full-frequency and low-frequency spectrum charts plus waveform charts in Dify
 - generate a readable report
 - this branch should tolerate empty user text and rely on the uploaded file as the primary input
@@ -119,7 +121,7 @@ Current recommended node flow:
 
 Notes:
 
-- Edge/cloud协同模式下，Dify 的主入口应该是状态/事件 API，而不是文件上传。
+- Edge/cloud协同模式下，Dify 的主入口应该是 `diagnosis-report-latest` 这样的直接报告 API，而不是文件上传。
 - Waveforms are now rendered on the Dify side with `echarts` code blocks.
 - The backend `waveform-plot` API is still available for other clients, but the current Dify report workflow does not need to depend on it.
 - Dify has a per-variable size limit. For uploaded CSV, the workflow should compact and sample the extracted text before storing it in `csv_text`; do not pass the full extracted file text through workflow variables.
@@ -127,7 +129,7 @@ Notes:
 
 How Dify should explain the method:
 
-- Describe the main algorithm as: first compare the window with this elevator's own health baseline, then do a conservative `rope_vs_rubber` attribution only after the anomaly gate is hit.
+- Describe the main algorithm as: first compare the window with this elevator's own health baseline, then do a conservative detector attribution only after the anomaly gate is hit.
 - If users ask about the "template" or "rule", explain that the template is a weak prior made from manually chosen feature directions/ranges; it is not a trained model and not a hard threshold.
 - If `primary_issue` or `preferred_issue` is `rope_looseness` / `rubber_hardening`, phrase it as "更像 / 偏向" instead of "已经确认".
 - If the backend returns `unknown`, Dify must clearly say "已检测到异常，但类型待确认" and stop there.
@@ -157,13 +159,13 @@ What it does:
 - keep the user-facing result conservative and centered on abnormal vs normal
 - compute a trend-aware risk score from repeated appearances, score trend, and data quality
 - write a stable `latest_status.json` for Dify to query
-- include backend-generated `report_markdown_draft`, so the online-status branch can directly display a report-style summary without re-running the report workflow
+- include backend-generated `report_markdown_draft`, so the online branch can directly display a report-style summary
 
 For multi-elevator deployments:
 
 - store each elevator under `data/diagnosis/elevator_<id>/latest_status.json`
-- let the online-status branch pass `elevator_id`
-- if the user query contains text like `002号梯` or `elevator_002`, Dify should extract that id and call `GET /api/v1/diagnostics/latest-status?elevator_id=002`
+- let the online branch pass `elevator_id`
+- if the user query contains text like `002号梯` or `elevator_002`, Dify should extract that id and call `GET /api/v1/workflows/diagnosis-report-latest?elevator_id=002`
 - if no elevator id is mentioned, the workflow may fall back to the default `latest_json`
 
 Recommended scheduling:
@@ -194,7 +196,7 @@ Not recommended as the main source for user-facing diagnosis:
 For user-facing online status, prefer:
 
 - scheduled batch diagnosis result
-- `GET /api/v1/diagnostics/latest-status`
+- `GET /api/v1/workflows/diagnosis-report-latest`
 
 ## API Contracts
 
@@ -240,6 +242,28 @@ Output:
 - latest scheduled batch diagnosis payload
 - `latest_json`
 
+### `GET /api/v1/workflows/diagnosis-report-latest`
+
+Query:
+
+- `elevator_id`
+- `site_name`
+- `latest_json`
+- `latest_root`
+- `include_waveforms`
+
+Output:
+
+- latest report context for the target elevator
+- `status`
+- `screening`
+- `primary_issue`
+- `preferred_issue`
+- `detector_results`
+- `risk`
+- `report_markdown_draft`
+- `waveform_payload` when enabled
+
 ### `POST /api/v1/diagnostics/rule-engine`
 
 Input:
@@ -251,8 +275,7 @@ Output:
 - `summary`
 - `screening`
 - `primary_issue`
-- `rope_primary`
-- `rubber_primary`
+- `detector_results`
 - `system_abnormality`
 - `top_fault`
 - `top_candidate`
@@ -284,7 +307,7 @@ Important Dify mapping rule:
 
 No CSV uploaded:
 
-- read latest status only
+- read the latest report only
 - return a short answer
 - answer current risk and whether the latest batch already shows abnormality
 

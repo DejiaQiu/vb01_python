@@ -106,6 +106,19 @@ class DiagnosisReportByEventRequest(BaseModel):
     include_waveforms: bool = True
 
 
+class DiagnosisReportLatestRequest(BaseModel):
+    elevator_id: str = ""
+    site_name: str = ""
+    latest_json: str = "data/diagnosis/latest_status.json"
+    latest_root: str = "data/diagnosis"
+    language: str = "zh-CN"
+    report_style: str = "standard"
+    include_waveforms: bool = True
+    waveform_width: int = 920
+    waveform_height: int = 320
+    waveform_max_points: int = 240
+
+
 def normalize_row_values(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     for row in rows:

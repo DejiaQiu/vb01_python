@@ -10,6 +10,13 @@ These files look like legacy or experimental paths that are not part of the curr
 - `report/vib_anomaly_detector.py`
 - `report/fault_algorithms/detect_rope_looseness.py`
 - `report/fault_algorithms/detect_rubber_hardening.py`
+- `report/fault_algorithms/detect_bearing_wear.py`
+- `report/fault_algorithms/detect_brake_jitter.py`
+- `report/fault_algorithms/detect_car_imbalance.py`
+- `report/fault_algorithms/detect_coupling_misalignment.py`
+- `report/fault_algorithms/detect_impact_shock.py`
+- `report/fault_algorithms/detect_mechanical_looseness.py`
+- `report/fault_algorithms/detect_rail_wear.py`
 - `report/fault_algorithms/rope_looseness_timeline.py`
 - `tests/test_rope_looseness_detector.py`
 - `tests/test_rubber_hardening_detector.py`
@@ -35,5 +42,5 @@ These are output files, not source code, and can usually be archived or removed 
 
 ## Suggested Cleanup Order
 
-1. Keep only one rope-related experimental path (`report/wire_looseness_index.py` vs current mainline `report/fault_algorithms/rope_vs_rubber.py`).
+1. Keep only one rope-related experimental path (`report/wire_looseness_index.py` vs current mainline `report/fault_algorithms/fault_detectors.py`).
 2. Archive generated artifacts periodically.
