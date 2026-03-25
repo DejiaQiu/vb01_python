@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 from base64 import b64encode
@@ -686,6 +687,9 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("{{#status_parse.mag_chart#}}", workflow_text)
         self.assertNotIn("/api/v1/workflows/diagnosis-report-latest/plot", workflow_text)
         self.assertIn("{{#report_parse.waveform_markdown#}}", workflow_text)
+        upload_block = re.search(r"file_upload:\n((?:\s{6}.+\n)+)", workflow_text)
+        self.assertIsNotNone(upload_block)
+        self.assertIn("enabled: true", upload_block.group(1))
 
     def test_ingest_heartbeat_updates_edge_latest_status(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"ELEVATOR_CLOUD_STORE_DIR": tmp_dir}):

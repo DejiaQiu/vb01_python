@@ -60,7 +60,7 @@ workflow:
       allowed_file_upload_methods:
       - local_file
       - remote_url
-      enabled: false
+      enabled: true
       image:
         enabled: false
         number_limits: 3
