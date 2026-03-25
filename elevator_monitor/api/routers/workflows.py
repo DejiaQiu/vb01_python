@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -30,6 +32,31 @@ from ..schemas import (
 router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
 
 
+_ABS_PATH_PATTERN = re.compile(r"(/[^\s,:;]+)+")
+
+
+def _display_path(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "/" in text or "\\" in text:
+        name = Path(text).name
+        if name:
+            return name
+    return text
+
+
+def _sanitize_path_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    def _replace(match: re.Match[str]) -> str:
+        return _display_path(match.group(0))
+
+    return _ABS_PATH_PATTERN.sub(_replace, text)
+
+
 def _compact_waveform_payload_for_dify(payload: dict[str, Any] | None) -> dict[str, Any]:
     waveforms = dict(payload or {})
     if not waveforms:
@@ -50,6 +77,8 @@ def _compact_waveform_payload_for_dify(payload: dict[str, Any] | None) -> dict[s
         value = waveforms.get(key)
         if value not in (None, "", {}, []):
             compact[key] = value
+    if "source" in compact:
+        compact["source"] = _display_path(compact["source"])
     if compact_echarts:
         compact["echarts"] = compact_echarts
     if "markdown_echarts" in compact and "markdown" not in compact:
@@ -188,9 +217,9 @@ def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[
         dict(item) for item in latest_payload.get("auxiliary_results", []) if isinstance(item, dict)
     ]
     report_ctx["recommendation"] = str(latest_payload.get("recommendation", "")).strip()
-    report_ctx["latest_file"] = str(latest_payload.get("latest_file", "")).strip()
-    report_ctx["latest_file_name"] = str(latest_payload.get("latest_file_name", "")).strip()
-    report_ctx["waveform_error"] = str(latest_payload.get("waveform_error", "")).strip()
+    report_ctx["latest_file"] = _display_path(latest_payload.get("latest_file", ""))
+    report_ctx["latest_file_name"] = _display_path(latest_payload.get("latest_file_name", ""))
+    report_ctx["waveform_error"] = _sanitize_path_text(latest_payload.get("waveform_error", ""))
     report_ctx["latest_json"] = resolved_latest
     report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)

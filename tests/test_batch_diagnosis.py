@@ -177,6 +177,7 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertTrue(history_jsonl.exists())
 
             latest_payload = json.loads(latest_json.read_text(encoding="utf-8"))
+            self.assertTrue(latest_payload["latest_file"].endswith("vibration_30s_20260303_104600.csv"))
             self.assertEqual(latest_payload["latest_file_name"], "vibration_30s_20260303_104600.csv")
             self.assertEqual(len(latest_payload["history"]), 3)
             self.assertEqual(latest_payload["primary_issue"]["fault_type"], "rope_looseness")

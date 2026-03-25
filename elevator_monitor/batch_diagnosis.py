@@ -497,6 +497,14 @@ def _append_history_jsonl(path: str, payload: dict[str, Any]) -> str:
     return str(history_path)
 
 
+def _portable_path_text(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    try:
+        return str(resolved.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(resolved)
+
+
 def load_latest_status(path: str) -> dict[str, Any]:
     latest_path = Path(path).expanduser().resolve()
     if not latest_path.exists():
@@ -582,9 +590,9 @@ def run_batch_diagnosis(
     payload = {
         "workflow_type": "scheduled_batch_diagnosis_v1",
         "generated_at_ms": int(time.time() * 1000),
-        "input_dir": str(Path(input_dir).expanduser().resolve()) if str(input_dir).strip() else "",
+        "input_dir": _portable_path_text(Path(input_dir)) if str(input_dir).strip() else "",
         "files_scanned": len(files),
-        "latest_file": str(latest_file),
+        "latest_file": _portable_path_text(latest_file),
         "latest_file_name": latest_file.name,
         "status": latest_status,
         "baseline": dict(latest_result.get("baseline", {})) if isinstance(latest_result.get("baseline"), dict) else baseline_summary,

@@ -290,8 +290,64 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("markdown_echarts", payload["waveform_payload"])
         self.assertNotIn("plots", payload["waveform_payload"])
         self.assertNotIn("latest_status_payload", payload)
+        self.assertEqual(payload["latest_file"], "latest_capture.csv")
+        self.assertEqual(payload["latest_file_name"], "latest_capture.csv")
+        self.assertEqual(payload["waveform_payload"]["source"], "latest_capture.csv")
         self.assertLess(len(response.text), 200_000)
         self.assertIn("rubber_hardening", json.dumps(payload["detector_results"], ensure_ascii=False))
+
+    def test_diagnosis_report_latest_resolves_foreign_absolute_latest_file_portably(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            csv_path = root / "data" / "captures" / "elevator_002" / "latest_capture.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            rows = ["ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame"]
+            for i in range(24):
+                rows.append(f"{1_000_000 + i * 1000},0.01,0.02,{-0.98 + i * 0.001},0.1,0.2,0.3,1")
+            csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            status_dir = root / "elevator_002"
+            status_dir.mkdir(parents=True, exist_ok=True)
+            status_path = status_dir / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "generated_at_ms": 1_700_000_000_000,
+                        "status": "watch_only",
+                        "latest_file": "/foreign/host/data/captures/elevator_002/latest_capture.csv",
+                        "latest_file_name": "latest_capture.csv",
+                        "primary_issue": {"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"},
+                        "preferred_issue": {"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"},
+                        "risk": {"risk_score": 0.56, "risk_24h": 0.71, "risk_level_now": "watch", "risk_level_24h": "high"},
+                        "latest_result": {
+                            "summary": {"n_raw": 24, "n_effective": 24, "fs_hz": 1.0},
+                            "screening": {"status": "watch_only"},
+                            "baseline": {"mode": "dir"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/workflows/diagnosis-report-latest",
+                params={
+                    "elevator_id": "002",
+                    "latest_root": str(root),
+                    "site_name": "Tower B",
+                    "include_waveforms": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("waveform_payload", payload)
+        self.assertIn("markdown_echarts", payload["waveform_payload"])
+        self.assertEqual(payload["latest_file"], "latest_capture.csv")
+        self.assertEqual(payload["waveform_payload"]["source"], "latest_capture.csv")
+        self.assertEqual(payload.get("waveform_error", ""), "")
 
     def test_diagnosis_report_latest_plot_returns_svg_from_latest_csv(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
