@@ -190,6 +190,7 @@ def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[
     report_ctx["recommendation"] = str(latest_payload.get("recommendation", "")).strip()
     report_ctx["latest_file"] = str(latest_payload.get("latest_file", "")).strip()
     report_ctx["latest_file_name"] = str(latest_payload.get("latest_file_name", "")).strip()
+    report_ctx["waveform_error"] = str(latest_payload.get("waveform_error", "")).strip()
     report_ctx["latest_json"] = resolved_latest
     report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)

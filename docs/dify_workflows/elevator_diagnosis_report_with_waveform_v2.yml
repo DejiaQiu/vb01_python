@@ -448,9 +448,21 @@ workflow:
           \    try:\n        ts_ms = int(float(value))\n    except (TypeError, ValueError):\n\
           \        return \"未提供\"\n    if ts_ms <= 0:\n        return \"未提供\"\n  \
           \  return datetime.fromtimestamp(ts_ms / 1000.0).strftime(\"%Y-%m-%d %H:%M:%S\"\
-          )\n\n\ndef _option_json(payload, key):\n    echarts = _as_dict(payload.get(\"\
-          echarts\"))\n    item = _as_dict(echarts.get(key))\n    return str(item.get(\"\
-          option_json\") or \"\").strip()\n\n\ndef _fault_text(primary, preferred,\
+          )\n\n\ndef _placeholder_option(title, reason):\n    note = str(reason or \"\
+          当前没有可用波形数据\").strip() or \"当前没有可用波形数据\"\n    return {\n        \"title\"\
+          : {\"text\": title, \"left\": \"center\"},\n        \"xAxis\": {\"type\"\
+          : \"category\", \"data\": []},\n        \"yAxis\": {\"type\": \"value\"\
+          },\n        \"series\": [],\n        \"graphic\": [{\n            \"type\"\
+          : \"text\",\n            \"left\": \"center\",\n            \"top\": \"\
+          middle\",\n            \"style\": {\n                \"text\": f\"暂无可渲染波形\\\
+          n{note}\",\n                \"textAlign\": \"center\",\n               \
+          \ \"fill\": \"#666\",\n                \"fontSize\": 16,\n             \
+          \   \"lineHeight\": 24,\n            },\n        }],\n    }\n\n\ndef _option_json(payload,\
+          \ key, title, reason=\"\"):\n    echarts = _as_dict(payload.get(\"echarts\"\
+          ))\n    item = _as_dict(echarts.get(key))\n    option_json = str(item.get(\"\
+          option_json\") or \"\").strip()\n    if option_json:\n        return option_json\n\
+          \    return json.dumps(_placeholder_option(title, reason), ensure_ascii=False)\n\
+          \n\ndef _fault_text(primary, preferred,\
           \ candidate):\n    fault_type = str(primary.get(\"fault_type\") or preferred.get(\"\
           fault_type\") or candidate.get(\"fault_type\") or \"none\")\n    if fault_type\
           \ == \"rope_tension_abnormal\":\n        return \"钢丝绳状态异常\"\n    if fault_type\
@@ -523,7 +535,8 @@ workflow:
           \    system_abnormality = _as_dict(payload.get(\"system_abnormality\"))\n\
           \    preferred = _as_dict(payload.get(\"preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"\
           top_candidate\"))\n    waveforms = _as_dict(payload.get(\"waveform_payload\"\
-          ))\n    report_markdown_draft = str(payload.get(\"report_markdown_draft\"\
+          ))\n    waveform_error = str(payload.get(\"waveform_error\", \"\")).strip()\
+          \n    report_markdown_draft = str(payload.get(\"report_markdown_draft\"\
           , \"\")).strip()\n    requested_elevator_id = str(payload.get(\"requested_elevator_id\"\
           , \"\")).strip()\n    latest_file = str(payload.get(\"latest_file_name\"\
           ) or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
@@ -536,7 +549,10 @@ workflow:
           \   risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    compact_payload\
           \ = _compact_latest_payload(payload)\n\
           \    report_markdown_for_llm = _trim_report_for_llm(report_markdown_draft)\n\
-          \    summary = (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
+          \    waveform_insights = str(waveforms.get(\"insight_markdown\", \"\")).strip()\n\
+          \    if not waveform_insights and waveform_error:\n        waveform_insights\
+          \ = f\"## 波形图说明\\n\\n- 当前在线状态没有可用波形数据：{waveform_error}\"\n    summary =\
+          \ (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
           \ 分数={fault_score}; 异常分={abnormal_score}; 基线模式={baseline_mode}; 归因口径=按梯健康基线偏移+经验模板弱先验; 当前风险={risk_now}; 24h风险={risk_24h};\
           \ 目标电梯={requested_elevator_id or 'default'}; 最新文件={latest_file}; 后端报告={'已生成'\
           \ if report_markdown_draft else '未生成'}\"\n    )\n    return {\n        \"\
@@ -547,13 +563,14 @@ workflow:
           \        \"report_tables_text\": _tables_to_text(report_markdown_draft),\n\
           \        \"waveform_markdown\": str(waveforms.get(\"markdown_echarts\")\
           \ or waveforms.get(\"markdown\", \"\")).strip(),\n        \"waveform_insights\"\
-          : str(waveforms.get(\"insight_markdown\", \"\")).strip(),\n        \"display_conclusion\"\
-          : display_conclusion,\n        \"full_spectrum_chart\": _option_json(waveforms,\
-          \ \"full_frequency_spectrum\"),\n        \"spectrum_chart\": _option_json(waveforms,\
-          \ \"low_frequency_spectrum\"),\n        \"acc_chart\": _option_json(waveforms,\
-          \ \"acceleration\"),\n        \"gyro_chart\": _option_json(waveforms, \"\
-          gyroscope\"),\n        \"mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"\
-          ),\n    }\n"
+          : waveform_insights,\n        \"display_conclusion\": display_conclusion,\n\
+          \        \"full_spectrum_chart\": _option_json(waveforms, \"full_frequency_spectrum\"\
+          , \"全频频谱图\", waveform_error),\n        \"spectrum_chart\": _option_json(waveforms,\
+          \ \"low_frequency_spectrum\", \"低频频谱图\", waveform_error),\n        \"acc_chart\"\
+          : _option_json(waveforms, \"acceleration\", \"加速度波形\", waveform_error),\n\
+          \        \"gyro_chart\": _option_json(waveforms, \"gyroscope\", \"角速度波形\"\
+          , waveform_error),\n        \"mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"\
+          , \"加速度合量波形\", waveform_error),\n    }\n"
         code_language: python3
         desc: ''
         outputs:
