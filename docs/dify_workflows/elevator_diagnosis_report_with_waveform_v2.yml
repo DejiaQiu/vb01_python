@@ -76,7 +76,7 @@ workflow:
     speech_to_text:
       enabled: false
     suggested_questions:
-    - 近期电梯情况
+    - 查看 001 号梯状态
     - 查看 002 号梯状态
     suggested_questions_after_answer:
       enabled: true

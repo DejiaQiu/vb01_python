@@ -30,6 +30,49 @@ from ..schemas import (
 router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
 
 
+def _compact_waveform_payload_for_dify(payload: dict[str, Any] | None) -> dict[str, Any]:
+    waveforms = dict(payload or {})
+    if not waveforms:
+        return {}
+
+    compact_echarts: dict[str, Any] = {}
+    raw_echarts = waveforms.get("echarts", {})
+    if isinstance(raw_echarts, dict):
+        for key, item in raw_echarts.items():
+            if not isinstance(item, dict):
+                continue
+            option_json = str(item.get("option_json", "")).strip()
+            if option_json:
+                compact_echarts[str(key)] = {"option_json": option_json}
+
+    compact: dict[str, Any] = {}
+    for key in ("source", "summary", "axis_mapping", "sampling", "insight_markdown", "markdown_echarts"):
+        value = waveforms.get(key)
+        if value not in (None, "", {}, []):
+            compact[key] = value
+    if compact_echarts:
+        compact["echarts"] = compact_echarts
+    if "markdown_echarts" in compact and "markdown" not in compact:
+        compact["markdown"] = compact["markdown_echarts"]
+    return compact
+
+
+def _compact_latest_report_context(report_ctx: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(report_ctx)
+    compact["waveform_payload"] = _compact_waveform_payload_for_dify(
+        compact.get("waveform_payload") if isinstance(compact.get("waveform_payload"), dict) else {}
+    )
+    for key in (
+        "latest_status_payload",
+        "diagnosis_result",
+        "maintenance_package",
+        "dify_prompt_template",
+        "dify_report_inputs",
+    ):
+        compact.pop(key, None)
+    return compact
+
+
 @router.post("/maintenance-package")
 def maintenance_package(request: MaintenancePackageRequest) -> dict[str, Any]:
     alert_rows = normalize_row_values(request.alert_rows) if request.alert_rows else load_recent_alerts(
@@ -150,7 +193,7 @@ def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[
     report_ctx["latest_json"] = resolved_latest
     report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
-    return report_ctx
+    return _compact_latest_report_context(report_ctx)
 
 
 def _load_latest_payload(

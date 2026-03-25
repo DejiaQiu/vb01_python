@@ -286,9 +286,11 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["requested_elevator_id"], "002")
         self.assertIn("report_markdown_draft", payload)
         self.assertIn("Tower B / elevator-002", payload["report_title"])
-        self.assertIn("dify_report_inputs", payload)
         self.assertIn("waveform_payload", payload)
         self.assertIn("markdown_echarts", payload["waveform_payload"])
+        self.assertNotIn("plots", payload["waveform_payload"])
+        self.assertNotIn("latest_status_payload", payload)
+        self.assertLess(len(response.text), 200_000)
         self.assertIn("rubber_hardening", json.dumps(payload["detector_results"], ensure_ascii=False))
 
     def test_diagnosis_report_latest_plot_returns_svg_from_latest_csv(self):
