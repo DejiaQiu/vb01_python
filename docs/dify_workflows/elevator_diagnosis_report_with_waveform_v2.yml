@@ -408,11 +408,12 @@ workflow:
         body:
           data:
           - type: text
-            value: ''
+            value: "{\n  \"elevator_id\": \"{{#status_target.elevator_id#}}\",\n  \"site_name\": \"{{#env.site_name#}}\",\n  \"latest_json\": \"{{#env.latest_json#}}\",\n  \"latest_root\": \"{{#env.latest_root#}}\",\n  \"include_waveforms\": true,\n  \"language\": \"zh-CN\",\n  \"report_style\": \"standard\"\n}"
           type: raw-text
         desc: ''
         headers: Accept:application/json
-        method: get
+          Content-Type:application/json
+        method: post
         params: ''
         retry_config:
           max_retries: 3
@@ -426,7 +427,7 @@ workflow:
           max_write_timeout: 0
         title: 读取最新报告
         type: http-request
-        url: '{{#env.ip#}}/api/v1/workflows/diagnosis-report-latest?latest_json={{#env.latest_json#}}&latest_root={{#env.latest_root#}}&elevator_id={{#status_target.elevator_id#}}&site_name={{#env.site_name#}}&include_waveforms=true&language=zh-CN&report_style=standard'
+        url: '{{#env.ip#}}/api/v1/workflows/diagnosis-report-latest'
         variables: []
       height: 161
       id: status_http

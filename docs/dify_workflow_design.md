@@ -21,7 +21,7 @@ The old realtime rule engine under `elevator_monitor/monitor/` is no longer the 
 - `POST /api/v1/diagnostics/waveform-plot`
 - `POST /api/v1/workflows/maintenance-package`
 - `POST /api/v1/workflows/diagnosis-report`
-- `GET /api/v1/workflows/diagnosis-report-latest`
+- `GET/POST /api/v1/workflows/diagnosis-report-latest`
 - `POST /api/v1/workflows/diagnosis-report-by-event`
 - `GET /api/v1/health/monitor`
 
@@ -38,6 +38,7 @@ Recommended Dify DSL file:
 Branch rule:
 
 - Default production workflow should rely on `sys.query` and call `diagnosis-report-latest`
+- For Dify HTTP nodes, prefer `POST` with JSON body over `GET` query params to avoid URL encoding issues
 - File upload can be disabled in the default app so the workflow always enters the direct-query branch
 - If a separate debug workflow keeps CSV upload enabled, the CSV branch still does not depend on `sys.query`
 - Only when `system_abnormality.baseline_mode == robust_baseline` and `top_deviations` contains real `value / median / z / effective_scale` may Dify render or describe a "baseline median / deviation z" table
@@ -55,7 +56,7 @@ Node flow:
 
 1. `Start`
 2. `Code` -> parse `sys.query` and extract elevator id
-3. `HTTP Request` -> `GET /api/v1/workflows/diagnosis-report-latest`
+3. `HTTP Request` -> `POST /api/v1/workflows/diagnosis-report-latest`
 4. `Code` -> compact the report JSON and extract chart markdown / tables
 5. `LLM` -> answer in natural Chinese using the structured report
 6. `Answer` -> render the text conclusion first, then render waveform charts from the returned report context
@@ -165,7 +166,7 @@ For multi-elevator deployments:
 
 - store each elevator under `data/diagnosis/elevator_<id>/latest_status.json`
 - let the online branch pass `elevator_id`
-- if the user query contains text like `002号梯` or `elevator_002`, Dify should extract that id and call `GET /api/v1/workflows/diagnosis-report-latest?elevator_id=002`
+- if the user query contains text like `002号梯` or `elevator_002`, Dify should extract that id and call `POST /api/v1/workflows/diagnosis-report-latest` with `{"elevator_id":"002"}` in the JSON body
 - if no elevator id is mentioned, the workflow may fall back to the default `latest_json`
 
 Recommended scheduling:
@@ -196,7 +197,7 @@ Not recommended as the main source for user-facing diagnosis:
 For user-facing online status, prefer:
 
 - scheduled batch diagnosis result
-- `GET /api/v1/workflows/diagnosis-report-latest`
+- `GET/POST /api/v1/workflows/diagnosis-report-latest`
 
 ## API Contracts
 
@@ -242,9 +243,9 @@ Output:
 - latest scheduled batch diagnosis payload
 - `latest_json`
 
-### `GET /api/v1/workflows/diagnosis-report-latest`
+### `GET/POST /api/v1/workflows/diagnosis-report-latest`
 
-Query:
+Input:
 
 - `elevator_id`
 - `site_name`

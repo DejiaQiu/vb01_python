@@ -384,7 +384,7 @@ export MONITOR_INGEST_SHARED_TOKEN=change-me
 - `POST /api/v1/diagnostics/rule-engine`：执行 8 类规则诊断，支持 `rows`、`csv_text` 或 `csv_path`
 - `POST /api/v1/workflows/maintenance-package`：生成维保工单包，返回 `dify_inputs`
 - `POST /api/v1/workflows/diagnosis-report`：聚合“诊断结果 + 维保包”并输出 `dify_report_inputs`（供 Dify 生成报告）
-- `GET /api/v1/workflows/diagnosis-report-latest`：按电梯直接读取最新批诊断并返回完整报告上下文（推荐给 Dify 在线问答使用）
+- `GET/POST /api/v1/workflows/diagnosis-report-latest`：按电梯直接读取最新批诊断并返回完整报告上下文（Dify 推荐用 POST JSON）
 - `POST /api/v1/workflows/diagnosis-report-by-event`：按边缘同步事件生成报告上下文与 Dify 输入
 
 Dify 接法：

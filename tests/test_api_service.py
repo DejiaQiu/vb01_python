@@ -291,6 +291,48 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("markdown_echarts", payload["waveform_payload"])
         self.assertIn("rubber_hardening", json.dumps(payload["detector_results"], ensure_ascii=False))
 
+    def test_diagnosis_report_latest_accepts_post_json(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            status_dir = root / "elevator_002"
+            status_dir.mkdir(parents=True, exist_ok=True)
+            status_path = status_dir / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "generated_at_ms": 1_700_000_000_000,
+                        "status": "watch_only",
+                        "preferred_issue": {"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"},
+                        "primary_issue": {"fault_type": "rubber_hardening", "score": 61.2, "level": "watch"},
+                        "risk": {"risk_score": 0.56, "risk_24h": 0.71, "risk_level_now": "watch", "risk_level_24h": "high"},
+                        "latest_result": {
+                            "summary": {"n_raw": 24, "n_effective": 24, "fs_hz": 1.0},
+                            "screening": {"status": "watch_only"},
+                            "baseline": {"mode": "dir"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.post(
+                "/api/v1/workflows/diagnosis-report-latest",
+                json={
+                    "elevator_id": "002",
+                    "latest_root": str(root),
+                    "site_name": "测试梯",
+                    "include_waveforms": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["elevator_id"], "elevator-002")
+        self.assertEqual(payload["site_name"], "测试梯")
+        self.assertEqual(payload["status"], "watch_only")
+
     def test_batch_run_endpoint_returns_payload(self):
         fake_payload = {
             "workflow_type": "scheduled_batch_diagnosis_v1",
@@ -450,7 +492,8 @@ class TestAPIService(unittest.TestCase):
         self.assertIn("检测日期：", workflow_text)
         self.assertIn("固定输出五行", workflow_text)
         self.assertIn("diagnosis-report-latest", workflow_text)
-        self.assertIn("include_waveforms=true", workflow_text)
+        self.assertIn("method: post", workflow_text)
+        self.assertIn("include_waveforms", workflow_text)
         self.assertIn("怎么读这些图", workflow_text)
         self.assertIn("status_parse.waveform_insights", workflow_text)
         self.assertIn("status_parse.waveform_markdown", workflow_text)

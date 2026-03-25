@@ -101,31 +101,7 @@ def diagnosis_report(request: DiagnosisReportRequest) -> dict[str, Any]:
     return report_ctx
 
 
-@router.get("/diagnosis-report-latest")
-def diagnosis_report_latest(
-    elevator_id: str = "",
-    site_name: str = "",
-    latest_json: str = "data/diagnosis/latest_status.json",
-    latest_root: str = "data/diagnosis",
-    language: str = "zh-CN",
-    report_style: str = "standard",
-    include_waveforms: bool = True,
-    waveform_width: int = 920,
-    waveform_height: int = 320,
-    waveform_max_points: int = 240,
-) -> dict[str, Any]:
-    request = DiagnosisReportLatestRequest(
-        elevator_id=elevator_id,
-        site_name=site_name,
-        latest_json=latest_json,
-        latest_root=latest_root,
-        language=language,
-        report_style=report_style,
-        include_waveforms=include_waveforms,
-        waveform_width=waveform_width,
-        waveform_height=waveform_height,
-        waveform_max_points=waveform_max_points,
-    )
+def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[str, Any]:
     resolved_latest = resolve_latest_status_path(request.latest_json, request.elevator_id, request.latest_root)
     try:
         latest_payload = load_latest_status(str(resolved_latest))
@@ -190,6 +166,39 @@ def diagnosis_report_latest(
     report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
     return report_ctx
+
+
+@router.get("/diagnosis-report-latest")
+def diagnosis_report_latest(
+    elevator_id: str = "",
+    site_name: str = "",
+    latest_json: str = "data/diagnosis/latest_status.json",
+    latest_root: str = "data/diagnosis",
+    language: str = "zh-CN",
+    report_style: str = "standard",
+    include_waveforms: bool = True,
+    waveform_width: int = 920,
+    waveform_height: int = 320,
+    waveform_max_points: int = 240,
+) -> dict[str, Any]:
+    request = DiagnosisReportLatestRequest(
+        elevator_id=elevator_id,
+        site_name=site_name,
+        latest_json=latest_json,
+        latest_root=latest_root,
+        language=language,
+        report_style=report_style,
+        include_waveforms=include_waveforms,
+        waveform_width=waveform_width,
+        waveform_height=waveform_height,
+        waveform_max_points=waveform_max_points,
+    )
+    return _build_latest_report_context(request)
+
+
+@router.post("/diagnosis-report-latest")
+def diagnosis_report_latest_post(request: DiagnosisReportLatestRequest) -> dict[str, Any]:
+    return _build_latest_report_context(request)
 
 
 @router.post("/diagnosis-report-by-event")
