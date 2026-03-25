@@ -64,6 +64,14 @@ def _baseline_payload() -> dict:
             "lat_dom_freq_hz": {"median": 2.1000, "scale": 0.1483},
             "lat_low_band_ratio": {"median": 0.2985, "scale": 0.0041},
             "z_peak_ratio": {"median": 0.1283, "scale": 0.0004},
+            "a_activity_ratio": {"median": 0.0205, "scale": 0.0030},
+            "g_activity_ratio": {"median": 0.6600, "scale": 0.0500},
+            "activity_peak_ratio": {"median": 0.1300, "scale": 0.0200},
+            "corr_xy_abs": {"median": 0.1800, "scale": 0.0300},
+            "corr_xz_abs": {"median": 0.1200, "scale": 0.0300},
+            "energy_x_over_y": {"median": 0.9000, "scale": 0.0500},
+            "az_cv": {"median": 0.9800, "scale": 0.0400},
+            "az_jerk_rms": {"median": 0.9800, "scale": 0.0600},
         },
     }
 
@@ -88,6 +96,11 @@ def _system_features(**overrides: float | str | bool) -> dict:
         "lat_low_band_ratio": 0.3040,
         "lat_peak_ratio": 0.10,
         "z_peak_ratio": 0.1300,
+        "corr_xy_abs": 0.18,
+        "corr_xz_abs": 0.12,
+        "energy_x_over_y": 0.90,
+        "az_cv": 0.98,
+        "az_jerk_rms": 0.98,
     }
     payload.update(overrides)
     return payload
@@ -361,6 +374,31 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertIsNotNone(baseline)
         self.assertEqual(baseline["count"], 3)
         self.assertIn("a_peak_std", baseline["stats"])
+        self.assertIn("corr_xy_abs", baseline["stats"])
+        self.assertIn("a_activity_ratio", baseline["stats"])
+
+    def test_system_abnormality_uses_shape_supported_running_for_low_vibration_windows(self):
+        result = run_all_module._system_abnormality(
+            _system_features(
+                g_mean=1.0,
+                a_rms_ac=0.0071,
+                a_p2p=0.2950,
+                g_std=0.0920,
+                a_peak_std=0.0218,
+                a_pca_primary_ratio=0.8970,
+                a_band_log_ratio_0_5_over_5_20=0.5200,
+                lateral_ratio=0.3170,
+                lat_dom_freq_hz=0.4000,
+                lat_low_band_ratio=0.4590,
+                lat_peak_ratio=0.0580,
+                z_peak_ratio=0.0220,
+            ),
+            _baseline_payload(),
+        )
+
+        self.assertEqual(result["status"], "watch_only")
+        self.assertEqual(result["gate_mode"], "shape_supported_running")
+        self.assertGreaterEqual(result["shared_hits"], run_all_module.SYSTEM_GATE_CONFIG["watch_hit_min"] + 1)
 
 
 if __name__ == "__main__":

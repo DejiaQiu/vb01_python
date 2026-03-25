@@ -11,7 +11,7 @@ from .maintenance_workflow import build_maintenance_package
 from .reporting_service import build_report_context, render_report_markdown
 from .waveform_service import build_waveform_payload, load_waveform_rows
 from report.fault_algorithms._base import build_clean_feature_baseline, build_feature_pack, load_rows
-from report.fault_algorithms.run_all import BASELINE_KEYS, MIN_EFFECTIVE_SAMPLES, run_all_rows
+from report.fault_algorithms.run_all import ALL_BASELINE_KEYS, MIN_EFFECTIVE_SAMPLES, run_all_rows
 
 
 _FILE_TS_PATTERN = re.compile(r"(\d{8})_(\d{6})")
@@ -22,7 +22,7 @@ _RISK_LEVELS = (
     (0.40, "watch"),
     (0.0, "normal"),
 )
-_BASELINE_KEYS = tuple(dict.fromkeys(BASELINE_KEYS))
+_BASELINE_KEYS = tuple(dict.fromkeys(ALL_BASELINE_KEYS))
 
 
 def _clamp01(value: float) -> float:

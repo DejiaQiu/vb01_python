@@ -125,6 +125,13 @@ Notes:
 - Dify has a per-variable size limit. For uploaded CSV, the workflow should compact and sample the extracted text before storing it in `csv_text`; do not pass the full extracted file text through workflow variables.
 - For explanation cards and report tables, treat `system_abnormality.top_deviations` as displayable only in `robust_baseline` mode. Fallback mode may still have a score, but it does not mean backend has a real baseline median or z-statistic for each feature.
 
+How Dify should explain the method:
+
+- Describe the main algorithm as: first compare the window with this elevator's own health baseline, then do a conservative `rope_vs_rubber` attribution only after the anomaly gate is hit.
+- If users ask about the "template" or "rule", explain that the template is a weak prior made from manually chosen feature directions/ranges; it is not a trained model and not a hard threshold.
+- If `primary_issue` or `preferred_issue` is `rope_looseness` / `rubber_hardening`, phrase it as "更像 / 偏向" instead of "已经确认".
+- If the backend returns `unknown`, Dify must clearly say "已检测到异常，但类型待确认" and stop there.
+
 ## Scheduled Batch Diagnosis
 
 This is the new bridge between "online reply" and "offline algorithm".

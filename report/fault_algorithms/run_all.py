@@ -8,10 +8,10 @@ from typing import Any
 
 try:
     from ._base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
-    from .rope_vs_rubber import attribute as attribute_rope_vs_rubber
+    from .rope_vs_rubber import ATTRIBUTION_BASELINE_KEYS, attribute as attribute_rope_vs_rubber
 except ImportError:  # pragma: no cover
     from _base import SAMPLING_QUALITY_CONFIG, baseline_mapping_match, build_clean_feature_baseline, build_feature_pack, load_rows, parse_float, ratio_to_100
-    from rope_vs_rubber import attribute as attribute_rope_vs_rubber
+    from rope_vs_rubber import ATTRIBUTION_BASELINE_KEYS, attribute as attribute_rope_vs_rubber
 
 
 _PATTERN = re.compile(r"vibration_30s_\d{8}_(\d{6})\.csv$")
@@ -37,6 +37,12 @@ SYSTEM_BASELINE_FEATURES: tuple[dict[str, float | str], ...] = (
     {"key": "z_peak_ratio", "weight": 0.9, "softness": 2.0, "floor_abs": 0.02, "floor_ratio": 0.20},
 )
 BASELINE_KEYS = tuple(str(item["key"]) for item in SYSTEM_BASELINE_FEATURES)
+RUN_ACTIVITY_BASELINE_KEYS = (
+    "a_activity_ratio",
+    "g_activity_ratio",
+    "activity_peak_ratio",
+)
+ALL_BASELINE_KEYS = tuple(dict.fromkeys(BASELINE_KEYS + ATTRIBUTION_BASELINE_KEYS + RUN_ACTIVITY_BASELINE_KEYS))
 SYSTEM_GATE_CONFIG = {
     "watch_score": WATCH_SCORE,
     "candidate_score": HIGH_CONFIDENCE_SCORE,
@@ -84,7 +90,7 @@ def _build_baseline_from_dir(input_dir: Path, start_hhmm: str, end_hhmm: str) ->
     feature_rows = [build_feature_pack(load_rows(path)) for path in _select_files(input_dir, start_hhmm, end_hhmm)]
     if not feature_rows:
         return None
-    baseline = build_clean_feature_baseline(feature_rows, BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
+    baseline = build_clean_feature_baseline(feature_rows, ALL_BASELINE_KEYS, min_samples=MIN_EFFECTIVE_SAMPLES)
     baseline["source"] = str(input_dir)
     baseline["window"] = {"start_hhmm": start_hhmm, "end_hhmm": end_hhmm}
     return baseline
@@ -192,6 +198,29 @@ def _system_baseline_components(
     return components
 
 
+def _directed_deviation_score(
+    *,
+    value: float,
+    stat: tuple[float, float] | None,
+    direction: str = "high",
+    floor_abs: float = 0.0,
+    floor_ratio: float = 0.0,
+    softness: float = 2.0,
+) -> float:
+    if stat is None:
+        return 0.0
+    median, scale = stat
+    effective_scale = max(float(scale), float(floor_abs), abs(float(median)) * float(floor_ratio), 1e-6)
+    if str(direction) == "low":
+        delta = max(0.0, float(median) - float(value))
+    else:
+        delta = max(0.0, float(value) - float(median))
+    if delta <= 0.0:
+        return 0.0
+    z_value = delta / effective_scale
+    return _z_to_100(z_value, softness)
+
+
 def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | None) -> dict[str, Any]:
     gate_cfg = SYSTEM_GATE_CONFIG
     sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
@@ -203,10 +232,13 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     g_std = _to_float(features.get("g_std"))
     lat_peak_ratio = _to_float(features.get("lat_peak_ratio"))
     z_peak_ratio = _to_float(features.get("z_peak_ratio"))
+    a_activity_ratio = _to_float(features.get("a_activity_ratio"), a_rms_ac / max(a_mean, EPS))
+    g_activity_ratio = _to_float(features.get("g_activity_ratio"), g_std / max(g_mean, EPS))
+    activity_peak_ratio = _to_float(features.get("activity_peak_ratio"), max(lat_peak_ratio, z_peak_ratio))
 
-    fallback_a_rms = ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
+    fallback_a_rms = ratio_to_100(a_activity_ratio, 0.0015, 0.020)
     fallback_a_p2p = ratio_to_100(a_p2p / max(a_mean, EPS), 0.020, 0.180)
-    fallback_g_std = ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
+    fallback_g_std = ratio_to_100(g_activity_ratio, 0.015, 0.320)
     baseline_match = baseline_mapping_match(features, baseline)
     baseline_stats = _baseline_stats(baseline) if baseline_match is not False else {}
     baseline_components = _system_baseline_components(features, baseline_stats) if baseline_stats else []
@@ -223,21 +255,70 @@ def _system_abnormality(features: dict[str, Any], baseline: dict[str, Any] | Non
     shared_score = sum(shared_components) / len(shared_components)
     shared_hits = _count_hits(shared_components, gate_cfg["feature_hit_min"])
     shared_strong_hits = _count_hits(shared_components, gate_cfg["feature_strong_min"])
-    run_state_score = (
-        0.45 * ratio_to_100(a_rms_ac / max(a_mean, EPS), 0.0015, 0.020)
-        + 0.35 * ratio_to_100(g_std / max(g_mean, EPS), 0.015, 0.320)
-        + 0.20 * ratio_to_100(max(lat_peak_ratio, z_peak_ratio), 0.10, 0.50)
+    absolute_run_state_score = (
+        0.45 * ratio_to_100(a_activity_ratio, 0.0015, 0.020)
+        + 0.35 * ratio_to_100(g_activity_ratio, 0.015, 0.320)
+        + 0.20 * ratio_to_100(activity_peak_ratio, 0.10, 0.50)
     )
+    relative_run_components = [
+        _directed_deviation_score(
+            value=a_activity_ratio,
+            stat=baseline_stats.get("a_activity_ratio"),
+            direction="high",
+            floor_abs=0.0020,
+            floor_ratio=0.18,
+            softness=1.8,
+        ),
+        _directed_deviation_score(
+            value=g_activity_ratio,
+            stat=baseline_stats.get("g_activity_ratio"),
+            direction="high",
+            floor_abs=0.015,
+            floor_ratio=0.18,
+            softness=1.8,
+        ),
+        _directed_deviation_score(
+            value=activity_peak_ratio,
+            stat=baseline_stats.get("activity_peak_ratio"),
+            direction="high",
+            floor_abs=0.015,
+            floor_ratio=0.20,
+            softness=1.8,
+        ),
+    ]
+    relative_run_hits = _count_hits(relative_run_components, 45.0)
+    relative_run_state_score = sum(relative_run_components) / len(relative_run_components)
+    # 一些电梯异常更像“低振动但形态明显偏离健康基线”，这里允许它们以较保守的方式进入 watch/candidate。
+    run_state_score = max(absolute_run_state_score, relative_run_state_score if relative_run_hits >= 2 else 0.0)
     gate_mode = "running"
     score = 0.0
+    shape_supported_running = (
+        shared_score >= gate_cfg["shared_watch_min"]
+        and shared_hits >= max(int(gate_cfg["watch_hit_min"]) + 1, int(gate_cfg["watch_hit_min"]))
+        and shared_strong_hits >= max(1, int(gate_cfg["candidate_strong_min"]))
+        and run_state_score >= float(gate_cfg["run_watch_min"]) * 0.72
+    )
     if not sampling_ok:
         gate_mode = "sampling_low_quality"
         status = "normal"
         score = 0.0
-    elif run_state_score < gate_cfg["run_watch_min"]:
+    elif run_state_score < gate_cfg["run_watch_min"] and not shape_supported_running:
         gate_mode = "non_running_suppressed"
         status = "normal"
         score = 0.0
+    elif shape_supported_running and run_state_score < gate_cfg["run_watch_min"]:
+        gate_mode = "shape_supported_running"
+        if (
+            shared_score >= gate_cfg["shared_candidate_min"]
+            and shared_hits >= gate_cfg["candidate_hit_min"]
+            and shared_strong_hits >= gate_cfg["candidate_strong_min"]
+            and run_state_score >= float(gate_cfg["run_candidate_min"]) * 0.72
+        ):
+            status = "candidate_faults"
+            score = min(100.0, shared_score)
+        else:
+            status = "watch_only"
+            score = min(gate_cfg["candidate_score"] - 1.0, max(gate_cfg["watch_score"], shared_score))
     elif (
         shared_score >= gate_cfg["shared_candidate_min"]
         and shared_hits >= gate_cfg["candidate_hit_min"]
@@ -308,7 +389,7 @@ def run_all_rows(
 ) -> dict:
     features = build_feature_pack(rows, axis_mapping=axis_mapping)
     system_abnormality = _system_abnormality(features, baseline)
-    attribution = attribute_rope_vs_rubber(features, system_abnormality=system_abnormality)
+    attribution = attribute_rope_vs_rubber(features, system_abnormality=system_abnormality, baseline=baseline)
 
     quality_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
     baseline_match = baseline_mapping_match(features, baseline)

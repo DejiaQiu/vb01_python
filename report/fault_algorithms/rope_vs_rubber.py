@@ -10,6 +10,13 @@ except ImportError:  # pragma: no cover
 
 ROPE_FAULT_TYPE = "rope_looseness"
 RUBBER_FAULT_TYPE = "rubber_hardening"
+ATTRIBUTION_BASELINE_KEYS: tuple[str, ...] = (
+    "corr_xy_abs",
+    "corr_xz_abs",
+    "energy_x_over_y",
+    "az_cv",
+    "az_jerk_rms",
+)
 
 # 这层不是“异常门”，而是异常后的保守归因。
 # 规则只回答：当前异常窗更像 rope 还是 rubber；如果两边证据都不够集中，就保持 unknown。
@@ -44,6 +51,10 @@ RUBBER_FEATURE_SPECS: tuple[dict[str, Any], ...] = (
     {"key": "lat_dom_freq_hz", "label": "横向主频", "direction": "high", "lo": 2.30, "hi": 4.80, "weight": 0.9},
     {"key": "z_peak_ratio", "label": "竖向谱峰集中度", "direction": "low", "lo": 0.085, "hi": 0.110, "weight": 0.8},
 )
+BRANCH_BASELINE_RELATIVE_WEIGHT = 0.65
+BRANCH_TEMPLATE_WEIGHT = 0.35
+BRANCH_BASELINE_SOFTNESS = 2.0
+EPS = 1e-9
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -67,20 +78,75 @@ def _feature_value(features: dict[str, Any], key: str) -> float:
     return _to_float(features.get(key))
 
 
-def _branch_components(features: dict[str, Any], specs: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+def _baseline_stat(baseline: dict[str, Any] | None, key: str) -> tuple[float, float] | None:
+    if not isinstance(baseline, dict):
+        return None
+    stats = baseline.get("stats") if isinstance(baseline.get("stats"), dict) else baseline
+    if not isinstance(stats, dict):
+        return None
+    item = stats.get(key)
+    if not isinstance(item, dict):
+        return None
+    median = parse_float(item.get("median"))
+    scale = parse_float(item.get("scale"))
+    if median is None or scale is None or float(scale) <= EPS:
+        return None
+    return float(median), float(scale)
+
+
+def _relative_score(value: float, *, median: float, scale: float, direction: str, lo: float, hi: float) -> float:
+    width = max(abs(float(hi) - float(lo)), EPS)
+    effective_scale = max(float(scale), width * 0.18, abs(float(median)) * 0.12, 1e-6)
+    if str(direction) == "low":
+        delta = max(0.0, float(median) - float(value))
+    else:
+        delta = max(0.0, float(value) - float(median))
+    z_value = delta / effective_scale
+    return 100.0 * (1.0 - pow(2.718281828459045, -z_value / max(0.35, BRANCH_BASELINE_SOFTNESS)))
+
+
+def _branch_components(
+    features: dict[str, Any],
+    specs: tuple[dict[str, Any], ...],
+    *,
+    baseline: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     components: list[dict[str, Any]] = []
     for spec in specs:
         value = _feature_value(features, str(spec["key"]))
-        if str(spec.get("direction", "high")) == "low":
-            score = _score_low(value, _to_float(spec.get("lo")), _to_float(spec.get("hi")))
+        direction = str(spec.get("direction", "high"))
+        lo = _to_float(spec.get("lo"))
+        hi = _to_float(spec.get("hi"))
+        if direction == "low":
+            template_score = _score_low(value, lo, hi)
         else:
-            score = _score_high(value, _to_float(spec.get("lo")), _to_float(spec.get("hi")))
+            template_score = _score_high(value, lo, hi)
+        baseline_key = str(spec.get("baseline_key", spec["key"]))
+        stat = _baseline_stat(baseline, baseline_key)
+        relative_score = None
+        score = float(clamp(template_score, 0.0, 100.0))
+        if stat is not None:
+            relative_score = _relative_score(
+                value,
+                median=float(stat[0]),
+                scale=float(stat[1]),
+                direction=direction,
+                lo=lo,
+                hi=hi,
+            )
+            # 归因优先参考“相对本梯健康基线的偏移”，模板区间只保留为弱先验，减少跨梯失灵。
+            score = (
+                BRANCH_BASELINE_RELATIVE_WEIGHT * float(relative_score)
+                + BRANCH_TEMPLATE_WEIGHT * float(template_score)
+            )
         components.append(
             {
                 "key": str(spec["key"]),
                 "label": str(spec.get("label", spec["key"])),
                 "value": float(value),
                 "score": float(clamp(score, 0.0, 100.0)),
+                "template_score": float(clamp(template_score, 0.0, 100.0)),
+                "relative_score": None if relative_score is None else float(clamp(relative_score, 0.0, 100.0)),
                 "weight": float(spec.get("weight", 1.0)),
             }
         )
@@ -191,7 +257,12 @@ def _selected_issue(
     }
 
 
-def attribute(features: dict[str, Any], *, system_abnormality: dict[str, Any] | None = None) -> dict[str, Any]:
+def attribute(
+    features: dict[str, Any],
+    *,
+    system_abnormality: dict[str, Any] | None = None,
+    baseline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     abnormality = system_abnormality if isinstance(system_abnormality, dict) else {}
     abnormal_status = str(abnormality.get("status", "normal")).strip().lower()
     sampling_ok = bool(features.get("sampling_ok", features.get("sampling_ok_40hz", False)))
@@ -203,8 +274,8 @@ def attribute(features: dict[str, Any], *, system_abnormality: dict[str, Any] | 
             "auxiliary_results": [],
         }
 
-    rope_components = _branch_components(features, ROPE_FEATURE_SPECS)
-    rubber_components = _branch_components(features, RUBBER_FEATURE_SPECS)
+    rope_components = _branch_components(features, ROPE_FEATURE_SPECS, baseline=baseline)
+    rubber_components = _branch_components(features, RUBBER_FEATURE_SPECS, baseline=baseline)
     rope_score, rope_hits, rope_strong_hits = _branch_score(rope_components)
     rubber_score, rubber_hits, rubber_strong_hits = _branch_score(rubber_components)
     rope_margin = float(rope_score - rubber_score)
@@ -235,9 +306,15 @@ def attribute(features: dict[str, Any], *, system_abnormality: dict[str, Any] | 
 
     selected_issue: dict[str, Any] = {}
     if abnormal_status == "candidate_faults":
+        rope_ready = rope_candidate_ready or rope_watch_ready
+        rubber_ready = rubber_candidate_ready or rubber_watch_ready
         if rope_candidate_ready and not rubber_candidate_ready:
             selected_issue = _selected_issue(branch_payload=rope_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
         elif rubber_candidate_ready and not rope_candidate_ready:
+            selected_issue = _selected_issue(branch_payload=rubber_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
+        elif rope_ready and not rubber_ready and rope_margin >= float(ROPE_VS_RUBBER_CONFIG["candidate_margin_min"]):
+            selected_issue = _selected_issue(branch_payload=rope_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
+        elif rubber_ready and not rope_ready and rubber_margin >= float(ROPE_VS_RUBBER_CONFIG["candidate_margin_min"]):
             selected_issue = _selected_issue(branch_payload=rubber_primary, system_abnormality=abnormality, abnormal_status=abnormal_status)
     else:
         rope_ready = rope_candidate_ready or rope_watch_ready

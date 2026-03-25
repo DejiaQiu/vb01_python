@@ -137,6 +137,7 @@ alerts.csv]  alerts.csv]
 
 ### 专项诊断
 - `report/fault_algorithms` 当前总控默认先做“相对健康基线的异常筛查”，异常后再做保守的 `rope_vs_rubber` 归因
+- `rope_vs_rubber` 里的“经验模板”不是训练模型，而是一组人工设定的特征方向/区间弱先验；当前归因更依赖“相对本梯健康基线的偏移”
 - 可对单个 CSV 或批量 CSV 进行离线诊断
 - 输出保持保守，只给 `normal`、`watch_only`、`candidate_faults`
 

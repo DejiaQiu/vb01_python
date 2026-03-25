@@ -87,6 +87,38 @@ class TestRopeVsRubber(unittest.TestCase):
         self.assertGreater(result["rubber_primary"]["score"], result["rope_primary"]["score"])
         self.assertTrue(result["rubber_primary"]["type_watch_ready"])
 
+    def test_baseline_relative_scoring_can_support_rubber_selection(self):
+        baseline = {
+            "stats": {
+                "corr_xy_abs": {"median": 0.10, "scale": 0.03},
+                "corr_xz_abs": {"median": 0.08, "scale": 0.03},
+                "a_pca_primary_ratio": {"median": 0.44, "scale": 0.05},
+                "energy_x_over_y": {"median": 1.02, "scale": 0.05},
+                "lateral_ratio": {"median": 0.82, "scale": 0.08},
+                "lat_dom_freq_hz": {"median": 1.10, "scale": 0.30},
+                "z_peak_ratio": {"median": 0.13, "scale": 0.02},
+            }
+        }
+        result = attribute(
+            _features(
+                energy_x_over_y=0.88,
+                corr_xy=-0.36,
+                corr_xz=-0.22,
+                a_pca_primary_ratio=0.64,
+                z_peak_ratio=0.08,
+                az_cv=0.92,
+                az_jerk_rms=0.94,
+                lateral_ratio=1.28,
+                lat_dom_freq_hz=3.4,
+            ),
+            system_abnormality=_system("watch_only", 52.0),
+            baseline=baseline,
+        )
+
+        self.assertEqual(result["selected_issue"]["fault_type"], "rubber_hardening")
+        self.assertGreater(result["rubber_primary"]["score"], result["rope_primary"]["score"])
+        self.assertTrue(result["rubber_primary"]["type_watch_ready"])
+
 
 if __name__ == "__main__":
     unittest.main()
