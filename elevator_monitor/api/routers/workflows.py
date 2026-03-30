@@ -102,6 +102,60 @@ def _compact_latest_report_context(report_ctx: dict[str, Any]) -> dict[str, Any]
     return compact
 
 
+def _copy_dict_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _copy_dict_list(value: Any) -> list[dict[str, Any]]:
+    return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _fallback_primary_issue(report_ctx: dict[str, Any]) -> dict[str, Any]:
+    preferred_issue = report_ctx.get("preferred_issue")
+    if not isinstance(preferred_issue, dict):
+        return {}
+    return {
+        "fault_type": str(preferred_issue.get("fault_type", "unknown")),
+        "score": preferred_issue.get("score", 0.0),
+        "level": str(preferred_issue.get("level", "normal")),
+    }
+
+
+def _normalize_latest_report_fields(
+    *,
+    report_ctx: dict[str, Any],
+    latest_payload: dict[str, Any],
+    request: DiagnosisReportLatestRequest,
+    resolved_latest: str,
+) -> dict[str, Any]:
+    primary_issue = _copy_dict_payload(latest_payload.get("primary_issue"))
+    if not primary_issue:
+        primary_issue = _fallback_primary_issue(report_ctx)
+    return {
+        "workflow_type": str(latest_payload.get("workflow_type", "scheduled_batch_diagnosis_v1")),
+        "generated_at_ms": int(
+            latest_payload.get("generated_at_ms", report_ctx.get("generated_at_ms", 0))
+            or report_ctx.get("generated_at_ms", 0)
+        ),
+        "status": str(
+            (report_ctx.get("screening", {}) if isinstance(report_ctx.get("screening"), dict) else {}).get(
+                "status",
+                latest_payload.get("status", "normal"),
+            )
+        ),
+        "primary_issue": primary_issue,
+        "top_candidate": _copy_dict_payload(latest_payload.get("top_candidate")),
+        "watch_faults": _copy_dict_list(latest_payload.get("watch_faults")),
+        "auxiliary_results": _copy_dict_list(latest_payload.get("auxiliary_results")),
+        "recommendation": str(latest_payload.get("recommendation", "")).strip(),
+        "latest_file": _display_path(latest_payload.get("latest_file", "")),
+        "latest_file_name": _display_path(latest_payload.get("latest_file_name", "")),
+        "waveform_error": _sanitize_path_text(latest_payload.get("waveform_error", "")),
+        "latest_json": resolved_latest,
+        "requested_elevator_id": str(request.elevator_id or "").strip(),
+    }
+
+
 @router.post("/maintenance-package")
 def maintenance_package(request: MaintenancePackageRequest) -> dict[str, Any]:
     alert_rows = normalize_row_values(request.alert_rows) if request.alert_rows else load_recent_alerts(
@@ -188,40 +242,14 @@ def _build_latest_report_context(request: DiagnosisReportLatestRequest) -> dict[
         if isinstance(latest_payload.get("waveform_payload"), dict)
         else {},
     )
-    report_ctx["workflow_type"] = str(latest_payload.get("workflow_type", "scheduled_batch_diagnosis_v1"))
-    report_ctx["generated_at_ms"] = int(
-        latest_payload.get("generated_at_ms", report_ctx.get("generated_at_ms", 0))
-        or report_ctx.get("generated_at_ms", 0)
-    )
-    report_ctx["status"] = str(
-        (report_ctx.get("screening", {}) if isinstance(report_ctx.get("screening"), dict) else {}).get(
-            "status", latest_payload.get("status", "normal")
+    report_ctx.update(
+        _normalize_latest_report_fields(
+            report_ctx=report_ctx,
+            latest_payload=latest_payload,
+            request=request,
+            resolved_latest=resolved_latest,
         )
     )
-    report_ctx["primary_issue"] = dict(latest_payload.get("primary_issue", {})) if isinstance(
-        latest_payload.get("primary_issue"), dict
-    ) else {}
-    if not report_ctx["primary_issue"] and isinstance(report_ctx.get("preferred_issue"), dict):
-        report_ctx["primary_issue"] = {
-            "fault_type": str(report_ctx["preferred_issue"].get("fault_type", "unknown")),
-            "score": report_ctx["preferred_issue"].get("score", 0.0),
-            "level": str(report_ctx["preferred_issue"].get("level", "normal")),
-        }
-    report_ctx["top_candidate"] = dict(latest_payload.get("top_candidate", {})) if isinstance(
-        latest_payload.get("top_candidate"), dict
-    ) else {}
-    report_ctx["watch_faults"] = [
-        dict(item) for item in latest_payload.get("watch_faults", []) if isinstance(item, dict)
-    ]
-    report_ctx["auxiliary_results"] = [
-        dict(item) for item in latest_payload.get("auxiliary_results", []) if isinstance(item, dict)
-    ]
-    report_ctx["recommendation"] = str(latest_payload.get("recommendation", "")).strip()
-    report_ctx["latest_file"] = _display_path(latest_payload.get("latest_file", ""))
-    report_ctx["latest_file_name"] = _display_path(latest_payload.get("latest_file_name", ""))
-    report_ctx["waveform_error"] = _sanitize_path_text(latest_payload.get("waveform_error", ""))
-    report_ctx["latest_json"] = resolved_latest
-    report_ctx["requested_elevator_id"] = str(request.elevator_id or "").strip()
     report_ctx["report_markdown_draft"] = render_report_markdown(report_ctx)
     return _compact_latest_report_context(report_ctx)
 

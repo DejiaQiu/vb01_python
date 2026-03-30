@@ -1,0 +1,128 @@
+{
+  "stats": {
+    "a_rms_ac": {
+      "median": 0.007049535490466788,
+      "scale": 0.00035671451867314263,
+      "count": 8.0
+    },
+    "a_p2p": {
+      "median": 0.04735607567569333,
+      "scale": 0.009215165349304465,
+      "count": 8.0
+    },
+    "g_std": {
+      "median": 0.0883717175008653,
+      "scale": 0.005792563374155007,
+      "count": 8.0
+    },
+    "a_peak_std": {
+      "median": 0.004797889836548739,
+      "scale": 0.000965654794179085,
+      "count": 8.0
+    },
+    "a_pca_primary_ratio": {
+      "median": 0.42514466395153294,
+      "scale": 0.03297291976147817,
+      "count": 8.0
+    },
+    "a_band_log_ratio_0_5_over_5_20": {
+      "median": 0.2980568196774079,
+      "scale": 0.12636525735165835,
+      "count": 8.0
+    },
+    "lateral_ratio": {
+      "median": 0.8792237242473058,
+      "scale": 0.03171164594986442,
+      "count": 8.0
+    },
+    "lat_dom_freq_hz": {
+      "median": 4.6,
+      "scale": 2.1497699999999993,
+      "count": 8.0
+    },
+    "lat_low_band_ratio": {
+      "median": 0.21765584092198492,
+      "scale": 0.06591197793580428,
+      "count": 8.0
+    },
+    "z_peak_ratio": {
+      "median": 0.053174689724112024,
+      "scale": 0.009854253048625432,
+      "count": 8.0
+    },
+    "corr_xy_abs": {
+      "median": 0.30166961950231064,
+      "scale": 0.05804971871755011,
+      "count": 8.0
+    },
+    "corr_xz_abs": {
+      "median": 0.2335418860353593,
+      "scale": 0.03653935599995479,
+      "count": 8.0
+    },
+    "energy_x_over_y": {
+      "median": 1.0408040757600303,
+      "scale": 0.04493634979121713,
+      "count": 8.0
+    },
+    "az_cv": {
+      "median": 0.8076941073416819,
+      "scale": 0.09682790350629218,
+      "count": 8.0
+    },
+    "az_jerk_rms": {
+      "median": 0.5180675518644835,
+      "scale": 0.03588168805272397,
+      "count": 8.0
+    },
+    "a_activity_ratio": {
+      "median": 0.007084759860947735,
+      "scale": 0.000358452556194248,
+      "count": 8.0
+    },
+    "g_activity_ratio": {
+      "median": 0.08500821925013208,
+      "scale": 0.005197658327548739,
+      "count": 8.0
+    },
+    "activity_peak_ratio": {
+      "median": 0.07004691281178141,
+      "scale": 0.01354196162198739,
+      "count": 8.0
+    }
+  },
+  "count": 8,
+  "source_count": 8,
+  "eligible_count": 8,
+  "min_samples": 64,
+  "keys": [
+    "a_rms_ac",
+    "a_p2p",
+    "g_std",
+    "a_peak_std",
+    "a_pca_primary_ratio",
+    "a_band_log_ratio_0_5_over_5_20",
+    "lateral_ratio",
+    "lat_dom_freq_hz",
+    "lat_low_band_ratio",
+    "z_peak_ratio",
+    "corr_xy_abs",
+    "corr_xz_abs",
+    "energy_x_over_y",
+    "az_cv",
+    "az_jerk_rms",
+    "a_activity_ratio",
+    "g_activity_ratio",
+    "activity_peak_ratio"
+  ],
+  "axis_mapping_signature": "vertical=Az|lateral_x=Ax|lateral_y=Ay",
+  "axis_mapping_mode": "default",
+  "cleaning": {
+    "mode": "top80",
+    "candidate_count": 9,
+    "kept_count": 8,
+    "dropped_count": 1,
+    "z_threshold": 3.5
+  },
+  "source": "/Users/qiudejia/project/vb01_python/data/baselines/elevator_001/ healthy"
+}

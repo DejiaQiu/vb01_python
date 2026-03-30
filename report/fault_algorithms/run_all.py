@@ -379,6 +379,70 @@ def _generic_abnormal_issue(system_abnormality: dict[str, Any], *, screening: st
     }
 
 
+def _copy_issue_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _copy_issue_list(value: Any) -> list[dict[str, Any]]:
+    return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _build_screening_outputs(
+    *,
+    quality_ok: bool,
+    system_abnormality: dict[str, Any],
+    attribution: dict[str, Any],
+) -> dict[str, Any]:
+    selected_issue = _copy_issue_payload(attribution.get("selected_issue"))
+    auxiliary_results = _copy_issue_list(attribution.get("auxiliary_results"))
+
+    if not quality_ok:
+        return {
+            "screening_status": "low_quality",
+            "top_fault": {},
+            "top_candidate": {},
+            "candidate_faults": [],
+            "watch_faults": [],
+            "detector_results": [],
+            "auxiliary_results": [],
+        }
+
+    abnormal_status = str(system_abnormality.get("status", "normal"))
+    if abnormal_status == "candidate_faults":
+        top_fault = selected_issue or _generic_abnormal_issue(system_abnormality, screening="high_confidence")
+        return {
+            "screening_status": "candidate_faults",
+            "top_fault": dict(top_fault),
+            "top_candidate": dict(top_fault),
+            "candidate_faults": [dict(top_fault)],
+            "watch_faults": [],
+            "detector_results": None,
+            "auxiliary_results": auxiliary_results,
+        }
+
+    if abnormal_status == "watch_only":
+        top_fault = selected_issue or _generic_abnormal_issue(system_abnormality, screening="watch")
+        return {
+            "screening_status": "watch_only",
+            "top_fault": dict(top_fault),
+            "top_candidate": {},
+            "candidate_faults": [],
+            "watch_faults": [dict(top_fault)],
+            "detector_results": None,
+            "auxiliary_results": auxiliary_results,
+        }
+
+    return {
+        "screening_status": "normal",
+        "top_fault": {},
+        "top_candidate": {},
+        "candidate_faults": [],
+        "watch_faults": [],
+        "detector_results": [],
+        "auxiliary_results": [],
+    }
+
+
 def run_all_rows(
     rows: list[dict[str, str]],
     source: str = "",
@@ -403,34 +467,21 @@ def run_all_rows(
     else:
         baseline_payload["mapping_match"] = None
 
-    if not quality_ok:
-        screening_status = "low_quality"
-        top_fault = {}
-        watch_faults = []
-        candidate_faults = []
-        top_candidate = {}
-        detector_results = []
-        auxiliary_results = []
-    elif system_abnormality.get("status") == "candidate_faults":
-        screening_status = "candidate_faults"
-        top_fault = dict(attribution.get("selected_issue", {})) if isinstance(attribution.get("selected_issue"), dict) and attribution.get("selected_issue") else _generic_abnormal_issue(system_abnormality, screening="high_confidence")
-        top_candidate = dict(top_fault)
-        candidate_faults = [dict(top_fault)]
-        watch_faults = []
-        auxiliary_results = list(attribution.get("auxiliary_results", [])) if isinstance(attribution.get("auxiliary_results"), list) else []
-    elif system_abnormality.get("status") == "watch_only":
-        screening_status = "watch_only"
-        top_fault = dict(attribution.get("selected_issue", {})) if isinstance(attribution.get("selected_issue"), dict) and attribution.get("selected_issue") else _generic_abnormal_issue(system_abnormality, screening="watch")
-        top_candidate = {}
-        candidate_faults = []
-        watch_faults = [dict(top_fault)]
-        auxiliary_results = list(attribution.get("auxiliary_results", [])) if isinstance(attribution.get("auxiliary_results"), list) else []
-    else:
-        screening_status = "normal"
-        top_fault = {}
-        top_candidate = {}
-        candidate_faults = []
-        watch_faults = []
+    screening_outputs = _build_screening_outputs(
+        quality_ok=quality_ok,
+        system_abnormality=system_abnormality,
+        attribution=attribution,
+    )
+    screening_status = str(screening_outputs["screening_status"])
+    top_fault = _copy_issue_payload(screening_outputs.get("top_fault"))
+    top_candidate = _copy_issue_payload(screening_outputs.get("top_candidate"))
+    candidate_faults = _copy_issue_list(screening_outputs.get("candidate_faults"))
+    watch_faults = _copy_issue_list(screening_outputs.get("watch_faults"))
+    auxiliary_results = _copy_issue_list(screening_outputs.get("auxiliary_results"))
+    detector_results_override = screening_outputs.get("detector_results")
+    if isinstance(detector_results_override, list):
+        detector_results = _copy_issue_list(detector_results_override)
+    elif screening_status == "normal":
         detector_results = []
         auxiliary_results = []
 

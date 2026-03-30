@@ -261,6 +261,8 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["screening"]["status"], "low_quality")
         self.assertEqual(payload["top_fault"], {})
         self.assertEqual(payload["candidate_faults"], [])
+        self.assertEqual(payload["detector_results"], [])
+        self.assertEqual(payload["auxiliary_results"], [])
         self.assertFalse(payload["summary"]["sampling_ok_40hz"])
 
     def test_system_abnormality_stays_normal_when_close_to_baseline(self):
@@ -376,6 +378,44 @@ class TestFaultAlgorithmsRunAll(unittest.TestCase):
         self.assertEqual(payload["primary_issue"]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["candidate_faults"][0]["fault_type"], "rubber_hardening")
         self.assertEqual(payload["detector_results"][0]["fault_type"], "rubber_hardening")
+
+    def test_watch_window_keeps_auxiliary_results(self):
+        with patch.object(
+            run_all_module,
+            "_system_abnormality",
+            return_value={
+                "status": "watch_only",
+                "score": 48.0,
+                "shared_abnormal_score": 51.0,
+                "baseline_mode": "robust_baseline",
+                "baseline_weight": 0.85,
+                "baseline_features": 10,
+                "baseline_match": True,
+                "run_state_score": 58.0,
+                "gate_mode": "running",
+                "shared_hits": 4,
+                "shared_strong_hits": 1,
+                "shared_feature_total": 10,
+                "top_deviations": [],
+                "sampling_ok": True,
+                "sampling_ok_40hz": True,
+                "sampling_condition": "sampling_ok",
+            },
+        ), patch.object(
+            run_all_module,
+            "run_fault_detectors",
+            return_value={
+                "detector_results": [
+                    _detector_result("rope_looseness", 71.0, type_watch_ready=True, type_candidate_ready=False),
+                ],
+                "selected_issue": {"fault_type": "rope_looseness", "score": 45.0, "level": "watch", "triggered": False, "screening": "watch"},
+                "auxiliary_results": [{"fault_type": "unknown", "score": 32.0}],
+            },
+        ):
+            payload = run_all_module.run_all_rows(_rows(), source="inline_rows")
+
+        self.assertEqual(payload["screening"]["status"], "watch_only")
+        self.assertEqual(payload["auxiliary_results"], [{"fault_type": "unknown", "score": 32.0}])
 
     def test_baseline_keys_match_shared_anomaly_features(self):
         self.assertEqual(

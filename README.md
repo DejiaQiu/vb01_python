@@ -6,9 +6,7 @@
 - 专项诊断链路：对单个或批量振动 CSV 执行规则算法并生成诊断报告
 
 ## 架构图
-静态图（推荐直接查看）：
-
-![Architecture Diagram](docs/architecture.png)
+更适合继续开发时参考的版本：[`docs/demo_architecture.md`](docs/demo_architecture.md)
 
 Mermaid 源图：
 

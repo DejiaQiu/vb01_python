@@ -907,7 +907,40 @@ class TestAPIService(unittest.TestCase):
             self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
             self.assertTrue(payload["latest_file"].endswith("alert_context.csv.gz"))
             self.assertEqual(payload["latest_file_name"], "alert_context.csv.gz")
-            self.assertIn("波形图与频谱图", payload["report_markdown_draft"])
+        self.assertIn("波形图与频谱图", payload["report_markdown_draft"])
+
+    def test_diagnosis_report_latest_normalizes_optional_fields(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "status": "watch_only",
+                        "preferred_issue": {"fault_type": "rubber_hardening", "score": 57.0, "level": "watch"},
+                        "primary_issue": [],
+                        "top_candidate": [],
+                        "watch_faults": [{"fault_type": "rubber_hardening", "score": 57.0}, "ignored"],
+                        "auxiliary_results": [{"fault_type": "unknown", "score": 20.0}, "ignored"],
+                        "waveform_error": "/tmp/some/very/long/path/latest.csv not found",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/workflows/diagnosis-report-latest",
+                params={"latest_json": str(status_path), "include_waveforms": False},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["primary_issue"]["fault_type"], "rubber_hardening")
+        self.assertEqual(payload["top_candidate"], {})
+        self.assertEqual(payload["watch_faults"], [{"fault_type": "rubber_hardening", "score": 57.0}])
+        self.assertEqual(payload["auxiliary_results"], [{"fault_type": "unknown", "score": 20.0}])
+        self.assertEqual(payload["waveform_error"], "latest.csv not found")
 
 
 if __name__ == "__main__":
