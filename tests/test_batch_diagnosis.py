@@ -180,10 +180,16 @@ class TestBatchDiagnosis(unittest.TestCase):
             self.assertTrue(latest_payload["latest_file"].endswith("vibration_30s_20260303_104600.csv"))
             self.assertEqual(latest_payload["latest_file_name"], "vibration_30s_20260303_104600.csv")
             self.assertEqual(len(latest_payload["history"]), 3)
+            self.assertEqual(latest_payload["history"][0]["window_start_ts_ms"], 1_000_000)
+            self.assertEqual(latest_payload["history"][0]["window_end_ts_ms"], 1_011_000)
+            self.assertEqual(latest_payload["fault_timeline"]["event_count"], 2)
+            self.assertEqual(latest_payload["fault_timeline"]["events"][0]["fault_type"], "rope_looseness")
             self.assertEqual(latest_payload["primary_issue"]["fault_type"], "rope_looseness")
             self.assertIn("report_markdown_draft", latest_payload)
             self.assertIn("当前最值得关注的问题", latest_payload["report_markdown_draft"])
             self.assertIn("本次判断依据", latest_payload["report_markdown_draft"])
+            self.assertIn("异常时序回顾", latest_payload["report_markdown_draft"])
+            self.assertIn("rope_looseness", json.dumps(latest_payload["fault_timeline"], ensure_ascii=False))
             self.assertIn("## 波形图", latest_payload["report_markdown_draft"])
             self.assertIn("waveform_payload", latest_payload)
             self.assertIn("markdown_echarts", latest_payload["waveform_payload"])
@@ -321,6 +327,50 @@ class TestBatchDiagnosis(unittest.TestCase):
 
         self.assertEqual(payload["status"], "watch_only")
         self.assertEqual(payload["preferred_issue"]["fault_type"], "rope_looseness")
+
+    def test_batch_merges_consecutive_windows_into_fault_timeline(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            paths = [
+                root / "vibration_30s_20260303_101500.csv",
+                root / "vibration_30s_20260303_103800.csv",
+                root / "vibration_30s_20260303_104600.csv",
+            ]
+            for path in paths:
+                _write_csv(path)
+
+            fake_results = [
+                _result(
+                    "normal",
+                    top_fault=_compact_fault("unknown", 22.0),
+                ),
+                _result(
+                    "candidate_faults",
+                    top_fault=_compact_fault("rope_looseness", 68.0, triggered=True),
+                    top_candidate=_compact_fault("rope_looseness", 68.0, triggered=True, screening="high_confidence"),
+                    detector_results=[{"fault_type": "rope_looseness", "score": 68.0, "level": "warning", "type_candidate_ready": True}],
+                ),
+                _result(
+                    "candidate_faults",
+                    top_fault=_compact_fault("rope_looseness", 72.0, triggered=True),
+                    top_candidate=_compact_fault("rope_looseness", 72.0, triggered=True, screening="high_confidence"),
+                    detector_results=[{"fault_type": "rope_looseness", "score": 72.0, "level": "warning", "type_candidate_ready": True}],
+                ),
+            ]
+
+            with patch("elevator_monitor.batch_diagnosis.run_all_rows", side_effect=fake_results):
+                payload = run_batch_diagnosis(
+                    input_dir=str(root),
+                    max_files=3,
+                    write_outputs=False,
+                )
+
+        events = payload["fault_timeline"]["events"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["fault_type"], "rope_looseness")
+        self.assertEqual(events[0]["screening_status"], "candidate_faults")
+        self.assertEqual(events[0]["window_count"], 2)
+        self.assertGreater(events[0]["end_ts_ms"], events[0]["start_ts_ms"])
 
 
 if __name__ == "__main__":

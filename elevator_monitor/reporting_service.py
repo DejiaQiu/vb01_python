@@ -396,6 +396,30 @@ def _build_system_deviation_rows(diag: dict[str, Any]) -> list[list[Any]]:
     return rows
 
 
+def _fault_timeline_events(diag: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_timeline = diag.get("fault_timeline", {}) if isinstance(diag.get("fault_timeline"), dict) else {}
+    events = raw_timeline.get("events", []) if isinstance(raw_timeline.get("events"), list) else []
+    normalized: list[dict[str, Any]] = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        fault_type = str(item.get("fault_type", "")).strip()
+        if fault_type in {"", "unknown", "normal"}:
+            continue
+        normalized.append(
+            {
+                "fault_type": fault_type,
+                "fault_label": _fault_label(fault_type),
+                "screening_status": str(item.get("screening_status", "normal")),
+                "start_time": str(item.get("start_time", "")),
+                "end_time": str(item.get("end_time", "")),
+                "window_count": _safe_int(item.get("window_count"), 1),
+                "max_score": _safe_float(item.get("max_score"), 0.0),
+            }
+        )
+    return normalized
+
+
 def build_report_context(
     *,
     diagnosis_result: dict[str, Any],
@@ -415,6 +439,7 @@ def build_report_context(
     risk = dict(package.get("risk", {})) if isinstance(package.get("risk"), dict) else {}
     baseline = dict(diag.get("baseline", {})) if isinstance(diag.get("baseline"), dict) else {}
     preferred_issue = _preferred_issue(diag)
+    fault_timeline = dict(diag.get("fault_timeline", {})) if isinstance(diag.get("fault_timeline"), dict) else {}
 
     elevator_id = str(package.get("elevator_id", "")).strip() or "elevator-unknown"
     site_name = str(package.get("site_name", "")).strip() or "unknown-site"
@@ -488,6 +513,7 @@ def build_report_context(
         },
         "detector_results": detector_results,
         "system_abnormality": system_abnormality,
+        "fault_timeline": fault_timeline,
         "preferred_issue": {
             "fault_type": preferred_fault_type,
             "fault_label": _fault_label(preferred_fault_type),
@@ -583,6 +609,16 @@ def _diagnosis_result_from_latest_status(payload: dict[str, Any]) -> dict[str, A
         for item in (raw.get("auxiliary_results", latest_result.get("auxiliary_results", [])) or [])
         if isinstance(item, dict)
     ]
+    diag["history"] = [
+        dict(item)
+        for item in (raw.get("history", latest_result.get("history", [])) or [])
+        if isinstance(item, dict)
+    ]
+    diag["fault_timeline"] = (
+        dict(raw.get("fault_timeline", latest_result.get("fault_timeline", {})))
+        if isinstance(raw.get("fault_timeline", latest_result.get("fault_timeline", {})), dict)
+        else {}
+    )
     return diag
 
 
@@ -847,6 +883,7 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
     ]
     system_deviation_rows = _build_system_deviation_rows(diagnosis)
     system_abnormality = diagnosis.get("system_abnormality", {}) if isinstance(diagnosis.get("system_abnormality"), dict) else {}
+    fault_timeline_events = _fault_timeline_events(diagnosis)
 
     lines.extend(["", "## 4. 本次判断依据"])
     lines.extend(_markdown_table(["项目", "内容"], basis_rows))
@@ -861,13 +898,27 @@ def render_report_markdown(report_context: dict[str, Any]) -> str:
                 "- 当前没有可直接对比的健康基线统计量，这一窗的异常分来自兜底评分，不展示“偏离 z / 基线中位数”表，避免把缺失值误读成 0。",
             ]
         )
-    lines.extend(["", "## 5. 给维保人员的补充参考"])
+    if fault_timeline_events:
+        lines.extend(["", "## 5. 异常时序回顾", "以下时间基于原始采集数据时间戳整理。"])
+        for item in fault_timeline_events:
+            time_text = str(item.get("start_time", "")).strip()
+            end_time = str(item.get("end_time", "")).strip()
+            if end_time and end_time != time_text:
+                time_text = f"{time_text} ~ {end_time}"
+            lines.append(
+                f"- {time_text}：{item.get('fault_label', item.get('fault_type', 'unknown'))}（{_screening_label(str(item.get('screening_status', 'normal')))}，连续 {max(1, _safe_int(item.get('window_count'), 1))} 个窗口，最高分 {_safe_float(item.get('max_score'), 0.0):.1f}）"
+            )
+
+    maintenance_section_index = "6" if fault_timeline_events else "5"
+    maintenance_subsection_index = "6.1" if fault_timeline_events else "5.1"
+
+    lines.extend(["", f"## {maintenance_section_index}. 给维保人员的补充参考"])
     lines.extend(_markdown_table(["项目", "内容"], maintenance_rows))
     if system_abnormality:
         lines.extend(
             [
                 "",
-                "### 5.1 通用异常门摘要",
+                f"### {maintenance_subsection_index} 通用异常门摘要",
                 f"- 异常门状态：{_screening_label(str(system_abnormality.get('status', 'normal')))}",
                 f"- 相对基线异常分：{_safe_float(system_abnormality.get('score'), 0.0):.1f}",
                 f"- 命中特征数：{_safe_int(system_abnormality.get('shared_hits'), 0)}/{_safe_int(system_abnormality.get('shared_feature_total'), 0)}，强命中 {_safe_int(system_abnormality.get('shared_strong_hits'), 0)}",

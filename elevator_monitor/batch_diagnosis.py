@@ -4,9 +4,11 @@ import argparse
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .data_recorder import format_ts_ms
 from .maintenance_workflow import build_maintenance_package
 from .reporting_service import build_report_context, render_report_markdown
 from .waveform_service import build_waveform_payload, load_waveform_rows
@@ -45,6 +47,45 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_row_ts_ms(row: dict[str, Any]) -> int:
+    for key in ("ts_ms", "data_ts_ms"):
+        value = _safe_int(row.get(key), 0)
+        if value > 0:
+            return value
+    return 0
+
+
+def _parse_file_ts_ms(path: Path) -> int:
+    match = _FILE_TS_PATTERN.search(path.name)
+    if not match:
+        return 0
+    try:
+        dt = datetime.strptime(f"{match.group(1)}{match.group(2)}", "%Y%m%d%H%M%S")
+    except ValueError:
+        return 0
+    return int(dt.timestamp() * 1000)
+
+
+def _window_time_summary(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    row_ts = [value for value in (_parse_row_ts_ms(row) for row in rows) if value > 0]
+    if row_ts:
+        start_ts_ms = min(row_ts)
+        end_ts_ms = max(row_ts)
+        source = "csv_ts_ms"
+    else:
+        start_ts_ms = _parse_file_ts_ms(path)
+        end_ts_ms = start_ts_ms
+        source = "filename" if start_ts_ms > 0 else "unknown"
+    return {
+        "window_start_ts_ms": int(start_ts_ms),
+        "window_end_ts_ms": int(end_ts_ms),
+        "window_start": format_ts_ms(start_ts_ms) if start_ts_ms > 0 else "",
+        "window_end": format_ts_ms(end_ts_ms) if end_ts_ms > 0 else "",
+        "window_duration_s": round(max(0.0, float(end_ts_ms - start_ts_ms) / 1000.0), 3) if start_ts_ms > 0 and end_ts_ms >= start_ts_ms else 0.0,
+        "window_time_source": source,
+    }
 
 
 def _infer_elevator_id(*candidates: Any) -> str:
@@ -187,13 +228,13 @@ def _preferred_issue(result: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:
+def _history_entry(path: Path, result: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     screening = result.get("screening", {}) if isinstance(result.get("screening"), dict) else {}
     candidate_faults = result.get("candidate_faults", []) if isinstance(result.get("candidate_faults"), list) else []
     watch_faults = result.get("watch_faults", []) if isinstance(result.get("watch_faults"), list) else []
     detector_results = result.get("detector_results", []) if isinstance(result.get("detector_results"), list) else []
     preferred = _preferred_issue(result)
-    return {
+    entry = {
         "path": str(path),
         "name": path.name,
         "screening_status": str(screening.get("status", "normal")),
@@ -204,6 +245,107 @@ def _history_entry(path: Path, result: dict[str, Any]) -> dict[str, Any]:
         "detector_results": [_compact_fault(item) for item in detector_results if isinstance(item, dict)],
         "candidate_faults": [_compact_fault(item) for item in candidate_faults if isinstance(item, dict)],
         "watch_faults": [_compact_fault(item) for item in watch_faults if isinstance(item, dict)],
+    }
+    entry.update(_window_time_summary(path, rows))
+    return entry
+
+
+def _history_issue_for_timeline(row: dict[str, Any]) -> dict[str, Any]:
+    preferred = row.get("preferred_issue", {}) if isinstance(row.get("preferred_issue"), dict) else {}
+    preferred_type = str(preferred.get("fault_type", "")).strip()
+    if preferred and preferred_type not in {"", "unknown", "normal"}:
+        return dict(preferred)
+
+    detector_results = row.get("detector_results", []) if isinstance(row.get("detector_results"), list) else []
+    ready_detectors = [
+        dict(item)
+        for item in detector_results
+        if isinstance(item, dict)
+        and str(item.get("fault_type", "")).strip() not in {"", "unknown", "normal"}
+        and bool(item.get("type_candidate_ready") or item.get("type_watch_ready"))
+    ]
+    if not ready_detectors:
+        return {}
+    ready_detectors.sort(key=lambda item: _safe_float(item.get("score"), 0.0), reverse=True)
+    top_ready = ready_detectors[0]
+    second_score = _safe_float(ready_detectors[1].get("score"), 0.0) if len(ready_detectors) > 1 else -1.0
+    top_score = _safe_float(top_ready.get("score"), 0.0)
+    if len(ready_detectors) == 1 or top_score > second_score:
+        return top_ready
+    return {}
+
+
+def _build_fault_timeline(history: list[dict[str, Any]]) -> dict[str, Any]:
+    events: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    for row in history:
+        status = str(row.get("screening_status", "")).strip()
+        if status not in {"candidate_faults", "watch_only"}:
+            current = None
+            continue
+
+        issue = _history_issue_for_timeline(row)
+        fault_type = str(issue.get("fault_type", "")).strip()
+        if fault_type in {"", "unknown", "normal"}:
+            current = None
+            continue
+
+        start_ts_ms = _safe_int(row.get("window_start_ts_ms"), 0)
+        end_ts_ms = _safe_int(row.get("window_end_ts_ms"), 0)
+        if current and current.get("fault_type") == fault_type and current.get("screening_status") == status:
+            if start_ts_ms > 0 and (current.get("start_ts_ms", 0) <= 0 or start_ts_ms < current["start_ts_ms"]):
+                current["start_ts_ms"] = start_ts_ms
+                current["start_time"] = str(row.get("window_start", ""))
+            if end_ts_ms > 0 and end_ts_ms >= current.get("end_ts_ms", 0):
+                current["end_ts_ms"] = end_ts_ms
+                current["end_time"] = str(row.get("window_end", ""))
+            current["window_count"] = int(current.get("window_count", 1)) + 1
+            current["max_score"] = round(max(_safe_float(current.get("max_score"), 0.0), _safe_float(issue.get("score"), 0.0)), 2)
+            current["last_window_name"] = str(row.get("name", ""))
+            current["last_path"] = str(row.get("path", ""))
+            continue
+
+        current = {
+            "fault_type": fault_type,
+            "screening_status": status,
+            "level": str(issue.get("level", "watch" if status == "watch_only" else "warning")),
+            "start_ts_ms": start_ts_ms,
+            "end_ts_ms": end_ts_ms,
+            "start_time": str(row.get("window_start", "")),
+            "end_time": str(row.get("window_end", "")),
+            "window_count": 1,
+            "max_score": round(_safe_float(issue.get("score"), 0.0), 2),
+            "first_window_name": str(row.get("name", "")),
+            "last_window_name": str(row.get("name", "")),
+            "first_path": str(row.get("path", "")),
+            "last_path": str(row.get("path", "")),
+        }
+        events.append(current)
+
+    by_fault_type: dict[str, list[dict[str, Any]]] = {}
+    for item in events:
+        normalized = dict(item)
+        normalized["event_duration_s"] = round(
+            max(0.0, float(_safe_int(item.get("end_ts_ms"), 0) - _safe_int(item.get("start_ts_ms"), 0)) / 1000.0),
+            3,
+        ) if _safe_int(item.get("start_ts_ms"), 0) > 0 and _safe_int(item.get("end_ts_ms"), 0) >= _safe_int(item.get("start_ts_ms"), 0) else 0.0
+        by_fault_type.setdefault(str(item.get("fault_type", "unknown")), []).append(normalized)
+
+    rope_events = []
+    for key in ("rope_looseness", "rope_tension_abnormal"):
+        rope_events.extend([dict(item) for item in by_fault_type.get(key, [])])
+
+    return {
+        "events": [dict(item) for item in events],
+        "by_fault_type": by_fault_type,
+        "has_real_timestamps": any(_safe_int(item.get("start_ts_ms"), 0) > 0 for item in events),
+        "event_count": len(events),
+        "fault_count": len(by_fault_type),
+        "rope_timeline": {
+            "events": rope_events,
+            "event_count": len(rope_events),
+        },
     }
 
 
@@ -383,6 +525,7 @@ def _build_report_outputs(
     latest_result: dict[str, Any],
     latest_issue: dict[str, Any],
     latest_status: str,
+    fault_timeline: dict[str, Any],
     risk: dict[str, Any],
     baseline_summary: dict[str, Any],
     baseline_payload: dict[str, Any] | None,
@@ -447,6 +590,7 @@ def _build_report_outputs(
 
     report_diagnosis = dict(latest_result)
     report_diagnosis["baseline_reference"] = baseline_reference
+    report_diagnosis["fault_timeline"] = dict(fault_timeline) if isinstance(fault_timeline, dict) else {}
     try:
         waveform_rows, waveform_source = load_waveform_rows([], "", str(latest_file))
         waveform_payload = build_waveform_payload(
@@ -551,7 +695,7 @@ def run_batch_diagnosis(
             baseline=baseline_payload,
             baseline_summary=baseline_summary,
         )
-        history.append(_history_entry(path, result))
+        history.append(_history_entry(path, result, rows))
         if path == latest_file:
             latest_result = result
 
@@ -576,10 +720,12 @@ def run_batch_diagnosis(
     latest_issue = _preferred_issue(latest_result)
     latest_status = str((latest_result.get("screening") or {}).get("status", "normal"))
     risk = _build_risk(history)
+    fault_timeline = _build_fault_timeline(history)
     report_summary, report_markdown_draft, waveform_payload = _build_report_outputs(
         latest_result=latest_result,
         latest_issue=latest_issue,
         latest_status=latest_status,
+        fault_timeline=fault_timeline,
         risk=risk,
         baseline_summary=baseline_summary,
         baseline_payload=baseline_payload,
@@ -603,7 +749,8 @@ def run_batch_diagnosis(
         "top_candidate": _compact_fault(latest_result.get("top_candidate", {})),
         "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
         "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
-        "rope_timeline": {},
+        "fault_timeline": fault_timeline,
+        "rope_timeline": dict(fault_timeline.get("rope_timeline", {})) if isinstance(fault_timeline.get("rope_timeline", {}), dict) else {},
         "risk": risk,
         "recommendation": _status_recommendation(latest_status, str(latest_issue.get("fault_type", "unknown"))),
         "report_summary": report_summary,
@@ -620,7 +767,8 @@ def run_batch_diagnosis(
             "candidate_faults": [_compact_fault(item) for item in latest_result.get("candidate_faults", []) if isinstance(item, dict)],
             "watch_faults": [_compact_fault(item) for item in latest_result.get("watch_faults", []) if isinstance(item, dict)],
             "auxiliary_results": [_compact_fault(item) for item in latest_result.get("auxiliary_results", []) if isinstance(item, dict)],
-            "rope_timeline": {},
+            "fault_timeline": fault_timeline,
+            "rope_timeline": dict(fault_timeline.get("rope_timeline", {})) if isinstance(fault_timeline.get("rope_timeline", {}), dict) else {},
             "waveform_payload": waveform_payload,
         },
         "history": history,

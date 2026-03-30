@@ -942,6 +942,57 @@ class TestAPIService(unittest.TestCase):
         self.assertEqual(payload["auxiliary_results"], [{"fault_type": "unknown", "score": 20.0}])
         self.assertEqual(payload["waveform_error"], "latest.csv not found")
 
+    def test_diagnosis_report_latest_renders_fault_timeline(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "latest_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "workflow_type": "scheduled_batch_diagnosis_v1",
+                        "status": "candidate_faults",
+                        "primary_issue": {"fault_type": "rope_looseness", "score": 68.0, "level": "warning"},
+                        "preferred_issue": {"fault_type": "rope_looseness", "score": 68.0, "level": "warning"},
+                        "fault_timeline": {
+                            "events": [
+                                {
+                                    "fault_type": "rope_looseness",
+                                    "screening_status": "candidate_faults",
+                                    "start_ts_ms": 1_000_000,
+                                    "end_ts_ms": 1_011_000,
+                                    "start_time": "1970-01-01 08:16:40.000",
+                                    "end_time": "1970-01-01 08:16:51.000",
+                                    "window_count": 2,
+                                    "max_score": 72.0,
+                                }
+                            ],
+                            "event_count": 1,
+                            "fault_count": 1,
+                        },
+                        "latest_result": {
+                            "summary": {"n_raw": 400, "n_effective": 400, "fs_hz": 40.0},
+                            "screening": {"status": "candidate_faults"},
+                            "top_fault": {"fault_type": "rope_looseness", "score": 68.0, "level": "warning"},
+                            "top_candidate": {"fault_type": "rope_looseness", "score": 68.0, "level": "warning"},
+                            "candidate_faults": [{"fault_type": "rope_looseness", "score": 68.0, "level": "warning"}],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.client.get(
+                "/api/v1/workflows/diagnosis-report-latest",
+                params={"latest_json": str(status_path), "include_waveforms": False},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("fault_timeline", payload)
+        self.assertIn("异常时序回顾", payload["report_markdown_draft"])
+        self.assertIn("1970-01-01 08:16:40.000 ~ 1970-01-01 08:16:51.000", payload["report_markdown_draft"])
+        self.assertIn("钢丝绳松动或张力不均", payload["report_markdown_draft"])
+
 
 if __name__ == "__main__":
     unittest.main()
