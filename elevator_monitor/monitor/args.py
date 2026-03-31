@@ -58,110 +58,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--alert-cooldown-s", type=float, default=env_float("MONITOR_ALERT_COOLDOWN_S", 2.0), help="同级告警最小间隔")
 
     parser.add_argument(
-        "--fault-type-enabled",
-        action=argparse.BooleanOptionalAction,
-        default=env_bool("MONITOR_FAULT_TYPE_ENABLED", True),
-        help="是否启用故障类型识别",
+        "--diagnosis-window-s",
+        type=float,
+        default=env_float("MONITOR_DIAGNOSIS_WINDOW_S", 30.0),
+        help="边缘新算法滚动诊断窗口秒数",
     )
     parser.add_argument(
-        "--fault-type-min-level",
-        choices=["warning", "anomaly"],
-        default=env_str("MONITOR_FAULT_TYPE_MIN_LEVEL", "warning"),
-        help="从哪个异常级别开始输出故障类型",
+        "--diagnosis-step-s",
+        type=float,
+        default=env_float("MONITOR_DIAGNOSIS_STEP_S", 2.0),
+        help="边缘新算法最小重算间隔秒数",
     )
     parser.add_argument(
-        "--fault-type-top-k",
+        "--diagnosis-baseline-max-windows",
         type=int,
-        default=env_int("MONITOR_FAULT_TYPE_TOP_K", 3),
-        help="输出候选故障类型数量",
+        default=env_int("MONITOR_DIAGNOSIS_BASELINE_MAX_WINDOWS", 240),
+        help="边缘健康基线最多保留多少个正常窗口特征",
     )
     parser.add_argument(
-        "--fault-baseline-size",
+        "--diagnosis-baseline-min-windows",
         type=int,
-        default=env_int("MONITOR_FAULT_BASELINE_SIZE", 2000),
-        help="故障类型算法基线样本上限",
+        default=env_int("MONITOR_DIAGNOSIS_BASELINE_MIN_WINDOWS", 8),
+        help="边缘健康基线达到 ready 所需的最少正常窗口数",
     )
     parser.add_argument(
-        "--fault-baseline-min-records",
+        "--diagnosis-max-rows",
         type=int,
-        default=env_int("MONITOR_FAULT_BASELINE_MIN_RECORDS", 120),
-        help="故障类型算法建基线最小样本",
-    )
-    parser.add_argument(
-        "--fault-vibration-warning-z",
-        type=float,
-        default=env_float("MONITOR_FAULT_VIBRATION_WARNING_Z", 3.0),
-        help="振动增大判定阈值（z）",
-    )
-    parser.add_argument(
-        "--fault-vibration-shock-z",
-        type=float,
-        default=env_float("MONITOR_FAULT_VIBRATION_SHOCK_Z", 6.0),
-        help="冲击判定阈值（z）",
-    )
-    parser.add_argument(
-        "--fault-temp-rise-c",
-        type=float,
-        default=env_float("MONITOR_FAULT_TEMP_RISE_C", 6.0),
-        help="温升判定阈值（摄氏度）",
-    )
-    parser.add_argument(
-        "--fault-temp-overheat-c",
-        type=float,
-        default=env_float("MONITOR_FAULT_TEMP_OVERHEAT_C", 45.0),
-        help="过温判定阈值（摄氏度）",
-    )
-    parser.add_argument(
-        "--fault-model-path",
-        default=env_str("MONITOR_FAULT_MODEL_PATH", ""),
-        help="故障类型模型路径（JSON，可选）",
-    )
-    parser.add_argument(
-        "--fault-model-min-confidence",
-        type=float,
-        default=env_float("MONITOR_FAULT_MODEL_MIN_CONFIDENCE", 0.60),
-        help="故障类型模型最小置信度（低于该值回退规则）",
-    )
-    parser.add_argument(
-        "--fault-model-top-k",
-        type=int,
-        default=env_int("MONITOR_FAULT_MODEL_TOP_K", 3),
-        help="故障类型模型输出候选数量",
-    )
-    parser.add_argument(
-        "--fault-fusion-mode",
-        choices=["rule_primary", "model_primary"],
-        default=env_str("MONITOR_FAULT_FUSION_MODE", "rule_primary"),
-        help="故障融合模式：rule_primary=规则主判，model_primary=模型优先",
-    )
-    parser.add_argument(
-        "--generated-algo-path",
-        default=env_str("MONITOR_GENERATED_ALGO_PATH", ""),
-        help="自动生成故障算法路径（JSON，可选）",
-    )
-    parser.add_argument(
-        "--generated-algo-min-confidence",
-        type=float,
-        default=env_float("MONITOR_GENERATED_ALGO_MIN_CONFIDENCE", 0.62),
-        help="自动生成算法最小置信度",
-    )
-    parser.add_argument(
-        "--generated-algo-top-k",
-        type=int,
-        default=env_int("MONITOR_GENERATED_ALGO_TOP_K", 3),
-        help="自动生成算法候选输出数量",
-    )
-    parser.add_argument(
-        "--generated-algo-horizon-s",
-        type=float,
-        default=env_float("MONITOR_GENERATED_ALGO_HORIZON_S", 30.0),
-        help="振动特征预测前瞻秒数",
-    )
-    parser.add_argument(
-        "--generated-algo-forecast-min-points",
-        type=int,
-        default=env_int("MONITOR_GENERATED_ALGO_FORECAST_MIN_POINTS", 10),
-        help="振动特征预测最小历史点数",
+        default=env_int("MONITOR_DIAGNOSIS_MAX_ROWS", 6000),
+        help="边缘诊断滚动缓存最大行数",
     )
 
     parser.add_argument(
@@ -229,95 +153,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=env_float("MONITOR_RISK_TEMPERATURE_WEIGHT", 0.10),
         help="温度变化在风险中的权重",
-    )
-    parser.add_argument(
-        "--risk-model-path",
-        default=env_str("MONITOR_RISK_MODEL_PATH", ""),
-        help="24h风险模型路径（JSON，可选）",
-    )
-    parser.add_argument(
-        "--risk-model-positive-label",
-        default=env_str("MONITOR_RISK_MODEL_POSITIVE_LABEL", "1"),
-        help="风险模型正类标签",
-    )
-    parser.add_argument(
-        "--risk-model-weight",
-        type=float,
-        default=env_float("MONITOR_RISK_MODEL_WEIGHT", 0.35),
-        help="风险模型概率在综合风险中的权重",
-    )
-    parser.add_argument(
-        "--model-window-s",
-        type=float,
-        default=env_float("MONITOR_MODEL_WINDOW_S", 10.0),
-        help="在线模型推理窗口秒数",
-    )
-    parser.add_argument(
-        "--model-window-min-samples",
-        type=int,
-        default=env_int("MONITOR_MODEL_WINDOW_MIN_SAMPLES", 20),
-        help="在线模型推理最小样本数",
-    )
-    parser.add_argument(
-        "--dify-enabled",
-        action=argparse.BooleanOptionalAction,
-        default=env_bool("MONITOR_DIFY_ENABLED", False),
-        help="是否在告警后主动调用 Dify Workflow API",
-    )
-    parser.add_argument(
-        "--dify-base-url",
-        default=env_str("MONITOR_DIFY_BASE_URL", ""),
-        help="Dify API 基地址，例如 http://localhost/v1",
-    )
-    parser.add_argument(
-        "--dify-api-key",
-        default=env_str("MONITOR_DIFY_API_KEY", ""),
-        help="Dify Workflow API Key",
-    )
-    parser.add_argument(
-        "--dify-user",
-        default=env_str("MONITOR_DIFY_USER", "elevator-monitor"),
-        help="Dify 请求 user 字段",
-    )
-    parser.add_argument(
-        "--dify-response-mode",
-        choices=["blocking", "streaming"],
-        default=env_str("MONITOR_DIFY_RESPONSE_MODE", "blocking"),
-        help="Dify workflow response_mode",
-    )
-    parser.add_argument(
-        "--dify-timeout-s",
-        type=float,
-        default=env_float("MONITOR_DIFY_TIMEOUT_S", 8.0),
-        help="Dify 请求超时时间",
-    )
-    parser.add_argument(
-        "--dify-verify-ssl",
-        action=argparse.BooleanOptionalAction,
-        default=env_bool("MONITOR_DIFY_VERIFY_SSL", True),
-        help="是否校验 Dify HTTPS 证书",
-    )
-    parser.add_argument(
-        "--dify-min-level",
-        choices=["warning", "anomaly"],
-        default=env_str("MONITOR_DIFY_MIN_LEVEL", "warning"),
-        help="仅当告警级别不低于该值时触发 Dify",
-    )
-    parser.add_argument(
-        "--dify-cooldown-s",
-        type=float,
-        default=env_float("MONITOR_DIFY_COOLDOWN_S", 30.0),
-        help="两次 Dify 触发之间的最小间隔秒数",
-    )
-    parser.add_argument(
-        "--dify-site-name",
-        default=env_str("MONITOR_DIFY_SITE_NAME", ""),
-        help="写入维保包的站点名称",
-    )
-    parser.add_argument(
-        "--dify-manifest-json",
-        default=env_str("MONITOR_DIFY_MANIFEST_JSON", ""),
-        help="可选：模型 manifest 路径，用于补充 Dify 输入上下文",
     )
     parser.add_argument("--reconnect-backoff-s", type=float, default=env_float("MONITOR_RECONNECT_BACKOFF_S", 2.0), help="重连重试间隔")
     parser.add_argument("--reconnect-no-data-s", type=float, default=env_float("MONITOR_RECONNECT_NO_DATA_S", 8.0), help="超过该秒数无新数据则重连")

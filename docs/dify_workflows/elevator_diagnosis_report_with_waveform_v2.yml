@@ -443,134 +443,370 @@ workflow:
       type: custom
       width: 242
     - data:
-        code: "import html\nimport json\nfrom datetime import datetime\n\n\ndef _as_dict(value):\n\
-          \    return value if isinstance(value, dict) else {}\n\n\ndef _format_detected_at(value):\n\
-          \    try:\n        ts_ms = int(float(value))\n    except (TypeError, ValueError):\n\
-          \        return \"未提供\"\n    if ts_ms <= 0:\n        return \"未提供\"\n  \
-          \  return datetime.fromtimestamp(ts_ms / 1000.0).strftime(\"%Y-%m-%d %H:%M:%S\"\
-          )\n\n\ndef _placeholder_option(title, reason):\n    note = str(reason or \"\
-          当前没有可用波形数据\").strip() or \"当前没有可用波形数据\"\n    return {\n        \"title\"\
-          : {\"text\": title, \"left\": \"center\"},\n        \"xAxis\": {\"type\"\
-          : \"category\", \"data\": []},\n        \"yAxis\": {\"type\": \"value\"\
-          },\n        \"series\": [],\n        \"graphic\": [{\n            \"type\"\
-          : \"text\",\n            \"left\": \"center\",\n            \"top\": \"\
-          middle\",\n            \"style\": {\n                \"text\": f\"暂无可渲染波形\\\
-          n{note}\",\n                \"textAlign\": \"center\",\n               \
-          \ \"fill\": \"#666\",\n                \"fontSize\": 16,\n             \
-          \   \"lineHeight\": 24,\n            },\n        }],\n    }\n\n\ndef _option_json(payload,\
-          \ key, title, reason=\"\"):\n    echarts = _as_dict(payload.get(\"echarts\"\
-          ))\n    item = _as_dict(echarts.get(key))\n    option_json = str(item.get(\"\
-          option_json\") or \"\").strip()\n    if option_json:\n        return option_json\n\
-          \    return json.dumps(_placeholder_option(title, reason), ensure_ascii=False)\n\
-          \n\ndef _fault_text(primary, preferred,\
-          \ candidate):\n    fault_type = str(primary.get(\"fault_type\") or preferred.get(\"\
-          fault_type\") or candidate.get(\"fault_type\") or \"none\")\n    if fault_type\
-          \ == \"rope_tension_abnormal\":\n        return \"钢丝绳状态异常\"\n    if fault_type\
-          \ == \"rope_looseness\":\n        return \"钢丝绳松动或张力不均\"\n    if fault_type\
-          \ == \"rubber_hardening\":\n        return \"橡胶圈硬化\"\n    if fault_type\
-          \ == \"unknown\":\n        return \"异常类型待确认\"\n    return fault_type\n\n\
-          \ndef _display_conclusion(status, fault_text):\n    if status == \"normal\"\
-          :\n        return \"当前未见明确异常证据\"\n    if status == \"watch_only\" and fault_text\
-          \ == \"异常类型待确认\":\n        return \"已检测到异常，但类型待确认\"\n    return fault_text\n\
-          \n\ndef _extract_markdown_tables(text):\n    lines = str(text or \"\").splitlines()\n\
-          \    tables = []\n    current = []\n    for line in lines:\n        stripped\
-          \ = line.rstrip()\n        if \"|\" in stripped and stripped.strip().startswith(\"\
-          |\"):\n            current.append(stripped)\n            continue\n    \
-          \    if current:\n            if len(current) >= 2 and \"---\" in current[1]:\n\
-          \                tables.append(current)\n            current = []\n    if\
-          \ current and len(current) >= 2 and \"---\" in current[1]:\n        tables.append(current)\n\
-          \    return tables\n\n\ndef _table_block_to_html(lines):\n    def split_row(line):\n\
-          \        return [part.strip() for part in line.strip().strip(\"|\").split(\"\
-          |\")]\n\n    headers = split_row(lines[0])\n    body_lines = lines[2:]\n\
-          \    rows = []\n    for line in body_lines:\n        if \"|\" not in line:\n\
-          \            continue\n        parts = split_row(line)\n        if len(parts)\
-          \ < len(headers):\n            parts.extend([\"\"] * (len(headers) - len(parts)))\n\
-          \        rows.append(parts[: len(headers)])\n    if not headers or not rows:\n\
-          \        return \"\"\n\n    parts = [\"<table>\", \"<thead><tr>\"]\n   \
-          \ for head in headers:\n        parts.append(f\"<th>{html.escape(head)}</th>\"\
-          )\n    parts.append(\"</tr></thead><tbody>\")\n    for row in rows:\n  \
-          \      parts.append(\"<tr>\")\n        for cell in row:\n            parts.append(f\"\
-          <td>{html.escape(cell)}</td>\")\n        parts.append(\"</tr>\")\n    parts.append(\"\
-          </tbody></table>\")\n    return \"\".join(parts)\n\n\ndef _tables_to_html(text):\n\
-          \    blocks = _extract_markdown_tables(text)\n    html_tables = [_table_block_to_html(block)\
-          \ for block in blocks]\n    html_tables = [item for item in html_tables\
-          \ if item]\n    if not html_tables:\n        return \"\"\n    return \"\\\
-          n\\n\".join(html_tables)\n\n\ndef _table_block_to_text(lines):\n    def\
-          \ split_row(line):\n        return [part.strip() for part in line.strip().strip(\"\
-          |\").split(\"|\")]\n\n    headers = split_row(lines[0])\n    body_lines\
-          \ = lines[2:]\n    rows = []\n    for line in body_lines:\n        if \"\
-          |\" not in line:\n            continue\n        parts = split_row(line)\n\
-          \        if len(parts) < len(headers):\n            parts.extend([\"\"]\
-          \ * (len(headers) - len(parts)))\n        rows.append(parts[: len(headers)])\n\
-          \    if not headers or not rows:\n        return \"\"\n\n    widths = [len(head)\
-          \ for head in headers]\n    for row in rows:\n        for idx, cell in enumerate(row):\n\
-          \            widths[idx] = max(widths[idx], len(cell))\n\n    def fmt_row(row):\n\
-          \        return \" | \".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))\n\
-          \n    parts = [fmt_row(headers), \"-+-\".join(\"-\" * width for width in\
-          \ widths)]\n    parts.extend(fmt_row(row) for row in rows)\n    return \"\
-          \\n\".join(parts)\n\n\ndef _tables_to_text(text):\n    blocks = _extract_markdown_tables(text)\n\
-          \    rendered = []\n    for idx, block in enumerate(blocks, start=1):\n\
-          \        table_text = _table_block_to_text(block)\n        if table_text:\n\
-          \            rendered.append(f\"[表{idx}]\\n{table_text}\")\n    return \"\
-          \\n\\n\".join(rendered)\n\n\ndef _trim_report_for_llm(text, max_chars=12000):\n\
-          \    raw = str(text or \"\").strip()\n    if not raw:\n        return \"\
-          \"\n    for marker in (\"\\n## 波形图\", \"\\n## 怎么读这些图\"):\n        if marker\
-          \ in raw:\n            raw = raw.split(marker, 1)[0].strip()\n    if len(raw)\
-          \ <= max_chars:\n        return raw\n    return raw[:max_chars].rstrip()\
-          \ + \"\\n\\n[后续内容已截断]\"\n\n\ndef _compact_latest_payload(payload):\n   \
-          \ keep_keys = [\n        \"workflow_type\",\n        \"generated_at_ms\"\
-          ,\n        \"status\",\n        \"baseline\",\n        \"primary_issue\"\
-          ,\n        \"preferred_issue\",\n        \"detector_results\",\n        \"top_candidate\",\n        \"\
-          watch_faults\",\n        \"auxiliary_results\",\n        \"risk\",\n   \
-          \     \"recommendation\",\n        \"latest_file\",\n        \"latest_file_name\"\
-          ,\n        \"requested_elevator_id\",\n        \"system_abnormality\",\n\
-          \        \"report_summary\",\n    ]\n    compact = {}\n    for key in\
-          \ keep_keys:\n        if key in payload:\n            compact[key] = payload.get(key)\n\
-          \    return compact\n\n\ndef main(body):\n    text = str(body or \"\").strip()\n\
-          \    try:\n        payload = json.loads(text) if text else {}\n    except\
-          \ Exception:\n        payload = {\"status\": \"unknown\", \"detail\": \"\
-          latest status payload is not valid json\"}\n\n    payload = _as_dict(payload)\n\
-          \    status = str(payload.get(\"status\", \"unknown\"))\n    risk = _as_dict(payload.get(\"\
-          risk\"))\n    primary_issue = _as_dict(payload.get(\"primary_issue\"))\n\
-          \    system_abnormality = _as_dict(payload.get(\"system_abnormality\"))\n\
-          \    preferred = _as_dict(payload.get(\"preferred_issue\"))\n    top_candidate = _as_dict(payload.get(\"\
-          top_candidate\"))\n    waveforms = _as_dict(payload.get(\"waveform_payload\"\
-          ))\n    waveform_error = str(payload.get(\"waveform_error\", \"\")).strip()\
-          \n    report_markdown_draft = str(payload.get(\"report_markdown_draft\"\
-          , \"\")).strip()\n    requested_elevator_id = str(payload.get(\"requested_elevator_id\"\
-          , \"\")).strip()\n    latest_file = str(payload.get(\"latest_file_name\"\
-          ) or payload.get(\"latest_file\") or \"\")\n    detected_at = _format_detected_at(payload.get(\"\
-          generated_at_ms\"))\n    fault_type = _fault_text(primary_issue, preferred,\
-          \ top_candidate)\n    display_conclusion = _display_conclusion(status, fault_type)\n\
-          \    fault_score = primary_issue.get(\"score\", preferred.get(\"score\"\
-          , top_candidate.get(\"score\", 0)))\n    abnormal_score = system_abnormality.get(\"score\",\
-          \ 0)\n    baseline_mode = str(system_abnormality.get(\"baseline_mode\", \"unknown\"\
-          ))\n    risk_now = str(risk.get(\"risk_level_now\", \"unknown\"))\n \
-          \   risk_24h = str(risk.get(\"risk_level_24h\", \"unknown\"))\n    compact_payload\
-          \ = _compact_latest_payload(payload)\n\
-          \    report_markdown_for_llm = _trim_report_for_llm(report_markdown_draft)\n\
-          \    waveform_insights = str(waveforms.get(\"insight_markdown\", \"\")).strip()\n\
-          \    if not waveform_insights and waveform_error:\n        waveform_insights\
-          \ = f\"## 波形图说明\\n\\n- 当前在线状态没有可用波形数据：{waveform_error}\"\n    summary =\
-          \ (\n        f\"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion};\
-          \ 分数={fault_score}; 异常分={abnormal_score}; 基线模式={baseline_mode}; 归因口径=按梯健康基线偏移+经验模板弱先验; 当前风险={risk_now}; 24h风险={risk_24h};\
-          \ 目标电梯={requested_elevator_id or 'default'}; 最新文件={latest_file}; 后端报告={'已生成'\
-          \ if report_markdown_draft else '未生成'}\"\n    )\n    return {\n        \"\
-          status_json\": json.dumps(compact_payload, ensure_ascii=False),\n      \
-          \  \"status_summary\": summary,\n        \"detected_at\": detected_at,\n\
-          \        \"report_markdown_draft\": report_markdown_draft,\n        \"report_markdown_for_llm\"\
-          : report_markdown_for_llm,\n        \"report_tables_html\": _tables_to_html(report_markdown_draft),\n\
-          \        \"report_tables_text\": _tables_to_text(report_markdown_draft),\n\
-          \        \"waveform_markdown\": str(waveforms.get(\"markdown_echarts\")\
-          \ or waveforms.get(\"markdown\", \"\")).strip(),\n        \"waveform_insights\"\
-          : waveform_insights,\n        \"display_conclusion\": display_conclusion,\n\
-          \        \"full_spectrum_chart\": _option_json(waveforms, \"full_frequency_spectrum\"\
-          , \"全频频谱图\", waveform_error),\n        \"spectrum_chart\": _option_json(waveforms,\
-          \ \"low_frequency_spectrum\", \"低频频谱图\", waveform_error),\n        \"acc_chart\"\
-          : _option_json(waveforms, \"acceleration\", \"加速度波形\", waveform_error),\n\
-          \        \"gyro_chart\": _option_json(waveforms, \"gyroscope\", \"角速度波形\"\
-          , waveform_error),\n        \"mag_chart\": _option_json(waveforms, \"acceleration_magnitude\"\
-          , \"加速度合量波形\", waveform_error),\n    }\n"
+        code: |
+          import html
+          import json
+          from datetime import datetime
+
+
+          def _as_dict(value):
+              return value if isinstance(value, dict) else {}
+
+
+          def _as_list(value):
+              return value if isinstance(value, list) else []
+
+
+          def _format_detected_at(value):
+              try:
+                  ts_ms = int(float(value))
+              except (TypeError, ValueError):
+                  return "未提供"
+              if ts_ms <= 0:
+                  return "未提供"
+              return datetime.fromtimestamp(ts_ms / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+          def _placeholder_option(title, reason):
+              note = str(reason or "当前没有可用波形数据").strip() or "当前没有可用波形数据"
+              return {
+                  "title": {"text": title, "left": "center"},
+                  "xAxis": {"type": "category", "data": []},
+                  "yAxis": {"type": "value"},
+                  "series": [],
+                  "graphic": [{
+                      "type": "text",
+                      "left": "center",
+                      "top": "middle",
+                      "style": {
+                          "text": f"暂无可渲染波形\n{note}",
+                          "textAlign": "center",
+                          "fill": "#666",
+                          "fontSize": 16,
+                          "lineHeight": 24,
+                      },
+                  }],
+              }
+
+
+          def _option_json(payload, key, title, reason=""):
+              echarts = _as_dict(payload.get("echarts"))
+              item = _as_dict(echarts.get(key))
+              option_json = str(item.get("option_json") or "").strip()
+              if option_json:
+                  return option_json
+              return json.dumps(_placeholder_option(title, reason), ensure_ascii=False)
+
+
+          def _fault_text(primary, preferred, candidate):
+              fault_type = str(primary.get("fault_type") or preferred.get("fault_type") or candidate.get("fault_type") or "none")
+              if fault_type == "rope_tension_abnormal":
+                  return "钢丝绳状态异常"
+              if fault_type == "rope_looseness":
+                  return "钢丝绳松动或张力不均"
+              if fault_type == "rubber_hardening":
+                  return "橡胶圈硬化"
+              if fault_type == "unknown":
+                  return "异常类型待确认"
+              return fault_type
+
+
+          def _fault_label(fault_type):
+              mapping = {
+                  "rope_tension_abnormal": "钢丝绳状态异常",
+                  "rope_looseness": "钢丝绳松动或张力不均",
+                  "rubber_hardening": "减振橡胶硬化",
+              }
+              key = str(fault_type or "").strip()
+              return mapping.get(key, key or "异常类型待确认")
+
+
+          def _screening_label(status):
+              mapping = {
+                  "normal": "正常",
+                  "watch_only": "重点关注",
+                  "candidate_faults": "高置信候选",
+              }
+              key = str(status or "").strip()
+              return mapping.get(key, key or "未知")
+
+
+          def _display_conclusion(status, fault_text):
+              if status == "normal":
+                  return "当前未见明确异常证据"
+              if status == "watch_only" and fault_text == "异常类型待确认":
+                  return "已检测到异常，但类型待确认"
+              return fault_text
+
+
+          def _extract_markdown_tables(text):
+              lines = str(text or "").splitlines()
+              tables = []
+              current = []
+              for line in lines:
+                  stripped = line.rstrip()
+                  if "|" in stripped and stripped.strip().startswith("|"):
+                      current.append(stripped)
+                      continue
+                  if current:
+                      if len(current) >= 2 and "---" in current[1]:
+                          tables.append(current)
+                      current = []
+              if current and len(current) >= 2 and "---" in current[1]:
+                  tables.append(current)
+              return tables
+
+
+          def _table_block_to_html(lines):
+              def split_row(line):
+                  return [part.strip() for part in line.strip().strip("|").split("|")]
+
+              headers = split_row(lines[0])
+              body_lines = lines[2:]
+              rows = []
+              for line in body_lines:
+                  if "|" not in line:
+                      continue
+                  parts = split_row(line)
+                  if len(parts) < len(headers):
+                      parts.extend([""] * (len(headers) - len(parts)))
+                  rows.append(parts[: len(headers)])
+              if not headers or not rows:
+                  return ""
+
+              parts = ["<table>", "<thead><tr>"]
+              for head in headers:
+                  parts.append(f"<th>{html.escape(head)}</th>")
+              parts.append("</tr></thead><tbody>")
+              for row in rows:
+                  parts.append("<tr>")
+                  for cell in row:
+                      parts.append(f"<td>{html.escape(cell)}</td>")
+                  parts.append("</tr>")
+              parts.append("</tbody></table>")
+              return "".join(parts)
+
+
+          def _tables_to_html(text):
+              blocks = _extract_markdown_tables(text)
+              html_tables = [_table_block_to_html(block) for block in blocks]
+              html_tables = [item for item in html_tables if item]
+              if not html_tables:
+                  return ""
+              return "\n\n".join(html_tables)
+
+
+          def _table_block_to_text(lines):
+              def split_row(line):
+                  return [part.strip() for part in line.strip().strip("|").split("|")]
+
+              headers = split_row(lines[0])
+              body_lines = lines[2:]
+              rows = []
+              for line in body_lines:
+                  if "|" not in line:
+                      continue
+                  parts = split_row(line)
+                  if len(parts) < len(headers):
+                      parts.extend([""] * (len(headers) - len(parts)))
+                  rows.append(parts[: len(headers)])
+              if not headers or not rows:
+                  return ""
+
+              widths = [len(head) for head in headers]
+              for row in rows:
+                  for idx, cell in enumerate(row):
+                      widths[idx] = max(widths[idx], len(cell))
+
+              def fmt_row(row):
+                  return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
+
+              parts = [fmt_row(headers), "-+-".join("-" * width for width in widths)]
+              parts.extend(fmt_row(row) for row in rows)
+              return "\n".join(parts)
+
+
+          def _tables_to_text(text):
+              blocks = _extract_markdown_tables(text)
+              rendered = []
+              for idx, block in enumerate(blocks, start=1):
+                  table_text = _table_block_to_text(block)
+                  if table_text:
+                      rendered.append(f"[表{idx}]\n{table_text}")
+              return "\n\n".join(rendered)
+
+
+          def _trim_report_for_llm(text, max_chars=12000):
+              raw = str(text or "").strip()
+              if not raw:
+                  return ""
+              for marker in ("\n## 波形图", "\n## 怎么读这些图"):
+                  if marker in raw:
+                      raw = raw.split(marker, 1)[0].strip()
+              if len(raw) <= max_chars:
+                  return raw
+              return raw[:max_chars].rstrip() + "\n\n[后续内容已截断]"
+
+
+          def _format_timeline_item(item):
+              fault_type = str(item.get("fault_type", "")).strip()
+              if fault_type in {"", "unknown", "normal"}:
+                  return ""
+              start_time = str(item.get("start_time", "")).strip()
+              end_time = str(item.get("end_time", "")).strip()
+              if start_time and end_time and end_time != start_time:
+                  time_text = f"{start_time} ~ {end_time}"
+              else:
+                  time_text = start_time or end_time or "时间未提供"
+              window_count = max(1, int(float(item.get("window_count", 1) or 1)))
+              max_score = float(item.get("max_score", 0.0) or 0.0)
+              return f"- {time_text}：{_fault_label(fault_type)}（{_screening_label(item.get('screening_status', 'unknown'))}，连续 {window_count} 个窗口，最高分 {max_score:.1f}）"
+
+
+          def _build_timeline_text(payload):
+              timeline = _as_dict(payload.get("fault_timeline"))
+              events = _as_list(timeline.get("events"))
+              lines = []
+              for item in events:
+                  if not isinstance(item, dict):
+                      continue
+                  line = _format_timeline_item(item)
+                  if line:
+                      lines.append(line)
+              if not lines:
+                  return "当前没有可展示的分段异常时序。", "无明确分段异常时序"
+              summary = "；".join(line.removeprefix("- ").strip() for line in lines[:4])
+              return "\n".join(lines), summary
+
+
+          def _build_timeline_overview(payload):
+              timeline = _as_dict(payload.get("fault_timeline"))
+              events = _as_list(timeline.get("events"))
+              phrases = []
+              prefixes = ["先在", "随后在", "之后在", "最后在"]
+              for idx, item in enumerate(events[:4]):
+                  if not isinstance(item, dict):
+                      continue
+                  fault_type = str(item.get("fault_type", "")).strip()
+                  if fault_type in {"", "unknown", "normal"}:
+                      continue
+                  start_time = str(item.get("start_time", "")).strip()
+                  prefix = prefixes[idx] if idx < len(prefixes) else "随后在"
+                  label = _fault_label(fault_type)
+                  screening = _screening_label(item.get("screening_status", "unknown"))
+                  if start_time:
+                      phrases.append(f"{prefix}{start_time}出现{label}（{screening}）")
+                  else:
+                      phrases.append(f"{prefix}某一时段出现{label}（{screening}）")
+              if not phrases:
+                  return "当前没有可展示的分段异常时序。"
+              return "；".join(phrases) + "。"
+
+
+          def _compact_latest_payload(payload):
+              keep_keys = [
+                  "workflow_type",
+                  "generated_at_ms",
+                  "status",
+                  "baseline",
+                  "primary_issue",
+                  "preferred_issue",
+                  "detector_results",
+                  "top_candidate",
+                  "watch_faults",
+                  "auxiliary_results",
+                  "risk",
+                  "recommendation",
+                  "latest_file",
+                  "latest_file_name",
+                  "requested_elevator_id",
+                  "system_abnormality",
+                  "report_summary",
+                  "fault_timeline",
+              ]
+              compact = {}
+              for key in keep_keys:
+                  if key in payload:
+                      compact[key] = payload.get(key)
+              return compact
+
+
+          def main(body):
+              text = str(body or "").strip()
+              try:
+                  payload = json.loads(text) if text else {}
+              except Exception:
+                  payload = {"status": "unknown", "detail": "latest status payload is not valid json"}
+
+              payload = _as_dict(payload)
+              status = str(payload.get("status", "unknown"))
+              risk = _as_dict(payload.get("risk"))
+              primary_issue = _as_dict(payload.get("primary_issue"))
+              system_abnormality = _as_dict(payload.get("system_abnormality"))
+              preferred = _as_dict(payload.get("preferred_issue"))
+              top_candidate = _as_dict(payload.get("top_candidate"))
+              waveforms = _as_dict(payload.get("waveform_payload"))
+              waveform_error = str(payload.get("waveform_error", "")).strip()
+              report_markdown_draft = str(payload.get("report_markdown_draft", "")).strip()
+              requested_elevator_id = str(payload.get("requested_elevator_id", "")).strip()
+              latest_file = str(payload.get("latest_file_name") or payload.get("latest_file") or "")
+              detected_at = _format_detected_at(payload.get("generated_at_ms"))
+              current_status_text = f"{status}（{_screening_label(status)}）" if status else "unknown"
+              fault_type = _fault_text(primary_issue, preferred, top_candidate)
+              display_conclusion = _display_conclusion(status, fault_type)
+              fault_score = primary_issue.get("score", preferred.get("score", top_candidate.get("score", 0)))
+              abnormal_score = system_abnormality.get("score", 0)
+              baseline_mode = str(system_abnormality.get("baseline_mode", "unknown"))
+              risk_now = str(risk.get("risk_level_now", "unknown"))
+              risk_24h = str(risk.get("risk_level_24h", "unknown"))
+              recommendation_raw = payload.get("recommendation")
+              if isinstance(recommendation_raw, dict):
+                  recommendation_text = str(
+                      recommendation_raw.get("maintenance_advice")
+                      or recommendation_raw.get("action")
+                      or recommendation_raw.get("summary")
+                      or ""
+                  ).strip()
+              else:
+                  recommendation_text = str(recommendation_raw or "").strip()
+              if not recommendation_text:
+                  recommendation_text = "建议结合现场复核继续观察。"
+              compact_payload = _compact_latest_payload(payload)
+              report_markdown_for_llm = _trim_report_for_llm(report_markdown_draft)
+              waveform_insights = str(waveforms.get("insight_markdown", "")).strip()
+              if not waveform_insights and waveform_error:
+                  waveform_insights = f"## 波形图说明\n\n- 当前在线状态没有可用波形数据：{waveform_error}"
+              timeline_text, timeline_summary = _build_timeline_text(payload)
+              timeline_overview = _build_timeline_overview(payload)
+              summary = (
+                  f"检测日期={detected_at}; 状态={status}; 主结论={display_conclusion}; 分数={fault_score}; "
+                  f"异常分={abnormal_score}; 基线模式={baseline_mode}; 归因口径=按梯健康基线偏移+经验模板弱先验; "
+                  f"当前风险={risk_now}; 24h风险={risk_24h}; 目标电梯={requested_elevator_id or 'default'}; "
+                  f"最新文件={latest_file}; 异常时序={timeline_summary}; 后端报告={'已生成' if report_markdown_draft else '未生成'}"
+              )
+              return {
+                  "status_json": json.dumps(compact_payload, ensure_ascii=False),
+                  "status_summary": summary,
+                  "detected_at": detected_at,
+                  "current_status_text": current_status_text,
+                  "risk_now": risk_now,
+                  "recommendation_text": recommendation_text,
+                  "timeline_overview": timeline_overview,
+                  "timeline_text": timeline_text,
+                  "timeline_summary": timeline_summary,
+                  "report_markdown_draft": report_markdown_draft,
+                  "report_markdown_for_llm": report_markdown_for_llm,
+                  "report_tables_html": _tables_to_html(report_markdown_draft),
+                  "report_tables_text": _tables_to_text(report_markdown_draft),
+                  "waveform_markdown": str(waveforms.get("markdown_echarts") or waveforms.get("markdown", "")).strip(),
+                  "waveform_insights": waveform_insights,
+                  "display_conclusion": display_conclusion,
+                  "full_spectrum_chart": _option_json(waveforms, "full_frequency_spectrum", "全频频谱图", waveform_error),
+                  "spectrum_chart": _option_json(waveforms, "low_frequency_spectrum", "低频频谱图", waveform_error),
+                  "acc_chart": _option_json(waveforms, "acceleration", "加速度波形", waveform_error),
+                  "gyro_chart": _option_json(waveforms, "gyroscope", "角速度波形", waveform_error),
+                  "mag_chart": _option_json(waveforms, "acceleration_magnitude", "加速度合量波形", waveform_error),
+              }
         code_language: python3
         desc: ''
         outputs:
@@ -578,6 +814,9 @@ workflow:
             children: null
             type: string
           detected_at:
+            children: null
+            type: string
+          current_status_text:
             children: null
             type: string
           display_conclusion:
@@ -604,6 +843,12 @@ workflow:
           report_tables_text:
             children: null
             type: string
+          recommendation_text:
+            children: null
+            type: string
+          risk_now:
+            children: null
+            type: string
           spectrum_chart:
             children: null
             type: string
@@ -611,6 +856,15 @@ workflow:
             children: null
             type: string
           status_summary:
+            children: null
+            type: string
+          timeline_overview:
+            children: null
+            type: string
+          timeline_summary:
+            children: null
+            type: string
+          timeline_text:
             children: null
             type: string
           waveform_insights:
@@ -657,16 +911,36 @@ workflow:
         prompt_template:
         - id: 6bc4515a-764e-42d2-bf70-6c1a26e71179
           role: system
-          text: "你是电梯在线状态回复助手。你只能依据下面这份“后端直接生成的最新诊断报告”回答，不能编造不存在的故障、风险或历史。\n\n站点名：{{#env.site_name#}}\n\
-            用户问题：{{#sys.query#}}\n最新状态摘要：{{#status_parse.status_summary#}}\n最新报告 JSON：\n\
-            {{#status_parse.status_json#}}\n\n后端报告草稿（如有）：\n{{#status_parse.report_markdown_for_llm#}}\n\
-            \n输出要求：\n1. 先直接回答用户问题。\n2. 然后固定输出五行：\n   检测日期：\n   当前状态：\n   主结论：\n  \
-            \ 当前风险：\n   建议动作：\n3. “检测日期”优先使用最近一次批诊断的 generated_at_ms，对用户明确展示具体日期时间。\n\
-            4. 如果附带波形图，可在正文里简要引用波形观察，但不要编造图上没有的信息。\n5. 如果后端报告草稿存在，优先沿用其中的一句话结论、解释和建议，不要重新发明一套相互矛盾的说法。\n\
-            6. 如果状态是 normal，明确写“当前未见明确异常证据”。\n7. 如果状态是 watch_only，明确写“检测到异常变化，但建议继续观察或尽快复测”。\n\
-            8. 如果状态是 watch_only 且主结论为 unknown，必须直接写“已检测到异常，但类型待确认”，不要写成“没有异常”或“无法判断”。\n\
-            9. 如果状态是 candidate_faults，明确写“存在高置信异常，建议安排现场复核”。\n10. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。\n\
-            11. 如果主结论是 rope_looseness 或 rubber_hardening，只能写成“当前更像/偏向……”，不要写成已经确诊。\n12. 如果需要解释算法，只能说“系统先与这台电梯的健康基线比较，再结合少量经验模板弱先验做保守归因”。不要把经验模板说成训练模型。\n13. 只有当输入里明确出现 robust_baseline 且后端草稿真的给出了“基线中位数 / 偏离 z”时，才可以引用这些统计量。\n14. 如果输入里是 self_normalized_fallback 或 mapping_mismatch_fallback，只能说“异常分来自兜底评分/自归一化评分”，不要编造基线中位数、z 值，也不要把缺失值说成 0。\n15. 用自然中文，不要输出 JSON，不要夸大结论。\n"
+          text: |
+            你是电梯在线状态回复助手。你只能依据下面这份“后端直接生成的最新诊断报告”回答，不能编造不存在的故障、风险或历史。
+
+            站点名：{{#env.site_name#}}
+            用户问题：{{#sys.query#}}
+            最新状态摘要：{{#status_parse.status_summary#}}
+            异常时序摘要：{{#status_parse.timeline_summary#}}
+            最新报告 JSON：
+            {{#status_parse.status_json#}}
+
+            后端报告草稿（如有）：
+            {{#status_parse.report_markdown_for_llm#}}
+
+            输出要求：
+            1. 先直接回答用户问题，用 1 到 2 段自然中文。
+            2. 不要再重复输出“检测日期 / 当前状态 / 主结论 / 当前风险 / 建议动作”这五行，模板会单独展示。
+            3. 如果存在分段异常时序，正文第一段必须先按时间顺序概括“先发生什么，后发生什么”，不要只写最新一次检测日期。
+            4. “检测日期”优先使用最近一次批诊断的 generated_at_ms，对用户明确展示具体日期时间。
+            5. 如果附带波形图，可在正文里简要引用波形观察，但不要编造图上没有的信息。
+            6. 如果后端报告草稿存在，优先沿用其中的一句话结论、解释和建议，不要重新发明一套相互矛盾的说法。
+            7. 如果状态是 normal，明确写“当前未见明确异常证据”。
+            8. 如果状态是 watch_only，明确写“检测到异常变化，但建议继续观察或尽快复测”。
+            9. 如果状态是 watch_only 且主结论为 unknown，必须直接写“已检测到异常，但类型待确认”，不要写成“没有异常”或“无法判断”。
+            10. 如果状态是 candidate_faults，明确写“存在高置信异常，建议安排现场复核”。
+            11. 如果存在 auxiliary_results，可在正文里补一句“同时观察到辅助异常线索”，但不要把辅助异常写成主结论。
+            12. 如果主结论是 rope_looseness 或 rubber_hardening，只能写成“当前更像/偏向……”，不要写成已经确诊。
+            13. 如果需要解释算法，只能说“系统先与这台电梯的健康基线比较，再结合少量经验模板弱先验做保守归因”。不要把经验模板说成训练模型。
+            14. 只有当输入里明确出现 robust_baseline 且后端草稿真的给出了“基线中位数 / 偏离 z”时，才可以引用这些统计量。
+            15. 如果输入里是 self_normalized_fallback 或 mapping_mismatch_fallback，只能说“异常分来自兜底评分/自归一化评分”，不要编造基线中位数、z 值，也不要把缺失值说成 0。
+            16. 用自然中文，不要输出 JSON，不要夸大结论。
         selected: false
         title: 在线状态回答
         type: llm
@@ -689,6 +963,20 @@ workflow:
     - data:
         answer: |
           # {{#env.site_name#}} 在线状态
+
+          检测日期：{{#status_parse.detected_at#}}
+          当前状态：{{#status_parse.current_status_text#}}
+          主结论：{{#status_parse.display_conclusion#}}
+          当前风险：{{#status_parse.risk_now#}}
+          建议动作：{{#status_parse.recommendation_text#}}
+
+          ## 异常时序总览
+
+          {{#status_parse.timeline_overview#}}
+
+          ## 分段异常时序
+
+          {{#status_parse.timeline_text#}}
 
           {{#status_llm.text#}}
 

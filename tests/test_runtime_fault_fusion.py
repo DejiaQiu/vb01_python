@@ -4,21 +4,78 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from elevator_monitor.generated_algorithm import GeneratedAlgorithmPrediction
-from elevator_monitor.model_inference import ModelPrediction
 from elevator_monitor.monitor.args import build_arg_parser
+from elevator_monitor.monitor.edge_diagnosis import diagnosis_to_anomaly_result, diagnosis_to_fault_result
 from elevator_monitor.monitor.runtime import RealtimeMonitor
 
 
-class TestRuntimeFaultFusion(unittest.TestCase):
-    def _build_monitor(self, tmp_dir: str, fusion_mode: str) -> RealtimeMonitor:
+class TestEdgeDiagnosisMappings(unittest.TestCase):
+    def test_candidate_faults_maps_to_anomaly_level(self):
+        result = {
+            "summary": {"sampling_condition": "good"},
+            "screening": {"status": "candidate_faults", "quality_ok": True},
+            "system_abnormality": {
+                "score": 82.0,
+                "gate_mode": "strict",
+                "baseline_mode": "rolling_windows",
+                "top_deviations": [{"key": "lateral_ratio", "score": 81.2}],
+            },
+        }
+
+        anomaly = diagnosis_to_anomaly_result(result, baseline_ready=True, baseline_count=12)
+
+        self.assertEqual("anomaly", anomaly["level"])
+        self.assertEqual(82.0, anomaly["score"])
+        self.assertTrue(anomaly["baseline_ready"])
+        self.assertEqual(12, anomaly["baseline_count"])
+        self.assertIn("screening:candidate_faults", anomaly["reasons"])
+        self.assertIn("baseline:rolling_windows", anomaly["reasons"])
+
+    def test_fault_result_uses_primary_issue_metadata(self):
+        result = {
+            "summary": {
+                "sampling_condition": "good",
+                "axis_mapping_signature": "vertical=Az;lateral_x=Ax;lateral_y=Ay",
+            },
+            "screening": {"status": "watch_only"},
+            "system_abnormality": {
+                "score": 67.5,
+                "gate_mode": "watch",
+                "baseline_mode": "rolling_windows",
+                "baseline_match": True,
+            },
+            "primary_issue": {
+                "fault_type": "rope_looseness",
+                "score": 78.0,
+                "reasons": ["lat_dom_freq_low", "lat_low_band_high"],
+                "detector_family": "rope_primary",
+                "attribution_margin": 9.5,
+            },
+            "candidate_faults": [],
+            "watch_faults": [],
+        }
+
+        fault = diagnosis_to_fault_result(result)
+
+        self.assertEqual("rope_looseness", fault["fault_type"])
+        self.assertAlmostEqual(0.78, fault["fault_confidence"])
+        self.assertEqual("edge_rule_engine_v2", fault["fault_source"])
+        self.assertEqual("rope_looseness:78.0", fault["fault_candidates"])
+        self.assertEqual("watch_only", fault["fault_screening_status"])
+        self.assertEqual("rope_primary", fault["fault_detector_family"])
+        self.assertAlmostEqual(9.5, fault["fault_attribution_margin"])
+        self.assertEqual("rolling_windows", fault["baseline_mode"])
+        self.assertEqual("good", fault["sampling_condition"])
+
+
+class TestRealtimeMonitorSinglePath(unittest.TestCase):
+    def _build_monitor(self, tmp_dir: str) -> RealtimeMonitor:
         args = build_arg_parser().parse_args([])
         args.log_file = str(Path(tmp_dir) / "monitor.log")
         args.health_path = str(Path(tmp_dir) / "health.json")
         args.output_data = str(Path(tmp_dir) / "data.csv")
         args.output_alert = str(Path(tmp_dir) / "alert.csv")
         args.profile_path = str(Path(tmp_dir) / "{elevator_id}.json")
-        args.fault_fusion_mode = fusion_mode
         return RealtimeMonitor(args)
 
     @staticmethod
@@ -27,103 +84,34 @@ class TestRuntimeFaultFusion(unittest.TestCase):
             handler.close()
         monitor.logger.handlers.clear()
 
-    def test_rule_primary_keeps_rule_result(self):
+    def test_runtime_profile_payload_uses_edge_diagnosis_only(self):
         with tempfile.TemporaryDirectory() as tmp:
-            monitor = self._build_monitor(tmp, "rule_primary")
+            monitor = self._build_monitor(tmp)
             try:
-                rule_result = {
-                    "fault_type": "vibration_increase",
-                    "fault_confidence": 0.62,
-                    "fault_source": "vibration_rules",
-                    "fault_candidates": "vibration_increase:0.620@vibration_rules",
-                    "fault_reasons": "max_z=4.8",
-                }
-                model_pred = ModelPrediction(
-                    label="door_stuck",
-                    confidence=0.95,
-                    top_k="door_stuck:0.950|normal:0.050",
-                    probabilities={"door_stuck": 0.95, "normal": 0.05},
-                )
+                payload = monitor._build_profile_payload()
+                health = monitor._build_health_snapshot()
 
-                merged = monitor._merge_fault_result(
-                    rule_result,
-                    model_pred,
-                    None,
-                    {"level": "warning"},
-                    None,
-                    None,
-                )
-
-                self.assertEqual("vibration_increase", merged["fault_type"])
-                self.assertEqual("door_stuck", merged["fault_model_pred"])
+                self.assertIn("edge_diagnosis", payload)
+                self.assertIn("risk_predictor", payload)
+                self.assertNotIn("anomaly_detector", payload)
+                self.assertNotIn("fault_engine", payload)
+                self.assertNotIn("feature_forecaster", payload)
+                self.assertFalse(health["baseline_ready"])
+                self.assertEqual(0, health["baseline_count"])
+                self.assertEqual("normal", health["last_screening_status"])
             finally:
                 self._close_monitor(monitor)
 
-    def test_rule_primary_uses_generated_when_rule_unknown(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            monitor = self._build_monitor(tmp, "rule_primary")
-            try:
-                rule_result = {
-                    "fault_type": "unknown",
-                    "fault_confidence": 0.0,
-                    "fault_source": "none",
-                    "fault_candidates": "",
-                    "fault_reasons": "",
-                }
-                generated_pred = GeneratedAlgorithmPrediction(
-                    label="bolt_loosen",
-                    confidence=0.76,
-                    top_k="bolt_loosen:0.760|unknown:0.240",
-                    probabilities={"bolt_loosen": 0.76, "unknown": 0.24},
-                    best_score=0.71,
-                    threshold=0.40,
-                )
+    def test_runtime_args_no_longer_expose_old_edge_chain(self):
+        args = build_arg_parser().parse_args([])
 
-                merged = monitor._merge_fault_result(
-                    rule_result,
-                    None,
-                    generated_pred,
-                    {"level": "warning"},
-                    {"A_mag_mean": 1.0},
-                    None,
-                )
-
-                self.assertEqual("bolt_loosen", merged["fault_type"])
-                self.assertTrue(str(merged["fault_source"]).startswith("generated_algo:"))
-            finally:
-                self._close_monitor(monitor)
-
-    def test_model_primary_can_override_rule(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            monitor = self._build_monitor(tmp, "model_primary")
-            try:
-                rule_result = {
-                    "fault_type": "vibration_increase",
-                    "fault_confidence": 0.40,
-                    "fault_source": "vibration_rules",
-                    "fault_candidates": "vibration_increase:0.400@vibration_rules",
-                    "fault_reasons": "max_z=3.2",
-                }
-                model_pred = ModelPrediction(
-                    label="door_stuck",
-                    confidence=0.90,
-                    top_k="door_stuck:0.900|normal:0.100",
-                    probabilities={"door_stuck": 0.90, "normal": 0.10},
-                )
-
-                merged = monitor._merge_fault_result(
-                    rule_result,
-                    model_pred,
-                    None,
-                    {"level": "warning"},
-                    None,
-                    None,
-                )
-
-                self.assertEqual("door_stuck", merged["fault_type"])
-                self.assertTrue(str(merged["fault_source"]).startswith("model:"))
-            finally:
-                self._close_monitor(monitor)
+        self.assertTrue(hasattr(args, "diagnosis_window_s"))
+        self.assertTrue(hasattr(args, "diagnosis_step_s"))
+        self.assertFalse(hasattr(args, "dify_enabled"))
+        self.assertFalse(hasattr(args, "fault_model_path"))
+        self.assertFalse(hasattr(args, "generated_algo_path"))
+        self.assertFalse(hasattr(args, "risk_model_path"))
+        self.assertFalse(hasattr(args, "fault_fusion_mode"))
 
 
 if __name__ == "__main__":
