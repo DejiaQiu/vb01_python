@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import logging
 import os
@@ -13,6 +14,8 @@ from threading import Event
 from typing import Any, Optional
 
 from ..common import CORE_FIELDS, REG_MAP
+from ..common import dumps_jsonl
+from ..control_plane import ControlPlaneStore
 from ..data_recorder import DataRecorder, format_ts_ms, now_ts_ms
 from ..device_model import DeviceModel
 from ..edge_sync import (
@@ -51,29 +54,18 @@ class RealtimeMonitor:
         self.logger = self._build_logger(args)
 
         self.device: Optional[DeviceModel] = None
-        self.diagnosis_engine = OnlineEdgeDiagnosis(
-            window_s=self.args.diagnosis_window_s,
-            step_s=self.args.diagnosis_step_s,
-            baseline_max_windows=self.args.diagnosis_baseline_max_windows,
-            baseline_min_windows=self.args.diagnosis_baseline_min_windows,
-            max_rows=self.args.diagnosis_max_rows,
-        )
-        self.risk_predictor = OnlineRiskPredictor(
-            enabled=args.risk_enabled,
-            stale_limit=args.stale_limit,
-            baseline_size=args.risk_baseline_size,
-            baseline_min_records=args.risk_baseline_min_records,
-            trend_window_s=args.risk_trend_window_s,
-            smooth_alpha=args.risk_smooth_alpha,
-            anomaly_scale=args.risk_anomaly_scale,
-            fault_weight=args.risk_fault_weight,
-            vibration_weight=args.risk_vibration_weight,
-            temperature_weight=args.risk_temperature_weight,
-            model_weight=0.0,
-        )
+        self.diagnosis_engine = self._build_diagnosis_engine()
+        self.risk_predictor = self._build_risk_predictor()
         self.alert_context_rows: deque[dict[str, Any]] = deque(maxlen=self.args.alert_context_max_rows)
         self.edge_sync_queue = self._build_edge_sync_queue()
         self.edge_sync_client = self._build_edge_sync_client()
+        self.control_store = ControlPlaneStore()
+        self.lifecycle_stage = "commissioning"
+        self.commissioning_confirmed = False
+        self.baseline_learning_enabled = False
+        self.baseline_frozen = False
+        self.alerts_enabled = False
+        self._last_applied_command_seq = 0
 
         self.started_monotonic = time.monotonic()
         self.last_data_monotonic = 0.0
@@ -112,6 +104,31 @@ class RealtimeMonitor:
         self.profile_save_count = 0
         self._last_profile_save_records = 0
         self._load_profile()
+        self._init_control_state()
+
+    def _build_diagnosis_engine(self) -> OnlineEdgeDiagnosis:
+        return OnlineEdgeDiagnosis(
+            window_s=self.args.diagnosis_window_s,
+            step_s=self.args.diagnosis_step_s,
+            baseline_max_windows=self.args.diagnosis_baseline_max_windows,
+            baseline_min_windows=self.args.diagnosis_baseline_min_windows,
+            max_rows=self.args.diagnosis_max_rows,
+        )
+
+    def _build_risk_predictor(self) -> OnlineRiskPredictor:
+        return OnlineRiskPredictor(
+            enabled=self.args.risk_enabled,
+            stale_limit=self.args.stale_limit,
+            baseline_size=self.args.risk_baseline_size,
+            baseline_min_records=self.args.risk_baseline_min_records,
+            trend_window_s=self.args.risk_trend_window_s,
+            smooth_alpha=self.args.risk_smooth_alpha,
+            anomaly_scale=self.args.risk_anomaly_scale,
+            fault_weight=self.args.risk_fault_weight,
+            vibration_weight=self.args.risk_vibration_weight,
+            temperature_weight=self.args.risk_temperature_weight,
+            model_weight=0.0,
+        )
 
     def _log_runtime_config(self) -> None:
         self.logger.info(
@@ -224,6 +241,202 @@ class RealtimeMonitor:
             self.logger.warning("edge sync client init failed err=%s", ex)
             return None
 
+    def _apply_control_flags(
+        self,
+        *,
+        stage: str,
+        learning_enabled: bool,
+        frozen: bool,
+        alerts_enabled: bool,
+        commissioning_confirmed: bool,
+    ) -> None:
+        if stage not in {"commissioning", "baseline_building", "monitoring"}:
+            stage = "commissioning"
+        self.lifecycle_stage = stage
+        self.baseline_learning_enabled = bool(learning_enabled)
+        self.baseline_frozen = bool(frozen)
+        self.alerts_enabled = bool(alerts_enabled)
+        self.commissioning_confirmed = bool(commissioning_confirmed)
+        self.diagnosis_engine.set_learning_mode(enabled=self.baseline_learning_enabled, frozen=self.baseline_frozen)
+
+    def _init_control_state(self) -> None:
+        state = self.control_store.ensure_state(self.args.elevator_id)
+        stage = str(state.get("lifecycle_stage", "")).strip()
+        if stage not in {"commissioning", "baseline_building", "monitoring"}:
+            stage = "monitoring" if self.diagnosis_engine.baseline_ready else "commissioning"
+        if stage == "commissioning" and self.diagnosis_engine.baseline_ready:
+            stage = "monitoring"
+
+        frozen = bool(state.get("baseline_frozen", False))
+        commissioning_confirmed = bool(state.get("commissioning_confirmed", stage != "commissioning"))
+        learning_enabled = bool(state.get("baseline_learning_enabled", stage != "commissioning"))
+        alerts_enabled = bool(state.get("alerts_enabled", stage == "monitoring"))
+        if stage == "commissioning":
+            learning_enabled = False
+            alerts_enabled = False
+        self._last_applied_command_seq = int(
+            (state.get("last_applied_command", {}) if isinstance(state.get("last_applied_command"), dict) else {}).get("seq", 0) or 0
+        )
+        self._apply_control_flags(
+            stage=stage,
+            learning_enabled=learning_enabled,
+            frozen=frozen,
+            alerts_enabled=alerts_enabled,
+            commissioning_confirmed=commissioning_confirmed,
+        )
+        self._sync_control_state()
+
+    def _runtime_control_snapshot(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "elevator_id": self.args.elevator_id,
+            "connected": self.device is not None,
+            "records_written": self.records_written,
+            "skipped_total": self.skipped_total,
+            "alerts_emitted": self.alerts_emitted,
+            "baseline_ready": self.diagnosis_engine.baseline_ready,
+            "baseline_count": self.diagnosis_engine.baseline_count,
+            "last_screening_status": self.last_screening_status,
+            "last_system_score": self.last_system_score,
+            "last_fault_type": self.last_fault_type,
+            "last_fault_confidence": self.last_fault_confidence,
+            "last_risk_score": self.last_risk_score,
+            "last_risk_level_now": self.last_risk_level_now,
+            "last_risk_24h": self.last_risk_24h,
+            "last_risk_level_24h": self.last_risk_level_24h,
+            "last_alert_context_path": self.last_alert_context_path,
+            "profile_path": self.profile_path,
+            "profile_loaded": self.profile_loaded,
+            "lifecycle_stage": self.lifecycle_stage,
+            "baseline_learning_enabled": self.baseline_learning_enabled,
+            "baseline_frozen": self.baseline_frozen,
+            "alerts_enabled": self.alerts_enabled,
+            "commissioning_confirmed": self.commissioning_confirmed,
+            "updated_at_ms": now_ts_ms(),
+        }
+
+    def _sync_control_state(self) -> None:
+        self.control_store.save_state(
+            self.args.elevator_id,
+            {
+                "lifecycle_stage": self.lifecycle_stage,
+                "commissioning_confirmed": self.commissioning_confirmed,
+                "baseline_learning_enabled": self.baseline_learning_enabled,
+                "baseline_frozen": self.baseline_frozen,
+                "alerts_enabled": self.alerts_enabled,
+                "profile_path": self.profile_path,
+                "profile_loaded": self.profile_loaded,
+            },
+        )
+        self.control_store.sync_runtime_state(self.args.elevator_id, self._runtime_control_snapshot())
+
+    def _delete_profile_file(self) -> None:
+        try:
+            path = Path(self.profile_path)
+            if path.exists():
+                path.unlink()
+        except Exception as ex:
+            self.logger.warning("delete profile failed path=%s err=%s", self.profile_path, ex)
+
+    def _reset_learning_state(self, *, stage: str, learning_enabled: bool) -> None:
+        self.diagnosis_engine.reset_state()
+        self.risk_predictor.reset_state()
+        self.profile_loaded = False
+        self.profile_load_error = ""
+        self.last_fault_type = "unknown"
+        self.last_fault_confidence = 0.0
+        self.last_fault_source = ""
+        self.last_screening_status = "normal"
+        self.last_system_score = 0.0
+        self.last_risk_score = 0.0
+        self.last_risk_level_now = "normal"
+        self.last_risk_24h = 0.0
+        self.last_risk_level_24h = "normal"
+        self.last_degradation_slope = 0.0
+        self.last_alert_context_path = ""
+        self._last_level = "normal"
+        self._last_alert_emit_ms = None
+        self.alert_context_rows.clear()
+        self._delete_profile_file()
+        self._apply_control_flags(
+            stage=stage,
+            learning_enabled=learning_enabled,
+            frozen=False,
+            alerts_enabled=False,
+            commissioning_confirmed=(stage != "commissioning"),
+        )
+        self._sync_control_state()
+
+    def _poll_control_command(self) -> None:
+        state = self.control_store.ensure_state(self.args.elevator_id)
+        command = state.get("pending_command", {}) if isinstance(state.get("pending_command"), dict) else {}
+        seq = int(command.get("seq", 0) or 0)
+        if seq <= self._last_applied_command_seq:
+            return
+
+        action = str(command.get("action", "")).strip()
+        message = "ignored"
+        if action == "start_baseline":
+            self._reset_learning_state(stage="baseline_building", learning_enabled=True)
+            message = "baseline building started"
+        elif action == "reset_baseline":
+            self._reset_learning_state(stage="baseline_building", learning_enabled=True)
+            message = "baseline reset and restarted"
+        elif action == "freeze_baseline":
+            self._apply_control_flags(
+                stage="monitoring" if self.diagnosis_engine.baseline_ready else self.lifecycle_stage,
+                learning_enabled=False,
+                frozen=True,
+                alerts_enabled=self.diagnosis_engine.baseline_ready or self.alerts_enabled,
+                commissioning_confirmed=True,
+            )
+            self._sync_control_state()
+            message = "baseline frozen"
+        elif action == "resume_baseline":
+            next_stage = self.lifecycle_stage
+            if next_stage == "commissioning":
+                next_stage = "baseline_building"
+            self._apply_control_flags(
+                stage=next_stage,
+                learning_enabled=True,
+                frozen=False,
+                alerts_enabled=(next_stage == "monitoring"),
+                commissioning_confirmed=(next_stage != "commissioning"),
+            )
+            self._sync_control_state()
+            message = "baseline adaptive learning resumed"
+        else:
+            self.logger.warning("unknown control action=%s", action)
+            message = f"unknown action: {action}"
+
+        self._last_applied_command_seq = seq
+        self.control_store.acknowledge_command(
+            self.args.elevator_id,
+            command,
+            message=message,
+            state_patch={
+                "lifecycle_stage": self.lifecycle_stage,
+                "commissioning_confirmed": self.commissioning_confirmed,
+                "baseline_learning_enabled": self.baseline_learning_enabled,
+                "baseline_frozen": self.baseline_frozen,
+                "alerts_enabled": self.alerts_enabled,
+            },
+        )
+
+    def _maybe_promote_to_monitoring(self) -> None:
+        if self.lifecycle_stage != "baseline_building":
+            return
+        if not self.diagnosis_engine.baseline_ready:
+            return
+        self._apply_control_flags(
+            stage="monitoring",
+            learning_enabled=not self.baseline_frozen,
+            frozen=self.baseline_frozen,
+            alerts_enabled=True,
+            commissioning_confirmed=True,
+        )
+        self._sync_control_state()
+
     def _edge_site_name(self) -> str:
         return str(self.args.edge_sync_site_name or "").strip()
 
@@ -319,8 +532,8 @@ class RealtimeMonitor:
             self.logger.warning("edge alert queue failed err=%s", ex)
             return ""
 
-    def _enqueue_edge_context(self, *, event_id: str, ts_ms: int, csv_path: str) -> None:
-        if self.edge_sync_queue is None or not event_id or not str(csv_path).strip():
+    def _enqueue_edge_context(self, *, event_id: str, ts_ms: int, context_path: str) -> None:
+        if self.edge_sync_queue is None or not event_id or not str(context_path).strip():
             return
         try:
             payload = build_context_payload(
@@ -330,7 +543,7 @@ class RealtimeMonitor:
                 device_id=self._edge_device_id(),
                 elevator_id=self.args.elevator_id,
                 ts_ms=ts_ms,
-                csv_path=csv_path,
+                context_path=context_path,
                 max_raw_bytes=self.args.edge_sync_max_context_bytes,
             )
             self.edge_sync_queue.enqueue(
@@ -365,6 +578,11 @@ class RealtimeMonitor:
             "last_risk_24h": self.last_risk_24h,
             "last_risk_level_24h": self.last_risk_level_24h,
             "last_degradation_slope": self.last_degradation_slope,
+            "lifecycle_stage": self.lifecycle_stage,
+            "baseline_learning_enabled": self.baseline_learning_enabled,
+            "baseline_frozen": self.baseline_frozen,
+            "alerts_enabled": self.alerts_enabled,
+            "commissioning_confirmed": self.commissioning_confirmed,
         }
 
     def _build_profile_payload(self) -> dict[str, Any]:
@@ -520,7 +738,7 @@ class RealtimeMonitor:
         token = token.strip("_")
         return token or "unknown"
 
-    def _write_alert_context_csv(self, *, ts_ms: int, level: str, fault_type: str) -> str:
+    def _write_alert_context_jsonl_gz(self, *, ts_ms: int, level: str, fault_type: str) -> str:
         if not self.args.alert_context_enabled:
             return ""
         if not self.alert_context_rows:
@@ -542,12 +760,12 @@ class RealtimeMonitor:
             f"{self._safe_file_token(self.args.elevator_id)}_"
             f"{int(ts_ms)}_"
             f"{self._safe_file_token(fault_type)}_"
-            f"{self._safe_file_token(level)}.csv"
+            f"{self._safe_file_token(level)}.jsonl.gz"
         )
         out_path = out_dir / file_name
         try:
-            with DataRecorder(str(out_path), file_format="csv", fieldnames=DATA_FIELDS, flush=True) as recorder:
-                recorder.write_many(selected)
+            jsonl_text = dumps_jsonl(selected)
+            out_path.write_bytes(gzip.compress(jsonl_text.encode("utf-8")))
             self.last_alert_context_path = str(out_path)
             return str(out_path)
         except Exception as ex:
@@ -562,6 +780,9 @@ class RealtimeMonitor:
         fault_result: dict[str, Any],
         risk_result: dict[str, Any],
     ) -> None:
+        if not self.alerts_enabled:
+            self._last_level = "normal"
+            return
         anomaly_level = str(anomaly_result["level"])
         risk_level_24h = str(risk_result.get("risk_level_24h", "normal"))
 
@@ -592,7 +813,7 @@ class RealtimeMonitor:
         if not should_emit:
             return
 
-        alert_context_csv = self._write_alert_context_csv(
+        alert_context_path = self._write_alert_context_jsonl_gz(
             ts_ms=ts_ms,
             level=level,
             fault_type=str(fault_result.get("fault_type", "unknown")),
@@ -606,16 +827,16 @@ class RealtimeMonitor:
             anomaly_result=anomaly_result,
             fault_result=fault_result,
             risk_result=risk_result,
-            alert_context_csv=alert_context_csv,
+            alert_context_path=alert_context_path,
             records_written=self.records_written,
             skipped_total=self.skipped_total,
         )
 
         alert_recorder.write(alert)
-        self.last_alert_context_path = alert_context_csv
+        self.last_alert_context_path = alert_context_path
         edge_event_id = self._enqueue_edge_alert(alert, self._build_health_snapshot())
-        if edge_event_id and alert_context_csv:
-            self._enqueue_edge_context(event_id=edge_event_id, ts_ms=ts_ms, csv_path=alert_context_csv)
+        if edge_event_id and alert_context_path:
+            self._enqueue_edge_context(event_id=edge_event_id, ts_ms=ts_ms, context_path=alert_context_path)
         self._drain_edge_sync(force=True)
         self._last_alert_emit_ms = ts_ms
         self.alerts_emitted += 1
@@ -676,6 +897,11 @@ class RealtimeMonitor:
             "profile_loaded": self.profile_loaded,
             "profile_load_error": self.profile_load_error,
             "profile_save_count": self.profile_save_count,
+            "lifecycle_stage": self.lifecycle_stage,
+            "baseline_learning_enabled": self.baseline_learning_enabled,
+            "baseline_frozen": self.baseline_frozen,
+            "alerts_enabled": self.alerts_enabled,
+            "commissioning_confirmed": self.commissioning_confirmed,
             "alert_context_enabled": self.args.alert_context_enabled,
             "alert_context_dir": self.args.alert_context_dir,
             "alert_context_pre_seconds": self.args.alert_context_pre_seconds,
@@ -698,6 +924,7 @@ class RealtimeMonitor:
         tmp_path.replace(out_path)
 
         self._last_health_write = now_mono
+        self.control_store.sync_runtime_state(self.args.elevator_id, payload)
         self._enqueue_edge_heartbeat(payload)
         self._drain_edge_sync(force=force)
 
@@ -753,6 +980,7 @@ class RealtimeMonitor:
                     break
 
                 if self.device is None:
+                    self._poll_control_command()
                     if not self._connect_device():
                         self._write_health(force=True)
                         time.sleep(max(0.5, self.args.reconnect_backoff_s))
@@ -761,6 +989,7 @@ class RealtimeMonitor:
                 try:
                     self.total_loops += 1
                     ts_ms = now_ts_ms()
+                    self._poll_control_command()
 
                     record, data_ts_ms, is_new, accept = self._build_data_record(ts_ms)
 
@@ -799,6 +1028,7 @@ class RealtimeMonitor:
                         self.last_risk_24h = float(risk_result.get("risk_24h", 0.0))
                         self.last_risk_level_24h = str(risk_result.get("risk_level_24h", "normal"))
                         self.last_degradation_slope = float(risk_result.get("degradation_slope", 0.0))
+                        self._maybe_promote_to_monitoring()
                         self._maybe_emit_alert(alert_recorder, ts_ms, anomaly_result, fault_result, risk_result)
                         self._save_profile()
 

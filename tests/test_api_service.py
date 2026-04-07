@@ -760,20 +760,18 @@ class TestAPIService(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
 
-            csv_text = "\n".join(
-                [
-                    "ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame",
-                    "1000000,0.01,0.02,-0.98,0.1,0.2,0.3,1",
-                    "1001000,0.02,0.02,-0.97,0.1,0.2,0.3,1",
-                    "1002000,0.03,0.02,-0.96,0.1,0.2,0.3,1",
-                    "1003000,0.04,0.02,-0.95,0.1,0.2,0.3,1",
-                    "1004000,0.05,0.02,-0.94,0.1,0.2,0.3,1",
-                    "1005000,0.04,0.02,-0.95,0.1,0.2,0.3,1",
-                    "1006000,0.03,0.02,-0.96,0.1,0.2,0.3,1",
-                    "1007000,0.02,0.02,-0.97,0.1,0.2,0.3,1",
-                    "1008000,0.01,0.02,-0.98,0.1,0.2,0.3,1",
-                ]
-            )
+            rows = [
+                {"ts_ms": 1000000, "Ax": 0.01, "Ay": 0.02, "Az": -0.98, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1001000, "Ax": 0.02, "Ay": 0.02, "Az": -0.97, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1002000, "Ax": 0.03, "Ay": 0.02, "Az": -0.96, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1003000, "Ax": 0.04, "Ay": 0.02, "Az": -0.95, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1004000, "Ax": 0.05, "Ay": 0.02, "Az": -0.94, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1005000, "Ax": 0.04, "Ay": 0.02, "Az": -0.95, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1006000, "Ax": 0.03, "Ay": 0.02, "Az": -0.96, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1007000, "Ax": 0.02, "Ay": 0.02, "Az": -0.97, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1008000, "Ax": 0.01, "Ay": 0.02, "Az": -0.98, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+            ]
+            jsonl_text = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
             context_response = self.client.post(
                 "/api/v1/ingest/context",
                 json={
@@ -782,10 +780,10 @@ class TestAPIService(unittest.TestCase):
                     "elevator_id": "elevator-101",
                     "site_name": "Tower E",
                     "ts_ms": 1_000_000,
-                    "file_name": "alert_context.csv.gz",
-                    "content_type": "text/csv",
+                    "file_name": "alert_context.jsonl.gz",
+                    "content_type": "application/x-ndjson",
                     "compression": "gzip",
-                    "content_b64": b64encode(compress(csv_text.encode("utf-8"))).decode("ascii"),
+                    "content_b64": b64encode(compress(jsonl_text.encode("utf-8"))).decode("ascii"),
                 },
             )
             self.assertEqual(context_response.status_code, 200)
@@ -844,20 +842,18 @@ class TestAPIService(unittest.TestCase):
             )
             self.assertEqual(alert_response.status_code, 200)
 
-            csv_text = "\n".join(
-                [
-                    "ts_ms,Ax,Ay,Az,Gx,Gy,Gz,is_new_frame",
-                    "1000000,0.01,0.02,-0.98,0.1,0.2,0.3,1",
-                    "1000250,0.02,0.03,-0.97,0.1,0.2,0.3,1",
-                    "1000500,0.03,0.03,-0.96,0.1,0.2,0.3,1",
-                    "1000750,0.04,0.03,-0.95,0.1,0.2,0.3,1",
-                    "1001000,0.05,0.03,-0.94,0.1,0.2,0.3,1",
-                    "1001250,0.04,0.03,-0.95,0.1,0.2,0.3,1",
-                    "1001500,0.03,0.03,-0.96,0.1,0.2,0.3,1",
-                    "1001750,0.02,0.03,-0.97,0.1,0.2,0.3,1",
-                    "1002000,0.01,0.03,-0.98,0.1,0.2,0.3,1",
-                ]
-            )
+            rows = [
+                {"ts_ms": 1000000, "Ax": 0.01, "Ay": 0.02, "Az": -0.98, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1000250, "Ax": 0.02, "Ay": 0.03, "Az": -0.97, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1000500, "Ax": 0.03, "Ay": 0.03, "Az": -0.96, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1000750, "Ax": 0.04, "Ay": 0.03, "Az": -0.95, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1001000, "Ax": 0.05, "Ay": 0.03, "Az": -0.94, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1001250, "Ax": 0.04, "Ay": 0.03, "Az": -0.95, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1001500, "Ax": 0.03, "Ay": 0.03, "Az": -0.96, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1001750, "Ax": 0.02, "Ay": 0.03, "Az": -0.97, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+                {"ts_ms": 1002000, "Ax": 0.01, "Ay": 0.03, "Az": -0.98, "Gx": 0.1, "Gy": 0.2, "Gz": 0.3, "is_new_frame": 1},
+            ]
+            jsonl_text = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
             context_response = self.client.post(
                 "/api/v1/ingest/context",
                 json={
@@ -866,10 +862,10 @@ class TestAPIService(unittest.TestCase):
                     "elevator_id": "elevator-102",
                     "site_name": "Tower F",
                     "ts_ms": 1_000_000,
-                    "file_name": "alert_context.csv.gz",
-                    "content_type": "text/csv",
+                    "file_name": "alert_context.jsonl.gz",
+                    "content_type": "application/x-ndjson",
                     "compression": "gzip",
-                    "content_b64": b64encode(compress(csv_text.encode("utf-8"))).decode("ascii"),
+                    "content_b64": b64encode(compress(jsonl_text.encode("utf-8"))).decode("ascii"),
                 },
             )
             self.assertEqual(context_response.status_code, 200)
@@ -905,8 +901,8 @@ class TestAPIService(unittest.TestCase):
             self.assertIn("waveform_payload", payload)
             self.assertIn("markdown_echarts", payload["waveform_payload"])
             self.assertIn("```echarts", payload["waveform_payload"]["markdown_echarts"])
-            self.assertTrue(payload["latest_file"].endswith("alert_context.csv.gz"))
-            self.assertEqual(payload["latest_file_name"], "alert_context.csv.gz")
+            self.assertTrue(payload["latest_file"].endswith("alert_context.jsonl.gz"))
+            self.assertEqual(payload["latest_file_name"], "alert_context.jsonl.gz")
         self.assertIn("波形图与频谱图", payload["report_markdown_draft"])
 
     def test_diagnosis_report_latest_normalizes_optional_fields(self):

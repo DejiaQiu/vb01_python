@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import csv
-import gzip
-import io
 import json
 import re
 import time
@@ -656,6 +653,7 @@ def _maintenance_package_from_latest_status(
         "risk_level_now": str(risk.get("risk_level_now", "normal")),
         "risk_24h": f"{_safe_float(risk.get('risk_24h'), 0.0):.4f}",
         "risk_level_24h": str(risk.get("risk_level_24h", "normal")),
+        "alert_context_path": str(raw.get("latest_file", "")),
         "alert_context_csv": str(raw.get("latest_file", "")),
     }
     health_payload = {
@@ -756,12 +754,6 @@ def _load_waveform_payload_from_event_context(
     if not path.exists():
         return {}
     try:
-        if str(context.get("compression", "")).strip().lower() == "gzip":
-            text = gzip.decompress(path.read_bytes()).decode("utf-8", errors="replace")
-            rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
-            if rows:
-                return build_waveform_payload(rows, source=stored_path, diagnosis_result=diagnosis_result)
-            return {}
         rows, source = load_waveform_rows([], "", stored_path)
         if rows:
             return build_waveform_payload(rows, source=source, diagnosis_result=diagnosis_result)
@@ -802,6 +794,7 @@ def build_report_context_from_edge_event(
         "risk_level_now": str(event.get("risk_level_now", "normal")),
         "risk_24h": str(event.get("risk_24h", 0.0)),
         "risk_level_24h": str(event.get("risk_level_24h", "normal")),
+        "alert_context_path": str(event.get("alert_context_path", event.get("alert_context_csv", ""))),
         "alert_context_csv": str(event.get("alert_context_csv", "")),
     }
     maintenance_package = build_maintenance_package(

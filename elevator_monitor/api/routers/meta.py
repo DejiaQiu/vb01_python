@@ -28,5 +28,7 @@ def meta() -> dict[str, Any]:
             "diagnosis_report_latest",
             "diagnosis_report_by_event",
             "monitor_health",
+            "control_plane",
+            "control_panel",
         ],
     }

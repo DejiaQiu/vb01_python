@@ -59,6 +59,7 @@ def build_alert_payload(
     health_payload: dict[str, Any],
 ) -> dict[str, Any]:
     alert = dict(alert_payload or {})
+    alert_context_path = str(alert.get("alert_context_path", "")).strip() or str(alert.get("alert_context_csv", "")).strip()
     ts_ms = int(float(alert.get("ts_ms", _now_ts_ms()) or _now_ts_ms()))
     level = str(alert.get("level", "normal"))
     fault_type = str(alert.get("fault_type", "unknown"))
@@ -78,7 +79,8 @@ def build_alert_payload(
         "risk_24h": float(alert.get("risk_24h", 0.0) or 0.0),
         "risk_level_24h": str(alert.get("risk_level_24h", "normal")),
         "predictive_only": int(float(alert.get("predictive_only", 0) or 0)),
-        "alert_context_csv": str(alert.get("alert_context_csv", "")).strip(),
+        "alert_context_path": alert_context_path,
+        "alert_context_csv": alert_context_path,
         "alert_payload": alert,
         "health_payload": dict(health_payload or {}),
     }
@@ -92,17 +94,27 @@ def build_context_payload(
     site_id: str,
     site_name: str = "",
     ts_ms: int,
-    csv_path: str,
+    context_path: str,
     max_raw_bytes: int = 2_000_000,
 ) -> dict[str, Any]:
-    path = Path(csv_path).expanduser().resolve()
-    raw = path.read_bytes()
+    path = Path(context_path).expanduser().resolve()
+    file_name = path.name
+    suffixes = [suffix.lower() for suffix in path.suffixes]
+    inferred_content_type = "text/csv"
+    if ".jsonl" in suffixes or ".ndjson" in suffixes:
+        inferred_content_type = "application/x-ndjson"
+
+    stored = path.read_bytes()
+    if path.suffix.lower() == ".gz":
+        raw = gzip.decompress(stored)
+    else:
+        raw = stored
     truncated = False
     if max_raw_bytes > 0 and len(raw) > max_raw_bytes:
         raw = raw[:max_raw_bytes]
         truncated = True
-    compressed = gzip.compress(raw)
-    encoded = base64.b64encode(compressed).decode("ascii")
+    encoded_bytes = gzip.compress(raw)
+    encoded = base64.b64encode(encoded_bytes).decode("ascii")
     return {
         "event_id": str(event_id),
         "device_id": str(device_id or "").strip() or _safe_token(elevator_id),
@@ -110,12 +122,12 @@ def build_context_payload(
         "site_name": str(site_name or "").strip(),
         "elevator_id": str(elevator_id or "").strip() or "elevator-unknown",
         "ts_ms": int(ts_ms),
-        "file_name": path.name,
-        "content_type": "text/csv",
+        "file_name": file_name if path.suffix.lower() == ".gz" else f"{file_name}.gz",
+        "content_type": inferred_content_type,
         "content_encoding": "base64",
         "compression": "gzip",
         "raw_size": len(raw),
-        "compressed_size": len(compressed),
+        "compressed_size": len(encoded_bytes),
         "truncated": bool(truncated),
         "content_b64": encoded,
     }
@@ -297,4 +309,3 @@ class EdgeSyncQueue:
                 if result.status_code >= 500 or result.status_code == 0:
                     break
         return summary
-

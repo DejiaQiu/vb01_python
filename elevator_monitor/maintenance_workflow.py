@@ -200,7 +200,7 @@ def build_maintenance_package(
     )
 
     model_context = _model_context(manifest_payload, manifest_path)
-    evidence_context_csv = str(latest.get("alert_context_csv", "")).strip()
+    evidence_context_path = str(latest.get("alert_context_path", "")).strip() or str(latest.get("alert_context_csv", "")).strip()
 
     payload = {
         "workflow_type": "elevator_predictive_maintenance_v1",
@@ -240,7 +240,8 @@ def build_maintenance_package(
         "evidence": {
             "alert_csv": alert_csv_path,
             "health_json": health_json_path,
-            "alert_context_csv": evidence_context_csv,
+            "alert_context_path": evidence_context_path,
+            "alert_context_csv": evidence_context_path,
         },
         "model_context": model_context,
     }
@@ -262,7 +263,8 @@ def build_maintenance_package(
         "summary": summary,
         "recommended_actions_text": " | ".join(actions),
         "suggested_parts_text": ", ".join(parts),
-        "alert_context_csv": evidence_context_csv,
+        "alert_context_path": evidence_context_path,
+        "alert_context_csv": evidence_context_path,
         "model_ids": payload["model_context"]["model_ids"],
     }
     return payload
@@ -313,7 +315,7 @@ def render_markdown(package: dict[str, Any]) -> str:
             "## Evidence",
             f"- Alert CSV: {evidence.get('alert_csv', '')}",
             f"- Health JSON: {evidence.get('health_json', '')}",
-            f"- Alert Context CSV: {evidence.get('alert_context_csv', '')}",
+            f"- Alert Context: {evidence.get('alert_context_path', evidence.get('alert_context_csv', ''))}",
         ]
     )
     return "\n".join(lines).strip() + "\n"

@@ -7,11 +7,11 @@ import math
 from pathlib import Path
 from typing import Any
 
+from .common import load_records
 from report.fault_algorithms._base import (
     _scan_spectrum,
     axis_mapping_signature,
     build_feature_pack,
-    load_rows,
     normalize_axis_mapping,
     parse_float,
     parse_int,
@@ -556,7 +556,9 @@ def load_waveform_rows(rows: list[dict[str, Any]], csv_text: str, csv_path: str)
         return parsed, "inline_csv_text"
     if csv_path.strip():
         path = Path(csv_path).expanduser().resolve()
-        return load_rows(path), str(path)
+        parsed = load_records(path)
+        normalized = [{str(k): "" if v is None else str(v) for k, v in row.items()} for row in parsed if isinstance(row, dict)]
+        return normalized, str(path)
     raise ValueError("provide rows, csv_text, or csv_path")
 
 

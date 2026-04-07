@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import gzip
+import io
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -46,21 +48,60 @@ def parse_float(value: Any) -> Optional[float]:
         return None
 
 
-def load_records(path: Path) -> list[dict[str, Any]]:
+def _normalize_record_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            normalized.append(dict(row))
+    return normalized
+
+
+def _load_csv_text(text: str) -> list[dict[str, Any]]:
+    return [dict(row) for row in csv.DictReader(io.StringIO(text))]
+
+
+def _load_jsonl_text(text: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        payload = json.loads(line)
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _infer_file_format(path: Path) -> str:
+    suffixes = [suffix.lower() for suffix in path.suffixes]
+    if suffixes[-2:] in ([".jsonl", ".gz"], [".ndjson", ".gz"]):
+        return "jsonl"
+    if suffixes[-2:] == [".csv", ".gz"]:
+        return "csv"
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        with path.open("r", encoding="utf-8", newline="") as fp:
-            return list(csv.DictReader(fp))
+        return "csv"
     if suffix in {".jsonl", ".ndjson"}:
-        records: list[dict[str, Any]] = []
-        with path.open("r", encoding="utf-8") as fp:
-            for line in fp:
-                line = line.strip()
-                if not line:
-                    continue
-                records.append(json.loads(line))
-        return records
-    raise ValueError(f"Unsupported file format: {path.suffix} (supports .csv/.jsonl/.ndjson)")
+        return "jsonl"
+    raise ValueError(f"Unsupported file format: {path.suffix} (supports .csv/.csv.gz/.jsonl/.jsonl.gz/.ndjson/.ndjson.gz)")
+
+
+def load_records(path: Path) -> list[dict[str, Any]]:
+    file_format = _infer_file_format(path)
+    raw = path.read_bytes()
+    if path.suffix.lower() == ".gz":
+        raw = gzip.decompress(raw)
+    text = raw.decode("utf-8", errors="replace")
+    if file_format == "csv":
+        return _normalize_record_rows(_load_csv_text(text))
+    if file_format == "jsonl":
+        return _normalize_record_rows(_load_jsonl_text(text))
+    raise ValueError(f"Unsupported file format: {path.suffix}")
+
+
+def dumps_jsonl(rows: list[dict[str, Any]]) -> str:
+    lines = [json.dumps(row, ensure_ascii=False) for row in _normalize_record_rows(rows)]
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def vector_magnitude(x: Optional[float], y: Optional[float], z: Optional[float]) -> Optional[float]:

@@ -134,6 +134,10 @@ class CloudIngestStore:
     ) -> dict[str, Any]:
         alert_payload = dict(payload.get("alert_payload", {})) if isinstance(payload.get("alert_payload"), dict) else {}
         health_payload = dict(payload.get("health_payload", {})) if isinstance(payload.get("health_payload"), dict) else {}
+        alert_context_path = (
+            str(alert_payload.get("alert_context_path", "")).strip()
+            or str(alert_payload.get("alert_context_csv", "")).strip()
+        )
         fault_type = str(alert_payload.get("fault_type", "")).strip() or str(health_payload.get("last_fault_type", "unknown")).strip() or "unknown"
         fault_confidence = float(alert_payload.get("fault_confidence", health_payload.get("last_fault_confidence", 0.0)) or 0.0)
         if 0.0 <= fault_confidence <= 1.0:
@@ -180,6 +184,8 @@ class CloudIngestStore:
             "health_payload": health_payload or dict(existing.get("health_payload", {})),
             "health": health_payload or dict(existing.get("health", {})),
             "latest_alert": alert_payload,
+            "alert_context_path": alert_context_path,
+            "alert_context_csv": alert_context_path,
             "last_event_id": str(payload.get("event_id", "")),
         }
         if payload.get("event_id"):
@@ -250,7 +256,12 @@ class CloudIngestStore:
         content_type = str(payload.get("content_type", "application/octet-stream")).strip() or "application/octet-stream"
         file_name = str(payload.get("file_name", "")).strip()
         if not file_name:
-            suffix = ".csv.gz" if "csv" in content_type else ".bin"
+            if "json" in content_type or "ndjson" in content_type:
+                suffix = ".jsonl.gz"
+            elif "csv" in content_type:
+                suffix = ".csv.gz"
+            else:
+                suffix = ".bin"
             file_name = f"{_safe_file_token(event_id)}{suffix}"
         out_path = self.context_dir / file_name
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,6 +294,12 @@ class CloudIngestStore:
         latest = _read_json(latest_path)
         if latest.get("last_event_id") == event_id:
             latest["context"] = metadata
+            latest["alert_context_path"] = str(out_path)
+            latest["alert_context_csv"] = str(out_path)
+            if not str(latest.get("latest_file", "")).strip():
+                latest["latest_file"] = str(out_path)
+            if not str(latest.get("latest_file_name", "")).strip():
+                latest["latest_file_name"] = out_path.name
             _write_json(latest_path, latest)
 
         return metadata

@@ -85,6 +85,17 @@ class OnlineRiskPredictor:
         self._history: deque[tuple[int, float]] = deque()
         self._updates = 0
 
+    def reset_state(self) -> None:
+        self._a_hist.clear()
+        self._g_hist.clear()
+        self._t_hist.clear()
+        self._a_stats = None
+        self._g_stats = None
+        self._t_stats = None
+        self._smoothed_risk = 0.0
+        self._history.clear()
+        self._updates = 0
+
     def _fit_baseline(self) -> None:
         if len(self._a_hist) >= self.baseline_min_records:
             self._a_stats = _robust_fit(list(self._a_hist))

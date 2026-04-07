@@ -80,6 +80,8 @@ class OnlineEdgeDiagnosis:
         self.step_ms = int(max(0.5, float(step_s)) * 1000)
         self.baseline_max_windows = max(8, int(baseline_max_windows))
         self.baseline_min_windows = max(3, int(baseline_min_windows))
+        self.learning_enabled = True
+        self.baseline_frozen = False
         self._rows: deque[tuple[int, dict[str, Any]]] = deque(maxlen=max(256, int(max_rows)))
         self._healthy_feature_rows: deque[dict[str, Any]] = deque(maxlen=self.baseline_max_windows)
         self._last_eval_ts_ms: Optional[int] = None
@@ -96,6 +98,16 @@ class OnlineEdgeDiagnosis:
     @property
     def last_result(self) -> dict[str, Any]:
         return dict(self._last_result)
+
+    def set_learning_mode(self, *, enabled: bool, frozen: bool = False) -> None:
+        self.learning_enabled = bool(enabled)
+        self.baseline_frozen = bool(frozen)
+
+    def reset_state(self) -> None:
+        self._rows.clear()
+        self._healthy_feature_rows.clear()
+        self._last_eval_ts_ms = None
+        self._last_result = _empty_result()
 
     def update(self, ts_ms: int, row: dict[str, Any]) -> dict[str, Any]:
         self._rows.append((int(ts_ms), dict(row)))
@@ -169,6 +181,8 @@ class OnlineEdgeDiagnosis:
         }
 
     def _remember_healthy_window(self, features: dict[str, Any], result: dict[str, Any]) -> None:
+        if not self.learning_enabled or self.baseline_frozen:
+            return
         screening = result.get("screening", {}) if isinstance(result.get("screening"), dict) else {}
         if not bool(screening.get("quality_ok", False)):
             return

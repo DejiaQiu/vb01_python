@@ -50,16 +50,24 @@ class TestEdgeSync(unittest.TestCase):
             device_id="edge-1",
             site_id="site-a",
             site_name="Tower A",
-            alert_payload={"ts_ms": 1234, "level": "warning", "fault_type": "rope_looseness", "fault_confidence": 0.88},
+            alert_payload={
+                "ts_ms": 1234,
+                "level": "warning",
+                "fault_type": "rope_looseness",
+                "fault_confidence": 0.88,
+                "alert_context_path": "/tmp/context.jsonl.gz",
+            },
             health_payload={"status": "running"},
         )
         self.assertEqual(alert["event_id"], build_event_id("elevator-1", 1234, "rope_looseness", "warning"))
         self.assertEqual(alert["fault_type"], "rope_looseness")
+        self.assertEqual(alert["alert_context_path"], "/tmp/context.jsonl.gz")
+        self.assertEqual(alert["alert_context_csv"], "/tmp/context.jsonl.gz")
 
-    def test_build_context_payload_compresses_csv(self):
+    def test_build_context_payload_compresses_jsonl(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            csv_path = Path(tmp_dir) / "context.csv"
-            csv_path.write_text("ts_ms,Ax\n1,0.1\n2,0.2\n", encoding="utf-8")
+            context_path = Path(tmp_dir) / "context.jsonl.gz"
+            context_path.write_bytes(gzip.compress(b'{"ts_ms": 1, "Ax": 0.1}\n{"ts_ms": 2, "Ax": 0.2}\n'))
             payload = build_context_payload(
                 event_id="evt-1",
                 elevator_id="elevator-1",
@@ -67,12 +75,13 @@ class TestEdgeSync(unittest.TestCase):
                 site_id="site-a",
                 site_name="Tower A",
                 ts_ms=1234,
-                csv_path=str(csv_path),
+                context_path=str(context_path),
                 max_raw_bytes=1024,
             )
             decoded = gzip.decompress(base64.b64decode(payload["content_b64"].encode("ascii"))).decode("utf-8")
-            self.assertIn("ts_ms,Ax", decoded)
+            self.assertIn('"ts_ms": 1', decoded)
             self.assertEqual(payload["compression"], "gzip")
+            self.assertEqual(payload["content_type"], "application/x-ndjson")
 
     def test_queue_dedup_and_drain(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

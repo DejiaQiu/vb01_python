@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import csv
-import gzip
-import io
 import re
 from pathlib import Path
 from typing import Any
@@ -149,11 +146,6 @@ def _load_rows_from_context(context: dict[str, Any], payload: dict[str, Any]) ->
     if not stored_path:
         raise ValueError("waveform context path missing in latest status payload")
     path = _resolve_payload_path(stored_path, payload, label="waveform context")
-    compression = str(context.get("compression", "")).strip().lower()
-    if compression == "gzip" or path.suffix.lower() == ".gz":
-        text = gzip.decompress(path.read_bytes()).decode("utf-8", errors="replace")
-        rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
-        return rows, str(path)
     return load_waveform_rows([], "", str(path))
 
 
