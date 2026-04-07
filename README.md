@@ -185,6 +185,29 @@ python -m elevator_monitor.feature_requirements requirements/feature_request.md
 项目根目录的 `AGENTS.md` 会约束后续实现流程：先校验需求，再按 `实现位置`、`验收标准`、`测试用例` 落代码和测试。
 
 ## 快速开始
+### 0) 一键启动本地控制面板链路（API + 实时监控）
+```bash
+bash scripts/local_stack.sh start \
+  --elevator-id elevator-001 \
+  --serial-port /dev/ttyUSB0
+```
+
+启动后可直接打开：
+```text
+http://127.0.0.1:8085/panel
+```
+
+查看状态 / 停止：
+```bash
+bash scripts/local_stack.sh status
+bash scripts/local_stack.sh stop
+```
+
+这个启动器会同时拉起：
+- 本地 FastAPI 服务
+- 实时监控进程
+- 边缘到本地 API 的事件/心跳同步
+
 ### 1) 本地运行在线监控
 ```bash
 python -m elevator_monitor.realtime_monitor \
