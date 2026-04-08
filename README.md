@@ -5,139 +5,6 @@
 - 离线训练链路：数据集构建 -> 故障/风险模型训练 -> 发布门槛检查
 - 专项诊断链路：对单个或批量振动 CSV 执行规则算法并生成诊断报告
 
-## 架构图
-更适合继续开发时参考的版本：[`docs/demo_architecture.md`](docs/demo_architecture.md)
-
-Mermaid 源图：
-
-```mermaid
-flowchart LR
-    subgraph Device[现场设备层]
-        VB01[VB01 传感器\n串口数据]
-    end
-
-    subgraph Online[在线监控链路 elevator_monitor.monitor.runtime]
-        Reader[RealtimeVibrationReader\nrealtime_vibration.py]
-        Filter[数据过滤\n非新帧/过期帧剔除]
-        Detector[OnlineAnomalyDetector\npipeline.py]
-        FaultEngine[FaultTypeEngine\nfault_types.py]
-        Fusion[模型/规则融合\nmodel_inference.py\ngenerated_algorithm.py]
-        Risk[OnlineRiskPredictor\nrisk_predictor.py]
-        Alerting[告警编排\nmonitor/alerting.py]
-    end
-
-    subgraph Output[在线输出与状态]
-        DataCSV[data/elevator_rt_live.csv]
-        AlertCSV[data/elevator_alerts_live.csv]
-        RailCSV[data/rail_wear_alerts_live.csv]
-        Health[data/monitor_health.json]
-        Profile[data/profiles/<elevator_id>.json]
-        Logs[logs/realtime_monitor.log]
-    end
-
-    subgraph Offline[离线训练与发布 elevator_monitor.training]
-        Labels[labels CSV]
-        Prep[prepare_dataset.py]
-        TrainFault[train_fault_model.py]
-        TrainRisk[train_risk_model.py]
-        GenAlgo[generate_fault_algorithm.py]
-        Gate[release_gate.py]
-        Manifest[build_model_manifest.py]
-        Models[data/models/*.json]
-    end
-
-    subgraph Report[专项诊断工具 report/]
-        FaultAlgos[report/fault_algorithms/*.py]
-        Reports[诊断报告 *.md]
-    end
-
-    VB01 --> Reader --> Filter --> Detector --> FaultEngine --> Fusion --> Risk --> Alerting
-    Filter --> DataCSV
-    Alerting --> AlertCSV
-    Alerting --> RailCSV
-    Risk --> Health
-    Detector --> Profile
-    Online --> Logs
-
-    DataCSV --> Prep
-    Labels --> Prep
-    Prep --> TrainFault
-    Prep --> TrainRisk
-    Prep --> GenAlgo
-    TrainFault --> Gate
-    TrainRisk --> Gate
-    GenAlgo --> Gate
-    Gate --> Manifest --> Models
-
-    Models -.在线加载.-> Fusion
-    Models -.在线加载.-> Risk
-
-    DataCSV --> FaultAlgos
-    FaultAlgos --> Reports
-```
-
-如果当前预览器不支持 Mermaid，可看下面这份纯文本架构图：
-
-```text
-[VB01 传感器/串口]
-        |
-        v
-[RealtimeVibrationReader]
-        |
-        v
-[数据过滤: is_new_frame/data_age_ms]
-        |
-        +------------------------------> [data/elevator_rt_live.csv]
-        |
-        v
-[OnlineAnomalyDetector]
-        |
-        v
-[FaultTypeEngine]
-        |
-        v
-[模型/规则融合: model_inference + generated_algorithm] <---- [data/models/*.json]
-        |
-        v
-[OnlineRiskPredictor] <-------------------------------------- [data/models/*.json]
-        |
-        v
-[Alerting]
-   |            |                    |
-   v            v                    v
-[elevator_   [rail_wear_         [monitor_health.json]
-alerts.csv]  alerts.csv]
-
-离线训练链路:
-[原始CSV + labels] -> [prepare_dataset] -> [train_fault/train_risk/generate_algo]
--> [release_gate] -> [build_model_manifest] -> [data/models/*.json] -> (在线加载)
-
-专项诊断链路:
-[振动CSV] -> [report/fault_algorithms/*.py] -> [诊断报告 *.md]
-```
-
-常见原因：IDE 的 Markdown 预览未启用 Mermaid 渲染（不是文档内容丢失）。
-
-## 核心能力
-### 在线监控（生产可运行）
-- 串口实时采集（VB01），支持断线自动重连、无数据超时重连、首帧超时保护
-- 数据有效性过滤（`is_new_frame`、`data_age_ms`）
-- 在线异常检测（滑动基线 + z-score）
-- 规则故障识别（如 `sensor_missing`、`signal_frozen`、`impact_shock`、`rail_wear_*`、`temperature_*`）
-- 24h 风险预测（支持 predictive-only 告警）
-- 模型融合（监督模型 + 生成算法，置信度不足自动回退规则）
-
-### 离线训练与上线闭环
-- 原始数据 + 标签构建训练集
-- 故障分类模型训练、风险模型训练、少样本故障算法生成
-- Release Gate 校验（准确率/召回/样本支撑）
-- Manifest 版本清单
-
-### 专项诊断
-- `report/fault_algorithms` 当前总控默认先做“相对健康基线的异常筛查”，异常后再做保守的 `fault_detectors` 归因
-- `fault_detectors` 里的“经验模板”不是训练模型，而是一组人工设定的特征方向/区间弱先验；当前归因更依赖“相对本梯健康基线的偏移”
-- 可对单个 CSV 或批量 CSV 进行离线诊断
-- 输出保持保守，只给 `normal`、`watch_only`、`candidate_faults`
 
 ## 目录结构（重点）
 ```text
@@ -187,14 +54,12 @@ python -m elevator_monitor.feature_requirements requirements/feature_request.md
 ## 快速开始
 ### 0) 一键启动本地控制面板链路（API + 实时监控）
 ```bash
-bash scripts/local_stack.sh start \
-  --elevator-id elevator-001 \
-  --serial-port /dev/ttyUSB0
+./scripts/local_stack.sh start --elevator-id elevator-001 --serial-port /dev/ttyUSB0 --api-port 8090
 ```
 
 启动后可直接打开：
 ```text
-http://127.0.0.1:8085/panel
+http://127.0.0.1:8090/panel
 ```
 
 查看状态 / 停止：
@@ -208,98 +73,8 @@ bash scripts/local_stack.sh stop
 - 实时监控进程
 - 边缘到本地 API 的事件/心跳同步
 
-### 1) 本地运行在线监控
-```bash
-python -m elevator_monitor.realtime_monitor \
-  --elevator-id elevator-001 \
-  --port /dev/ttyUSB0 \
-  --baud 115200 \
-  --addr 0x50 \
-  --sample-hz 40 \
-  --detect-hz 40 \
-  --reg-count 13 \
-  --output-data data/elevator_rt_live.csv \
-  --output-alert data/elevator_alerts_live.csv \
-  --output-rail-wear-alert data/rail_wear_alerts_live.csv \
-  --health-path data/monitor_health.json \
-  --log-file logs/realtime_monitor.log
-```
 
-### 2) 启动诊断 API 服务
-```bash
-python -m elevator_monitor.api.main \
-  --host 0.0.0.0 \
-  --port 8085
-```
 
-后台运行示例：
-```bash
-mkdir -p logs
-nohup python -m elevator_monitor.api.main \
-  --host 0.0.0.0 \
-  --port 8085 > logs/api_service.log 2>&1 &
-```
-
-### 3) 运行定时批诊断（推荐的在线状态主链路）
-```bash
-python -m elevator_monitor.batch_diagnosis \
-  --input-dir data/captures \
-  --max-files 12 \
-  --baseline-dir data/captures \
-  --baseline-start-hhmm 1015 \
-  --baseline-end-hhmm 1019 \
-  --latest-json data/diagnosis/latest_status.json \
-  --history-jsonl data/diagnosis/history.jsonl \
-  --pretty
-```
-
-查询最近一次批诊断结果：
-```bash
-curl "http://127.0.0.1:8085/api/v1/diagnostics/latest-status?latest_json=data/diagnosis/latest_status.json"
-```
-
-### 4) 只做实时振动读取（CLI/SDK）
-```bash
-python -m elevator_monitor.realtime_vibration \
-  --elevator-id elevator-001 \
-  --port /dev/ttyUSB0 \
-  --baud 115200 \
-  --sample-hz 40 \
-  --detect-hz 40 \
-  --reg-count 13 \
-  --limit 10
-```
-
-按固定 40Hz 输出（含 `is_new_frame` 标记）：
-```bash
-python -m elevator_monitor.realtime_vibration \
-  --port /dev/ttyUSB0 \
-  --baud 115200 \
-  --emit-mode fixed \
-  --emit-hz 40 \
-  --detect-hz 40 \
-  --reg-count 13 \
-  --duration-s 30 \
-  --output-csv data/vibration_fixed_40hz.csv \
-  --format csv > /dev/null
-```
-
-SDK 示例：
-```python
-from elevator_monitor import RealtimeVibrationReader
-
-with RealtimeVibrationReader(
-    elevator_id="elevator-001",
-    port="/dev/ttyUSB0",
-    baud=115200,
-    addr=0x50,
-    sample_hz=40.0,
-    detect_hz=40,
-    reg_count=13,
-) as reader:
-    frame = reader.read_latest(wait_timeout_s=2.0)
-    print(frame)
-```
 
 官方SDK兼容最小测试单元（用于先验证 Modbus 链路是否通）：
 ```bash
@@ -372,27 +147,6 @@ docker compose -f deploy/docker-compose.edge.yml down
 ### 4) 云端部署
 云端部署建议运行在公司服务器或中心平台上，负责接收边缘事件、提供查询 API、生成报告上下文，并供 Dify / 工单系统调用。
 
-本地直接运行：
-```bash
-nohup python -m elevator_monitor.api.main --host 0.0.0.0 --port 8085 > logs/api_service.log 2>&1 &
-```
-
-Docker Compose 运行：
-```bash
-docker compose -f deploy/docker-compose.api.yml up -d --build
-```
-
-常用命令：
-```bash
-docker compose -f deploy/docker-compose.api.yml logs -f
-docker compose -f deploy/docker-compose.api.yml ps
-docker compose -f deploy/docker-compose.api.yml down
-```
-
-如果需要限制边缘写入权限，可在云端设置：
-```bash
-export MONITOR_INGEST_SHARED_TOKEN=change-me
-```
 
 核心接口：
 - `GET /api/v1/health/monitor`：读取监控健康状态并校验时效
